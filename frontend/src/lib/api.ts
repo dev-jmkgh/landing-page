@@ -5,9 +5,50 @@
  * credentials, CSRF handling and error normalisation live in exactly one place.
  */
 
-const RAW_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:5000/api';
+const CONFIGURED_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
 
-export const API_BASE_URL = RAW_BASE.replace(/\/+$/, '');
+let resolvedBase: string | null = null;
+
+/**
+ * Base URL of the API.
+ *
+ * Deployments set `NEXT_PUBLIC_API_BASE_URL`. When it is absent the app falls back to
+ * the local API *only* while running on localhost, so a developer who has not created
+ * `.env.local` still gets a working setup. A deployed build with no API configured
+ * resolves to an empty string and the forms say so plainly — see `isApiConfigured`.
+ */
+export function apiBaseUrl(): string {
+  if (resolvedBase !== null) return resolvedBase;
+
+  if (CONFIGURED_BASE) {
+    resolvedBase = CONFIGURED_BASE;
+  } else if (
+    // Development convenience only. A production build never guesses at localhost —
+    // otherwise a deployed demo would quietly try to reach the developer's own machine
+    // instead of admitting it has no backend.
+    process.env.NODE_ENV !== 'production' &&
+    typeof window !== 'undefined' &&
+    ['localhost', '127.0.0.1'].includes(window.location.hostname)
+  ) {
+    resolvedBase = 'http://localhost:5000/api';
+  } else {
+    resolvedBase = '';
+  }
+
+  return resolvedBase;
+}
+
+/**
+ * False on a front-end-only deployment (the GitHub Pages demo). Forms use this to say
+ * up front that submissions cannot be received yet, rather than failing at the end or —
+ * worse — pretending to succeed.
+ */
+export function isApiConfigured(): boolean {
+  return apiBaseUrl().length > 0;
+}
+
+export const API_NOT_CONFIGURED_MESSAGE =
+  'This is a design preview — the enquiry service is not connected yet, so this form cannot be submitted. Please email info@jmkglobalholdings.com in the meantime.';
 
 export type FieldErrors = Record<string, string>;
 
@@ -65,6 +106,11 @@ type RequestOptions = {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, authenticated = false, signal } = options;
 
+  // Fail clearly and honestly rather than firing a request at nothing.
+  if (!isApiConfigured()) {
+    throw new ApiError(API_NOT_CONFIGURED_MESSAGE, 0, {}, 'api_not_configured');
+  }
+
   const headers: Record<string, string> = { Accept: 'application/json' };
   let payload: BodyInit | undefined;
 
@@ -82,7 +128,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(`${apiBaseUrl()}${path}`, {
       method,
       headers,
       body: payload,
@@ -259,5 +305,5 @@ export const adminApi = {
       authenticated: true,
     }),
 
-  resumeUrl: (id: number) => `${API_BASE_URL}/admin/applications/${id}/resume`,
+  resumeUrl: (id: number) => `${apiBaseUrl()}/admin/applications/${id}/resume`,
 };

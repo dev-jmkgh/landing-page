@@ -6,12 +6,11 @@ name: Build and deploy website
 # Required repository secrets (Settings ▸ Secrets and variables ▸ Actions):
 #   FTP_SERVER, FTP_USERNAME, FTP_PASSWORD, SITE_URL, API_BASE_URL
 
+# Manual only. The current demo is hosted on GitHub Pages (see pages.yml); this
+# workflow is the Hostinger path, kept ready but dormant so it does not fail on every
+# push while the FTP secrets are unset. Re-enable the push trigger when you move to
+# Hostinger.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 concurrency:

@@ -351,7 +351,64 @@ Because pages are pre-rendered, **any content change requires a rebuild and re-u
 
 ---
 
-## 10. Hostinger deployment
+## GitHub setup
+
+A remote is already configured — check before adding another:
+
+```bash
+git remote -v          # expect: origin  https://github.com/dev-jmkgh/landing-page.git
+git status             # confirm no .env file is listed
+git add .
+git commit -m "Website update"
+git push origin main
+```
+
+If `git remote -v` prints nothing, add your own remote first:
+
+```bash
+git remote add origin <YOUR_REPOSITORY_URL>
+git branch -M main
+git push -u origin main
+```
+
+`.gitignore` already excludes `.env`, `.env.*` (except the examples), `node_modules/`,
+build output, `backend/storage/` and `.claude/settings.local.json`.
+
+---
+
+## 10a. GitHub Pages — UI demo (current)
+
+The front end is deployed to GitHub Pages for design review. **No backend, database or
+email is deployed there.** The enquiry and careers forms remain in the UI and say plainly
+that submissions cannot be received yet — they never pretend to succeed.
+
+**One-time setup**
+
+1. Push to GitHub (see [GitHub setup](#github-setup) below).
+2. Repository **Settings ▸ Pages ▸ Build and deployment ▸ Source** → **GitHub Actions**.
+3. Push to `main`. [`.github/workflows/pages.yml`](.github/workflows/pages.yml) builds and
+   publishes automatically.
+4. The URL appears in the workflow summary: `https://<owner>.github.io/<repo>/`.
+
+**How it is configured**
+
+| Concern | Handling |
+| --- | --- |
+| Sub-path (`/<repo>/`) | `NEXT_PUBLIC_BASE_PATH`, set by the workflow from the repository name — nothing hard-coded |
+| Routing | Static export writes real `route/index.html` files, so deep links and refreshes work without an SPA redirect hack |
+| `_next/` assets | `public/.nojekyll` — without it Jekyll hides underscore folders and the site loads unstyled |
+| Public asset paths | `assetPath()` in `src/lib/paths.ts`; `next/image` does not add the base path itself when `unoptimized` is set |
+| API | `NEXT_PUBLIC_API_BASE_URL` is empty, so `isApiConfigured()` is false and the forms explain why |
+
+**Nothing here is GitHub-specific.** Build with `NEXT_PUBLIC_BASE_PATH` empty and the same
+output serves from a domain root — which is what S3/CloudFront will need.
+
+> Building locally? `.env.local` overrides shell variables, so a local production build
+> picks up your development API URL. That is fine for local checks; CI has no `.env.local`.
+
+---
+
+## 10b. Hostinger deployment
 
 Full walkthrough: **[`docs/deployment-hostinger.md`](docs/deployment-hostinger.md)**.
 

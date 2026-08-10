@@ -1,0 +1,84 @@
+name: Deploy UI demo to GitHub Pages
+
+# Publishes the front-end only, for design review.
+#
+# The API, database and email are NOT deployed here: the build is made with an empty
+# NEXT_PUBLIC_API_BASE_URL, so the enquiry and careers forms state plainly that
+# submissions cannot be received yet rather than failing obscurely or pretending to
+# succeed. Point that variable at the real API later and the same build works unchanged.
+#
+# One-time setup: repository Settings > Pages > Build and deployment > Source =
+# "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it half-published.
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build static site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        env:
+          # A project site is served from https://<owner>.github.io/<repo>/, so the app
+          # needs that sub-path. Taken from the repository itself — nothing hard-coded.
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          NEXT_PUBLIC_SITE_URL: ${{ steps.pages.outputs.base_url }}
+          # Deliberately empty: no backend is deployed for this demo.
+          NEXT_PUBLIC_API_BASE_URL: ''
+          NEXT_PUBLIC_RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
+        run: npm run build
+
+      - name: Verify the export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -f out/.nojekyll   # without this, Jekyll hides _next/ and the site loads unstyled
+          test -f out/gallery/index.html
+          test "$(find out/images/gallery -name '*.jpg' | wc -l)" -gt 0
+          echo "Exported $(find out -name '*.html' | wc -l) pages, $(find out -name '*.jpg' | wc -l) images"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/out
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

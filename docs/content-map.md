@@ -196,9 +196,17 @@ Tamil Nadu 641011, India
 
 ## 11. Gallery
 
-The document supplies **no gallery images and no project descriptions**. The gallery page
-ships with an empty, category-aware grid and documented image slots
-(`frontend/public/images/gallery/`). Nothing is captioned with invented project detail.
+The document supplies **no gallery images and no project descriptions**.
+
+The gallery therefore uses licensed Unsplash photography that *represents each discipline*
+— CAD training, drafting, software, renewable energy, farming, exports. Titles name the
+capability ("Engineering Design & Drafting", "Analytics Dashboards") and never claim the
+frame shows a JMK facility, employee, student or project. The page says so in its own words
+above the grid, and each photographer is credited in the enlarged view.
+
+Swapping in real JMK photography means changing only `src`, `width`, `height` and `alt` in
+`frontend/src/lib/content/gallery.ts`, then deleting that item's `credit` field.
+See [`image-assets.md`](./image-assets.md).
 
 ## 12. Imagery
 

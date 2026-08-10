@@ -22,6 +22,7 @@ build/
 out/
 .next/
 .next-build/
+.next-*/
 frontend/out/
 frontend/.next/
 frontend/.next-build/

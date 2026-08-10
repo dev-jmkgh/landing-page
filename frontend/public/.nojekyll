@@ -1,0 +1,5 @@
+GitHub Pages runs Jekyll by default, and Jekyll refuses to serve files or folders whose
+name begins with an underscore. Next.js emits all of its JavaScript and CSS into `_next/`,
+so without this file the deployed site loads as unstyled HTML with no interactivity.
+
+The file only needs to exist. It lives in `public/` so the export copies it to `out/`.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, API_NOT_CONFIGURED_MESSAGE, isApiConfigured } from '@/lib/api';
 import { FIELD_LIMITS, RESUME_UPLOAD, SUCCESS_MESSAGES } from '@/lib/constants';
 import { openPositions } from '@/lib/content/careers';
 import {
@@ -177,6 +177,11 @@ export function ApplicationForm() {
 
   return (
     <form className="form" onSubmit={handleSubmit} noValidate encType="multipart/form-data">
+      {/* Front-end-only deployment: say so before anyone fills the form in. */}
+      {!isApiConfigured() ? (
+        <FormAlert variant="info">{API_NOT_CONFIGURED_MESSAGE}</FormAlert>
+      ) : null}
+
       {formError ? <FormAlert variant="error">{formError}</FormAlert> : null}
 
       <div className="form-row form-row--2">

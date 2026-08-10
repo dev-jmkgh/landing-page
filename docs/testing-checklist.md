@@ -80,6 +80,18 @@ compiles and every route was exported.
 - [ ] Resume download requires a session
 - [ ] Error responses contain no stack traces or SQL text
 
+### Gallery
+
+- [ ] Every card in a row has the same height, the same image height, and category/title/description on the same baselines
+- [ ] The category label and the title never touch
+- [ ] All six filters (All, Academy, Design Studio, Software, Sustainability, Group) update the grid
+- [ ] The filter row scrolls sideways on narrow screens without making the page scroll
+- [ ] A card opens the lightbox; Escape closes it; arrow keys and the on-screen arrows navigate; the counter matches the active filter
+- [ ] Background scrolling is locked while the lightbox is open, and restored on close
+- [ ] Each enlarged image credits its photographer
+- [ ] The blueprint hero shows the finished drawing immediately under reduced motion
+- [ ] No image is captioned as a JMK facility, project, employee or student
+
 ## Responsive
 
 Check 1920, 1440, 1024, 768, 480, 390 and 360 px wide.

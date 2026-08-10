@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import { assetPath } from '@/lib/paths';
 
 type MediaFigureProps = {
   /** Public path such as `/images/gallery/academy-01.jpg`. Null renders the placeholder. */
@@ -115,7 +116,7 @@ export function MediaFigure({
       {hasImage ? (
         <Image
           className="figure__img"
-          src={src as string}
+          src={assetPath(src as string)}
           alt={alt as string}
           fill
           sizes={sizes}

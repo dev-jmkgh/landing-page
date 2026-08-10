@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, api, type EnquiryPayload } from '@/lib/api';
+import { ApiError, api, type EnquiryPayload, API_NOT_CONFIGURED_MESSAGE, isApiConfigured } from '@/lib/api';
 import { INTEREST_OPTIONS, FIELD_LIMITS, SUCCESS_MESSAGES } from '@/lib/constants';
 import {
   validateCompany,
@@ -213,6 +213,11 @@ export function EnquiryForm({
 
   return (
     <form className="form" onSubmit={handleSubmit} noValidate>
+      {/* Front-end-only deployment: say so before anyone fills the form in. */}
+      {!isApiConfigured() ? (
+        <FormAlert variant="info">{API_NOT_CONFIGURED_MESSAGE}</FormAlert>
+      ) : null}
+
       {formError ? <FormAlert variant="error">{formError}</FormAlert> : null}
 
       <div className="form-row form-row--2">

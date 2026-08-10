@@ -17,6 +17,8 @@
  * attribution required; credited anyway as a courtesy).
  */
 
+import { assetPath } from '@/lib/paths';
+
 export type GalleryCategoryId =
   | 'academy'
   | 'design-studio'
@@ -53,7 +55,7 @@ export type GalleryItem = {
   credit?: { photographer: string; url: string };
 };
 
-const BASE = '/images/gallery';
+const BASE = assetPath('/images/gallery');
 
 export const galleryItems: GalleryItem[] = [
   /* ---------------------------------------------------------------- design */
