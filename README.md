@@ -264,7 +264,8 @@ Full reference with comments: [`.env.example`](.env.example).
 | `DATABASE_URL` *or* `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME` | Connection |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` | Gmail App Password |
 | `SMTP_FROM_NAME`, `SMTP_FROM_EMAIL` | Display sender |
-| `CONTACT_EMAIL`, `CAREERS_EMAIL` | Notification recipients |
+| `ENQUIRY_RECEIVER_EMAIL` | **Where enquiries are delivered.** Canonical name; no address is hard-coded in the code. `CONTACT_EMAIL` is a legacy alias |
+| `CAREERS_EMAIL` | Optional separate inbox for applications; defaults to the enquiry receiver |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` | Fallback admin when `admin_users` is empty |
 | `JWT_SECRET` | Session signing key. **≥ 32 characters, or the API refuses to start in production** |
 | `SESSION_TTL_HOURS`, `COOKIE_SAMESITE` | Session lifetime and cookie policy |
@@ -294,15 +295,17 @@ SMTP_PORT=465
 SMTP_SECURE=true
 SMTP_USER=info@jmkglobalholdings.com
 SMTP_PASSWORD=your-app-password
-CONTACT_EMAIL=info@jmkglobalholdings.com
+ENQUIRY_RECEIVER_EMAIL=info@jmkglobalholdings.com
 ```
 
 Never use the account password, and never put SMTP credentials in frontend code — they
 only ever exist in `backend/.env`.
 
-**What gets sent.** Each enquiry produces an internal notification to `CONTACT_EMAIL`
+**What gets sent.** Each enquiry produces an internal notification to `ENQUIRY_RECEIVER_EMAIL`
 (with `Reply-To` set to the sender) and a branded auto-reply to the person who wrote in,
 carrying their reference number. Career applications do the same, to `CAREERS_EMAIL`.
+No recipient address appears anywhere in the source — if none is configured the mailer
+logs an error and skips sending rather than guessing an inbox.
 Email is sent after the record is stored: a failure is logged and recorded in the
 `notification_sent` / `autoreply_sent` columns, and the visitor still sees success
 because their enquiry is safely saved. Leave `SMTP_USER`/`SMTP_PASSWORD` empty in

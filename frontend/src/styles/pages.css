@@ -415,31 +415,66 @@
 
 .vertical-card {
   position: relative;
+  /* height:100% is the piece that makes equal-height columns actually work —
+     the grid stretches the Reveal wrapper, and this stretches the card inside it. */
+  height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: #fff;
-  border: 1px solid var(--line-200);
-  border-radius: var(--radius-md);
+  background-color: var(--glass-tint);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-shadow);
   overflow: hidden;
   transition:
     box-shadow var(--duration-base) var(--ease-out),
     transform var(--duration-base) var(--ease-out),
-    border-color var(--duration-base) var(--ease-out);
+    border-color var(--duration-base) var(--ease-out),
+    background-color var(--duration-base) var(--ease-out);
 }
 
-.vertical-card:hover {
-  box-shadow: var(--shadow-lg);
+/* Hairline highlight along the top edge — the detail that reads as "glass"
+   rather than "translucent box". */
+.vertical-card::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--glass-highlight), transparent);
+  pointer-events: none;
+}
+
+.vertical-card:hover,
+.vertical-card:focus-within {
   transform: translateY(-4px);
-  border-color: var(--navy-100);
+  box-shadow: var(--glass-shadow-hover);
+  border-color: var(--glass-edge-hover);
+  background-color: var(--glass-tint-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vertical-card:hover,
+  .vertical-card:focus-within {
+    transform: none;
+  }
 }
 
 .vertical-card__head {
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  padding: var(--space-6);
-  background-color: var(--navy-900);
+  padding: var(--space-5) var(--space-6);
+  background: var(--glass-navy);
   color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Reserve two lines for the tagline so every header is the same height and the
+   business names sit on one baseline, however long the tagline happens to be.
+   Derived from line-height rather than a magic pixel value. */
+.vertical-card__head-text {
+  min-width: 0;
 }
 
 .vertical-card__mark {
@@ -459,14 +494,24 @@
 }
 
 .vertical-card__name {
-  font-size: var(--text-xl);
+  font-size: 1.15rem;
+  line-height: 1.25;
   color: #fff;
+  overflow-wrap: anywhere;
 }
 
+/* Two lines are reserved so the header height is identical across cards whether
+   the tagline runs to one line or two. */
 .vertical-card__tagline {
-  margin-top: 0.2rem;
+  margin-top: 0.25rem;
   font-size: var(--text-sm);
+  line-height: 1.35;
   color: var(--color-on-dark-muted);
+  min-height: calc(2 * 1.35em);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .vertical-card__body {
@@ -474,12 +519,13 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
 }
 
 .vertical-card__summary {
   color: var(--color-text-muted);
   line-height: var(--leading-relaxed);
-  font-size: 0.96rem;
+  font-size: 0.95rem;
 }
 
 .vertical-card__services {
@@ -489,16 +535,37 @@
   gap: 0.4rem;
 }
 
-.vertical-card__service {
-  font-size: var(--text-xs);
+/* Compact glass chip: translucent, thin edge, small radius — deliberately not a
+   pill, and a fixed height so rows of chips stay even. */
+.vertical-card__service,
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 0.6rem;
+  font-size: 0.75rem;
   font-weight: 500;
-  padding: 0.3rem 0.6rem;
-  border-radius: var(--radius-xs);
-  background-color: var(--surface-muted);
-  border: 1px solid var(--line-100);
+  letter-spacing: 0.005em;
+  line-height: 1.2;
   color: var(--ink-700);
+  background-color: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-sm);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
+.vertical-card:hover .vertical-card__service {
+  border-color: rgba(192, 139, 46, 0.28);
+  background-color: rgba(255, 255, 255, 0.78);
+  color: var(--navy-800);
+}
+
+/* Sits on the bottom baseline no matter how many chips precede it. */
 .vertical-card__footer {
   margin-top: auto;
   padding-top: var(--space-6);
@@ -694,6 +761,9 @@
 
 .value-card {
   position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   padding: clamp(1.25rem, 2.5vw, 1.75rem);
   border: 1px solid var(--line-200);
   border-radius: var(--radius-md);
@@ -739,6 +809,7 @@
 }
 
 .founder-card {
+  height: 100%;
   display: flex;
   align-items: center;
   gap: var(--space-4);
@@ -815,6 +886,9 @@
 }
 
 .service-item {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   padding: var(--space-5);
   border: 1px solid var(--line-200);
   border-left: 3px solid var(--accent-500);
@@ -876,6 +950,9 @@
 }
 
 .sector-item {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   padding-top: var(--space-5);
   border-top: 2px solid var(--accent-500);
 }
@@ -1018,6 +1095,8 @@
 /* --- Careers ------------------------------------------------------------- */
 
 .role-group {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--line-200);
   border-radius: var(--radius-md);
   background-color: #fff;
@@ -1156,11 +1235,13 @@
 }
 
 .form-panel {
-  border: 1px solid var(--line-200);
-  border-radius: var(--radius-md);
-  background-color: #fff;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-lg);
+  background-color: var(--glass-tint-strong);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
   padding: clamp(1.5rem, 3vw, 2.5rem);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--glass-shadow);
 }
 
 .map-frame {

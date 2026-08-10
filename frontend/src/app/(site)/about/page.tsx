@@ -111,7 +111,7 @@ export default function AboutPage() {
             />
           </Reveal>
           <Reveal delay={60}>
-            <ul className="grid grid--3" style={{ textAlign: 'center' }}>
+            <ul className="card-grid card-grid--3" style={{ textAlign: 'center' }}>
               {successStats.map((stat) => (
                 <li className="card stat--light" key={stat.label} style={{ alignItems: 'center' }}>
                   <span className="stat__value">

@@ -135,7 +135,7 @@ export default function HomePage() {
       </section>
 
       {/* ---------------------------------------------- Business vertical overview */}
-      <section className="section section--muted">
+      <section className="section section--canvas">
         <div className="container">
           <Reveal>
             <SectionHeading
@@ -145,7 +145,7 @@ export default function HomePage() {
             />
           </Reveal>
 
-          <div className="grid grid--3">
+          <div className="card-grid card-grid--3">
             {verticals.map((vertical, index) => (
               <Reveal key={vertical.slug} delay={index * 70}>
                 <article className="vertical-card">
@@ -153,7 +153,7 @@ export default function HomePage() {
                     <span className="vertical-card__mark" aria-hidden="true">
                       {vertical.mark}
                     </span>
-                    <div>
+                    <div className="vertical-card__head-text">
                       <h3 className="vertical-card__name">{vertical.name}</h3>
                       <p className="vertical-card__tagline">{vertical.tagline}</p>
                     </div>

@@ -37,9 +37,17 @@ const schema = z.object({
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
   SMTP_FROM_NAME: z.string().default('JMK Global Holdings Website'),
-  SMTP_FROM_EMAIL: z.string().default('info@jmkglobalholdings.com'),
+  /** Falls back to SMTP_USER, which is the address Gmail sends as anyway. */
+  SMTP_FROM_EMAIL: z.string().default(''),
 
-  CONTACT_EMAIL: z.string().email().default('info@jmkglobalholdings.com'),
+  /**
+   * Where website enquiries are delivered. This is the canonical name; CONTACT_EMAIL
+   * is accepted as a legacy alias so existing deployments keep working. No address is
+   * hard-coded as a default — see `resolveRecipient` below.
+   */
+  ENQUIRY_RECEIVER_EMAIL: z.string().default(''),
+  CONTACT_EMAIL: z.string().default(''),
+  /** Optional separate inbox for career applications. */
   CAREERS_EMAIL: z.string().default(''),
 
   ADMIN_EMAIL: z.string().default(''),
@@ -92,6 +100,41 @@ if (isProduction && !raw.ADMIN_PASSWORD_HASH && !raw.DATABASE_URL && !raw.DB_PAS
   console.warn('[config] No ADMIN_PASSWORD_HASH set; admin sign-in relies on the admin_users table.');
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
+
+/**
+ * Picks the first configured, syntactically valid address from a list of candidates.
+ *
+ * Mail recipients are deliberately never hard-coded: an address baked into the source
+ * would silently keep delivering to the wrong inbox after the business changes it.
+ * Returns an empty string when nothing is configured — the mailer then logs and skips
+ * rather than sending somewhere unintended.
+ */
+function resolveRecipient(candidates: string[], label: string): string {
+  for (const candidate of candidates) {
+    const value = candidate.trim();
+    if (!value) continue;
+    if (!EMAIL_PATTERN.test(value)) {
+      console.warn(`[config] ${label} is not a valid email address and was ignored.`);
+      continue;
+    }
+    return value;
+  }
+  return '';
+}
+
+const enquiryReceiver = resolveRecipient(
+  [raw.ENQUIRY_RECEIVER_EMAIL, raw.CONTACT_EMAIL, raw.SMTP_USER],
+  'ENQUIRY_RECEIVER_EMAIL',
+);
+
+if (!enquiryReceiver) {
+  console.warn(
+    '[config] No enquiry recipient configured. Set ENQUIRY_RECEIVER_EMAIL in .env, ' +
+      'or enquiry notifications will be skipped (submissions are still stored).',
+  );
+}
+
 function parseDatabaseUrl(url: string) {
   const parsedUrl = new URL(url);
   return {
@@ -138,14 +181,18 @@ export const config = {
     user: raw.SMTP_USER,
     password: raw.SMTP_PASSWORD,
     fromName: raw.SMTP_FROM_NAME,
-    fromEmail: raw.SMTP_FROM_EMAIL || raw.CONTACT_EMAIL,
+    // Gmail rewrites the envelope sender to the authenticated account unless the
+    // address is a verified alias, so defaulting to SMTP_USER matches reality.
+    fromEmail: raw.SMTP_FROM_EMAIL.trim() || raw.SMTP_USER || enquiryReceiver,
     /** Email is optional in development; the API stays fully functional without it. */
     enabled: Boolean(raw.SMTP_USER && raw.SMTP_PASSWORD),
   },
 
   mail: {
-    contactEmail: raw.CONTACT_EMAIL,
-    careersEmail: raw.CAREERS_EMAIL || raw.CONTACT_EMAIL,
+    /** Enquiry notifications. Configured, never hard-coded. */
+    enquiryReceiver: enquiryReceiver,
+    /** Career applications; falls back to the enquiry receiver. */
+    careersReceiver: resolveRecipient([raw.CAREERS_EMAIL], 'CAREERS_EMAIL') || enquiryReceiver,
   },
 
   admin: {

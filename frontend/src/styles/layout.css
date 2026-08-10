@@ -35,6 +35,49 @@
   background-color: var(--surface-muted);
 }
 
+/* ---------------------------------------------------------------------------
+   Canvas: a quiet layered backdrop for glass panels.
+
+   Two very low-opacity radial glows (navy, then gold) plus a faint grid give the
+   translucent cards something to actually refract, without competing with them.
+   Kept subtle on purpose — at a glance it should read as "clean", not "gradient".
+   --------------------------------------------------------------------------- */
+.section--canvas {
+  position: relative;
+  isolation: isolate;
+  /* A touch deeper than --surface-muted so the translucent cards have something to
+     lift away from; still light enough that body text keeps full contrast. */
+  background: linear-gradient(180deg, #e9eef5 0%, #f4f7fa 55%, #eef2f7 100%);
+  overflow: hidden;
+}
+
+.section--canvas::before,
+.section--canvas::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.section--canvas::before {
+  inset: -20% -10% auto -10%;
+  height: 70%;
+  background:
+    radial-gradient(65% 65% at 15% -5%, rgba(30, 69, 111, 0.18), transparent 68%),
+    radial-gradient(55% 55% at 90% 8%, rgba(192, 139, 46, 0.16), transparent 68%);
+}
+
+.section--canvas::after {
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(16, 24, 40, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(16, 24, 40, 0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+  /* Fade the grid out towards the edges so it never draws a hard boundary. */
+  mask-image: radial-gradient(120% 80% at 50% 30%, #000 35%, transparent 78%);
+  -webkit-mask-image: radial-gradient(120% 80% at 50% 30%, #000 35%, transparent 78%);
+}
+
 .section--sunken {
   background-color: var(--surface-sunken);
 }
@@ -123,6 +166,75 @@
 
 .grid--4 {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+}
+
+/* ---------------------------------------------------------------------------
+   Equal-height card grid
+   ---------------------------------------------------------------------------
+   Cards are wrapped in a <Reveal> element for the scroll animation, so the grid
+   item is that wrapper — not the card. Stretching the wrapper alone leaves the
+   card at its natural height, which is what made the three business cards end at
+   different baselines. These three rules push the stretch all the way down to the
+   card, so any grid using .card-grid gets equal heights and aligned CTAs for free,
+   regardless of how much text each card holds.
+
+   `minmax(0, 1fr)` (rather than `auto`) stops a long unbroken word from forcing a
+   column wider than its share and introducing horizontal scroll.
+   --------------------------------------------------------------------------- */
+
+.card-grid {
+  display: grid;
+  gap: clamp(1rem, 2vw, 1.5rem);
+  align-items: stretch;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17.5rem), 1fr));
+}
+
+/* The Reveal wrapper: fill the row, and let the card inside fill it in turn.
+   Applied to every grid on the site that holds Reveal-wrapped cards, so the fix is
+   systemic rather than one section deep. */
+.card-grid > *,
+.service-list > *,
+.values-grid > *,
+.sector-list > *,
+.founder-row > * {
+  display: flex;
+  min-width: 0;
+}
+
+.card-grid > * > *,
+.service-list > * > *,
+.values-grid > * > *,
+.sector-list > * > *,
+.founder-row > * > * {
+  width: 100%;
+}
+
+/* Explicit column counts where the content is a known, fixed set.
+   Three columns start at 1200px rather than 900px: below that a 3-up column is
+   narrow enough that "JMK Software Solutions" wraps onto a second line, which makes
+   that card's header taller than its neighbours'. Two columns at tablet width keeps
+   every header on one line and the row visually even. */
+@media (min-width: 1200px) {
+  .card-grid--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 640px) and (max-width: 1199px) {
+  .card-grid--3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 700px) {
+  .card-grid--2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Anything that should sit at the bottom of a stretched card. */
+.push-bottom {
+  margin-top: auto;
 }
 
 .split {

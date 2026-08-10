@@ -110,7 +110,7 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
               title="Other JMK Global Holdings businesses"
             />
           </Reveal>
-          <div className="grid grid--2">
+          <div className="card-grid card-grid--2">
             {others.map((item, index) => (
               <Reveal key={item.slug} delay={index * 70}>
                 <article className="card card--interactive card--accent-top">

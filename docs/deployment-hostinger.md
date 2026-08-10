@@ -163,7 +163,7 @@ SMTP_PORT=465
 SMTP_SECURE=true
 SMTP_USER=info@jmkglobalholdings.com
 SMTP_PASSWORD=your-16-character-gmail-app-password
-CONTACT_EMAIL=info@jmkglobalholdings.com
+ENQUIRY_RECEIVER_EMAIL=info@jmkglobalholdings.com
 
 ADMIN_EMAIL=admin@jmkglobalholdings.com
 ADMIN_PASSWORD_HASH=paste-the-bcrypt-hash-here

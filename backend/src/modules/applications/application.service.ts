@@ -34,7 +34,7 @@ export type ResumeFile = {
 async function deliverApplicationEmails(id: number, data: ApplicationEmailData): Promise<void> {
   const notification = applicationNotification(data);
   const notificationResult = await sendMail({
-    to: config.mail.careersEmail,
+    to: config.mail.careersReceiver,
     subject: notification.subject,
     html: notification.html,
     text: notification.text,
@@ -47,7 +47,7 @@ async function deliverApplicationEmails(id: number, data: ApplicationEmailData):
     subject: autoReply.subject,
     html: autoReply.html,
     text: autoReply.text,
-    replyTo: config.mail.careersEmail,
+    replyTo: config.mail.careersReceiver,
   });
 
   if (notificationResult === 'failed' || autoReplyResult === 'failed') {

@@ -88,7 +88,7 @@ export function screenSubmission(
 async function deliverEnquiryEmails(id: number, data: EnquiryEmailData): Promise<void> {
   const notification = enquiryNotification(data);
   const notificationResult = await sendMail({
-    to: config.mail.contactEmail,
+    to: config.mail.enquiryReceiver,
     subject: notification.subject,
     html: notification.html,
     text: notification.text,
@@ -101,7 +101,7 @@ async function deliverEnquiryEmails(id: number, data: EnquiryEmailData): Promise
     subject: autoReply.subject,
     html: autoReply.html,
     text: autoReply.text,
-    replyTo: config.mail.contactEmail,
+    replyTo: config.mail.enquiryReceiver,
   });
 
   if (notificationResult === 'failed' || autoReplyResult === 'failed') {

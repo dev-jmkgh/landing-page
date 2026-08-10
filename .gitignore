@@ -21,8 +21,10 @@ dist/
 build/
 out/
 .next/
+.next-build/
 frontend/out/
 frontend/.next/
+frontend/.next-build/
 backend/dist/
 *.tsbuildinfo
 next-env.d.ts

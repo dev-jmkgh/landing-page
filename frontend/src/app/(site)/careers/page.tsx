@@ -46,7 +46,7 @@ export default function CareersPage() {
             />
           </Reveal>
 
-          <div className="grid grid--3">
+          <div className="card-grid card-grid--3">
             {roleGroups.map((group, index) => (
               <Reveal key={group.id} delay={index * 60}>
                 <article className="role-group">

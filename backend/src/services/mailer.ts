@@ -84,6 +84,17 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
   const transport = getTransporter();
   if (!transport) return 'skipped';
 
+  // Guards against an unconfigured ENQUIRY_RECEIVER_EMAIL silently producing a
+  // message with no recipient. The submission itself is already stored, so this
+  // only affects the notification.
+  if (!input.to || input.to.trim().length === 0) {
+    logger.error('Email not sent: no recipient configured', {
+      subject: input.subject,
+      hint: 'Set ENQUIRY_RECEIVER_EMAIL in the backend .env file.',
+    });
+    return 'failed';
+  }
+
   try {
     await transport.sendMail({
       from: {
