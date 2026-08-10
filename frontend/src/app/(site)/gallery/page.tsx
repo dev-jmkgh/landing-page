@@ -1,14 +1,16 @@
 import type { Metadata } from 'next';
+import { BlueprintAnimation } from '@/components/gallery/BlueprintAnimation';
 import { GalleryGrid } from '@/components/gallery/GalleryGrid';
 import { CtaBand } from '@/components/layout/CtaBand';
-import { PageHero } from '@/components/layout/PageHero';
+import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { JsonLd } from '@/components/ui/JsonLd';
+import { Reveal } from '@/components/ui/Reveal';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
 
 export const metadata: Metadata = buildMetadata({
-  title: 'Gallery',
+  title: 'Gallery — Skills, Engineering & Technology',
   description:
-    'Gallery of JMK Global Holdings: training, engineering design, software delivery, exports and renewable energy.',
+    'A visual view of the JMK Global Holdings verticals: CAD and engineering training, design and drafting, software and cloud, renewable energy, farming and exports.',
   path: '/gallery',
 });
 
@@ -22,24 +24,57 @@ export default function GalleryPage() {
     <>
       <JsonLd data={breadcrumbJsonLd(trail)} />
 
-      <PageHero
-        patternId="gallery-hero"
-        trail={trail}
-        eyebrow="Gallery"
-        title="Our work across the group"
-        intro="Work from across JMK Global Holdings, published business by business as each team releases it. Nothing here is stock imagery presented as our own."
-      />
-
-      <section className="section">
+      {/* ------------------------------------------------------------- Hero */}
+      <section className="gallery-hero">
         <div className="container">
-          <GalleryGrid />
+          <div className="gallery-hero__inner">
+            <div>
+              <Breadcrumbs trail={trail} onDark />
+              <p className="eyebrow" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
+                Our Gallery
+              </p>
+              <h1 className="gallery-hero__title">
+                Where skills, engineering and technology come together
+              </h1>
+              <p className="gallery-hero__intro">
+                A visual view of what the group actually does — CAD and engineering training,
+                design and drafting, software and cloud, and the renewable energy, farming and
+                export activity behind it.
+              </p>
+              <p className="gallery-hero__note">
+                These are representative images of each discipline, not photographs of JMK
+                facilities, people or projects. Our own photography replaces them as each
+                business releases it.
+              </p>
+            </div>
+
+            <BlueprintAnimation />
+          </div>
+        </div>
+      </section>
+
+      {/* ---------------------------------------------------------- Gallery */}
+      <section className="section section--canvas">
+        <div className="container">
+          <Reveal>
+            <GalleryGrid />
+          </Reveal>
+
+          <p className="gallery-credits">
+            Photography licensed via{' '}
+            <a href="https://unsplash.com/license" target="_blank" rel="noopener noreferrer">
+              Unsplash
+            </a>
+            . Each image represents the discipline described in its caption. Individual
+            photographers are credited in the enlarged view.
+          </p>
         </div>
       </section>
 
       <CtaBand
         patternId="gallery-cta"
-        title="Want to see more of what we do?"
-        text="Ask us for details of the work behind any of our businesses and we will share what we can."
+        title="Want to see the work behind these capabilities?"
+        text="Talk to the team about training, engineering design, software or a partnership across the group."
         secondary={{ label: 'Our Business', href: '/business' }}
       />
     </>

@@ -1,0 +1,519 @@
+/* ===========================================================================
+   Gallery
+   =========================================================================== */
+
+/* --- Hero ---------------------------------------------------------------- */
+
+.gallery-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--navy-900);
+  color: #fff;
+}
+
+.gallery-hero__inner {
+  display: grid;
+  gap: clamp(2rem, 4vw, 3.5rem);
+  align-items: center;
+  padding-block: clamp(2.5rem, 6vw, 4.5rem);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 960px) {
+  .gallery-hero__inner {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.gallery-hero__title {
+  margin-top: var(--space-5);
+  color: #fff;
+  font-size: var(--text-4xl);
+  max-width: 20ch;
+}
+
+.gallery-hero__intro {
+  margin-top: var(--space-5);
+  max-width: 56ch;
+  font-size: var(--text-lg);
+  line-height: var(--leading-relaxed);
+  color: var(--color-on-dark-muted);
+}
+
+.gallery-hero__note {
+  margin-top: var(--space-6);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--color-on-dark-muted);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--accent-500);
+  max-width: 52ch;
+}
+
+/* --- Blueprint animation -------------------------------------------------- */
+
+.blueprint {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 20% 0%, rgba(30, 69, 111, 0.55), transparent 60%),
+    linear-gradient(160deg, rgba(15, 39, 66, 0.9), rgba(5, 15, 28, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: var(--glass-shadow);
+}
+
+.blueprint__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Finished state is the default, so reduced-motion users and no-JS users see the
+   completed drawing rather than a half-drawn one. */
+.blueprint__grid,
+.blueprint__dims,
+.blueprint__labels {
+  opacity: 1;
+}
+
+.blueprint__path {
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 0;
+}
+
+.blueprint__ruler {
+  transform: translateX(560px);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .blueprint__grid {
+    animation: bp-fade 900ms var(--ease-out) both;
+  }
+
+  .blueprint__path {
+    stroke-dashoffset: 1200;
+    animation: bp-draw 1900ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+  }
+
+  .blueprint__path--1 { animation-delay: 500ms; }
+  .blueprint__path--2 { animation-delay: 1100ms; }
+  .blueprint__path--3 { animation-delay: 1450ms; }
+  .blueprint__path--4 { animation-delay: 1700ms; }
+
+  .blueprint__dims {
+    opacity: 0;
+    animation: bp-fade 900ms var(--ease-out) 2500ms forwards;
+  }
+
+  .blueprint__labels {
+    opacity: 0;
+    animation: bp-fade 900ms var(--ease-out) 2900ms forwards;
+  }
+
+  /* One slow pass, then it rests. */
+  .blueprint__ruler {
+    animation: bp-ruler 4200ms cubic-bezier(0.4, 0, 0.2, 1) 3200ms forwards;
+  }
+}
+
+@keyframes bp-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes bp-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes bp-ruler {
+  0% { transform: translateX(0); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translateX(560px); opacity: 0; }
+}
+
+/* --- Category filters ----------------------------------------------------- */
+
+.gallery-filters {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: clamp(1.75rem, 3vw, 2.5rem);
+  /* Scrolls rather than wrapping awkwardly on narrow screens. */
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 0.35rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.gallery-filter {
+  flex: 0 0 auto;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-edge);
+  background-color: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--ink-700);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.gallery-filter:hover {
+  border-color: var(--accent-500);
+  color: var(--navy-900);
+}
+
+.gallery-filter[aria-pressed='true'] {
+  background-color: var(--navy-900);
+  border-color: var(--navy-900);
+  color: #fff;
+}
+
+.gallery-filter__count {
+  margin-left: 0.4rem;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Card grid ------------------------------------------------------------ *
+ * One uniform card shape, so every tile aligns with its neighbours.
+ *
+ * Earlier this grid used mixed spans (feature / wide / tall) for editorial rhythm,
+ * but that put each card's caption at a different height and left ragged gaps. A
+ * single card shape with a fixed media ratio and a clamped two-line description means
+ * the image, category, title and description all start on the same baseline in every
+ * column, and the cards end flush.
+ */
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(1rem, 2vw, 1.5rem);
+  align-items: stretch;
+}
+
+@media (min-width: 640px) {
+  .gallery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .gallery-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.gallery-tile {
+  display: flex;
+  min-width: 0;
+  animation: tile-in 420ms var(--ease-out) both;
+  animation-delay: calc(var(--tile-index, 0) * 45ms);
+}
+
+@keyframes tile-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+.gallery-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  text-align: left;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-edge);
+  background-color: var(--glass-tint-strong);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: var(--glass-shadow);
+  transition:
+    box-shadow var(--duration-base) var(--ease-out),
+    border-color var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+
+.gallery-card:hover,
+.gallery-card:focus-visible {
+  transform: translateY(-3px);
+  border-color: var(--glass-edge-hover);
+  box-shadow: var(--glass-shadow-hover);
+}
+
+/* Fixed ratio: every image is cropped identically, so no card is taller than another
+   because of its source photograph. */
+.gallery-card__media {
+  position: relative;
+  flex-shrink: 0;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background-color: var(--surface-sunken);
+}
+
+.gallery-card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.gallery-card:hover .gallery-card__img,
+.gallery-card:focus-visible .gallery-card__img {
+  transform: scale(1.04);
+}
+
+.gallery-card__arrow {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #fff;
+  background-color: rgba(10, 27, 46, 0.5);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.9);
+  transition:
+    opacity var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+
+.gallery-card:hover .gallery-card__arrow,
+.gallery-card:focus-visible .gallery-card__arrow {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* Flex column keeps the three text pieces block-level, so they can never run
+   together the way inline spans would. */
+.gallery-card__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+  padding: clamp(0.9rem, 1.7vw, 1.2rem);
+  border-top: 1px solid var(--glass-edge);
+}
+
+.gallery-card__category {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--accent-700);
+}
+
+.gallery-card__title {
+  margin-top: 0.35rem;
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--navy-900);
+  /* Two lines reserved so titles of different length still leave the descriptions
+     on a common baseline. */
+  min-height: calc(2 * 1.3em);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.gallery-card__description {
+  margin-top: 0.3rem;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  min-height: calc(3 * 1.5em);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery-tile {
+    animation: none;
+  }
+  .gallery-card:hover,
+  .gallery-card:focus-visible,
+  .gallery-card:hover .gallery-card__img,
+  .gallery-card:focus-visible .gallery-card__img {
+    transform: none;
+  }
+}
+
+/* --- Lightbox ------------------------------------------------------------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  padding: clamp(0.75rem, 3vw, 2rem);
+  background-color: rgba(5, 15, 28, 0.82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: fade-in var(--duration-base) var(--ease-out) both;
+}
+
+.lightbox__dialog {
+  position: relative;
+  width: min(1040px, 100%);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: var(--glass-shadow-hover);
+}
+
+.lightbox__figure {
+  margin: 0;
+  background-color: rgba(5, 15, 28, 0.6);
+  min-height: 0;
+  display: flex;
+}
+
+.lightbox__img {
+  width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+  display: block;
+}
+
+.lightbox__caption {
+  padding: clamp(0.9rem, 2vw, 1.35rem) clamp(1rem, 2.5vw, 1.75rem);
+  background-color: rgba(10, 27, 46, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.lightbox__category {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--accent-400);
+}
+
+.lightbox__title {
+  margin-top: 0.3rem;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: #fff;
+}
+
+.lightbox__description {
+  margin-top: 0.35rem;
+  font-size: 0.94rem;
+  line-height: var(--leading-relaxed);
+  color: var(--color-on-dark-muted);
+  max-width: 68ch;
+}
+
+.lightbox__credit {
+  margin-top: 0.6rem;
+  font-size: var(--text-xs);
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.lightbox__credit a {
+  text-decoration: underline;
+}
+
+.lightbox__controls {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.lightbox__btn {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  pointer-events: auto;
+  color: #fff;
+  background-color: rgba(10, 27, 46, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.lightbox__btn:hover {
+  background-color: rgba(192, 139, 46, 0.85);
+  border-color: var(--accent-400);
+}
+
+.lightbox__btn--close {
+  top: 0.75rem;
+  right: 0.75rem;
+}
+
+.lightbox__btn--prev {
+  left: 0.75rem;
+  top: calc(34% - 22px);
+}
+
+.lightbox__btn--next {
+  right: 0.75rem;
+  top: calc(34% - 22px);
+}
+
+.lightbox__counter {
+  position: absolute;
+  top: 0.9rem;
+  left: 1rem;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.75);
+  background-color: rgba(10, 27, 46, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.6rem;
+  pointer-events: auto;
+}
+
+/* --- Credits -------------------------------------------------------------- */
+
+.gallery-credits {
+  margin-top: clamp(2rem, 4vw, 3rem);
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+  line-height: var(--leading-relaxed);
+}
+
+.gallery-credits a {
+  color: var(--accent-700);
+  text-decoration: underline;
+}
