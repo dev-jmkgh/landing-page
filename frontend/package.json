@@ -1,0 +1,32 @@
+{
+  "name": "jmk-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JMK Global Holdings — corporate website (Next.js App Router, static export)",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "prebuild": "node scripts/generate-og-image.mjs",
+    "build": "next build",
+    "og:generate": "node scripts/generate-og-image.mjs",
+    "start": "npx serve out -l 3000",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "next": "^15.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "eslint": "^9.18.0",
+    "eslint-config-next": "^15.5.4",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

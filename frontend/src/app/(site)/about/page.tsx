@@ -1,0 +1,220 @@
+import type { Metadata } from 'next';
+import { CtaBand } from '@/components/layout/CtaBand';
+import { PageHero } from '@/components/layout/PageHero';
+import { CountUp } from '@/components/ui/CountUp';
+import { Icon } from '@/components/ui/Icon';
+import { JsonLd } from '@/components/ui/JsonLd';
+import { MediaFigure } from '@/components/ui/MediaFigure';
+import { Reveal } from '@/components/ui/Reveal';
+import { SectionHeading } from '@/components/ui/SectionHeading';
+import { coreValues, founders, missionPoints, visionStatement, whoWeAre } from '@/lib/content/about';
+import { contributions, successStats } from '@/lib/content/home';
+import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
+import { siteConfig } from '@/lib/site';
+
+export const metadata: Metadata = buildMetadata({
+  title: 'About Us — Our Story, Vision & Values',
+  description:
+    'Founded in 2023 by Jose AM and Muthu Krishnan Anantham, JMK Global Holdings is a diversified corporate group headquartered in Coimbatore, Tamil Nadu.',
+  path: '/about',
+});
+
+const trail = [
+  { name: 'Home', path: '/' },
+  { name: 'About Us', path: '/about' },
+];
+
+function initials(name: string): string {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
+export default function AboutPage() {
+  return (
+    <>
+      <JsonLd data={breadcrumbJsonLd(trail)} />
+
+      <PageHero
+        patternId="about-hero"
+        trail={trail}
+        eyebrow="About Us"
+        title="One group, seven sectors, a single standard of quality"
+        intro="JMK Global Holdings brings together training, engineering design, software, exports, agriculture, renewable energy and real estate under one brand — with a commitment to creating opportunity alongside profit."
+        meta={siteConfig.sectors}
+      />
+
+      {/* ----------------------------------------------------------- Who we are */}
+      <section className="section">
+        <div className="container">
+          <div className="split">
+            <Reveal>
+              <SectionHeading eyebrow={whoWeAre.eyebrow} title={whoWeAre.heading} />
+              <div className="intro-copy">
+                {whoWeAre.paragraphs.map((paragraph) => (
+                  <p key={paragraph.slice(0, 32)}>{paragraph}</p>
+                ))}
+              </div>
+
+              <h3 style={{ marginTop: '2.5rem', fontSize: 'var(--text-xl)' }}>Leadership</h3>
+              <div className="founder-row" style={{ marginTop: '1rem' }}>
+                {founders.map((founder) => (
+                  <div className="founder-card" key={founder.name}>
+                    <span className="founder-card__initials" aria-hidden="true">
+                      {initials(founder.name)}
+                    </span>
+                    <span>
+                      <span className="founder-card__name">{founder.name}</span>
+                      <span className="founder-card__role">{founder.role}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Reveal>
+
+            <Reveal delay={80}>
+              <MediaFigure
+                seed="about-who-we-are"
+                ratio="4 / 3"
+                sizes="(max-width: 900px) 100vw, 45vw"
+              />
+              <div className="highlight-row" style={{ marginTop: '1.5rem' }}>
+                <div>
+                  <p className="highlight-row__label">Founded</p>
+                  <p className="highlight-row__value">2023</p>
+                </div>
+                <div>
+                  <p className="highlight-row__label">Headquarters</p>
+                  <p className="highlight-row__value">Coimbatore, Tamil Nadu</p>
+                </div>
+                <div>
+                  <p className="highlight-row__label">Co-Founders</p>
+                  <p className="highlight-row__value">Jose AM · Muthu Krishnan Anantham</p>
+                </div>
+              </div>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------- Success stories */}
+      <section className="section section--muted">
+        <div className="container">
+          <Reveal>
+            <SectionHeading
+              eyebrow="Success Stories"
+              title="Progress since 2023"
+              align="center"
+            />
+          </Reveal>
+          <Reveal delay={60}>
+            <ul className="grid grid--3" style={{ textAlign: 'center' }}>
+              {successStats.map((stat) => (
+                <li className="card stat--light" key={stat.label} style={{ alignItems: 'center' }}>
+                  <span className="stat__value">
+                    <CountUp value={stat.value} suffix={stat.suffix} />
+                  </span>
+                  <span className="stat__label" style={{ marginTop: '0.5rem' }}>
+                    {stat.label}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ------------------------------------------- Government contribution */}
+      <section className="section section--dark">
+        <div className="container">
+          <Reveal>
+            <SectionHeading
+              eyebrow="Government Contribution"
+              title="Supporting India's economic development"
+              description="JMK Global Holdings actively contributes to India's economic development through its diversified business ecosystem."
+            />
+          </Reveal>
+          <Reveal delay={60}>
+            <div className="contribution-grid">
+              {contributions.map((contribution) => (
+                <article className="contribution" key={contribution.id}>
+                  <span className="contribution__icon" aria-hidden="true">
+                    <Icon name={contribution.icon} size={22} />
+                  </span>
+                  <h3 className="contribution__title">{contribution.title}</h3>
+                  <p className="contribution__text">{contribution.description}</p>
+                </article>
+              ))}
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------ Vision & mission */}
+      <section className="section">
+        <div className="container">
+          <div className="split">
+            <Reveal>
+              <SectionHeading eyebrow="Vision" title="Our vision" />
+              <div className="vision-panel">
+                <span className="vision-panel__mark" aria-hidden="true">
+                  “
+                </span>
+                <p className="vision-panel__quote">{visionStatement}</p>
+              </div>
+            </Reveal>
+
+            <Reveal delay={80}>
+              <SectionHeading eyebrow="Mission" title="Our mission" />
+              <ol className="mission-list">
+                {missionPoints.map((point) => (
+                  <li className="mission-list__item" key={point}>
+                    <p className="mission-list__text">{point}</p>
+                  </li>
+                ))}
+              </ol>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------------- Values */}
+      <section className="section section--sunken">
+        <div className="container">
+          <Reveal>
+            <SectionHeading
+              eyebrow="Core Values"
+              title="Eight values, applied across every business"
+              align="center"
+            />
+          </Reveal>
+          <div className="values-grid">
+            {coreValues.map((value, index) => (
+              <Reveal key={value.name} delay={index * 50}>
+                <article className="value-card">
+                  <span className="value-card__index" aria-hidden="true">
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
+                  <span className="value-card__icon" aria-hidden="true">
+                    <Icon name={value.icon} size={26} />
+                  </span>
+                  <h3 className="value-card__name">{value.name}</h3>
+                </article>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <CtaBand
+        patternId="about-cta"
+        title="Work with a group built for the long term"
+        text="Talk to us about training, engineering design, software, exports or a partnership across the group."
+        secondary={{ label: 'Our Business', href: '/business' }}
+      />
+    </>
+  );
+}

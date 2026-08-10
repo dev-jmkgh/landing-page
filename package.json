@@ -1,0 +1,28 @@
+{
+  "name": "jmk-global-holdings",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Corporate website for JMK Global Holdings — Next.js static frontend + Express/MySQL API",
+  "scripts": {
+    "install:all": "npm --prefix frontend install && npm --prefix backend install",
+    "dev": "concurrently -n web,api -c cyan,magenta \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\"",
+    "dev:web": "npm --prefix frontend run dev",
+    "dev:api": "npm --prefix backend run dev",
+    "build": "npm --prefix frontend run build && npm --prefix backend run build",
+    "build:web": "npm --prefix frontend run build",
+    "build:api": "npm --prefix backend run build",
+    "start:api": "npm --prefix backend run start",
+    "typecheck": "npm --prefix frontend run typecheck && npm --prefix backend run typecheck",
+    "lint": "npm --prefix frontend run lint",
+    "db:migrate": "npm --prefix backend run db:migrate",
+    "db:seed": "npm --prefix backend run db:seed",
+    "hash:password": "npm --prefix backend run hash:password"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "license": "UNLICENSED"
+}

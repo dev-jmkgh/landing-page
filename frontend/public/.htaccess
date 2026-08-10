@@ -1,0 +1,94 @@
+# =============================================================================
+# JMK Global Holdings — Apache/LiteSpeed configuration for Hostinger
+#
+# This file is copied verbatim into the exported site (`out/.htaccess`) and belongs
+# in `public_html/`. It handles canonical host + HTTPS redirects, clean URLs,
+# caching and security headers.
+# =============================================================================
+
+Options -Indexes
+DirectoryIndex index.html
+
+# -----------------------------------------------------------------------------
+# 1. Canonical host: force HTTPS and the www subdomain
+#    http://jmkglobalholdings.com   ─┐
+#    https://jmkglobalholdings.com  ─┼─▶ https://www.jmkglobalholdings.com
+#    http://www.jmkglobalholdings.com ┘
+# -----------------------------------------------------------------------------
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Force HTTPS (Hostinger sets HTTPS=on behind its proxy; X-Forwarded-Proto is the fallback)
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !https
+  RewriteRule ^ https://www.jmkglobalholdings.com%{REQUEST_URI} [R=301,L]
+
+  # Force the www host
+  RewriteCond %{HTTP_HOST} !^www\. [NC]
+  RewriteRule ^ https://www.jmkglobalholdings.com%{REQUEST_URI} [R=301,L]
+
+  # Serve pre-rendered HTML for extensionless URLs (e.g. /about -> /about/index.html)
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_FILENAME}/index.html -f
+  RewriteRule ^(.*)$ /$1/index.html [L]
+</IfModule>
+
+# -----------------------------------------------------------------------------
+# 2. Error document
+# -----------------------------------------------------------------------------
+ErrorDocument 404 /404.html
+
+# -----------------------------------------------------------------------------
+# 3. Security headers
+# -----------------------------------------------------------------------------
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" env=HTTPS
+  # Remove the header that leaks the server signature where the host allows it
+  Header always unset X-Powered-By
+</IfModule>
+
+# -----------------------------------------------------------------------------
+# 4. Compression
+# -----------------------------------------------------------------------------
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/css text/xml text/javascript
+  AddOutputFilterByType DEFLATE application/javascript application/json application/xml
+  AddOutputFilterByType DEFLATE image/svg+xml font/woff2
+</IfModule>
+
+# -----------------------------------------------------------------------------
+# 5. Caching
+#    Hashed build assets under /_next/static are immutable; HTML must revalidate.
+# -----------------------------------------------------------------------------
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/css "access plus 1 year"
+  ExpiresByType application/javascript "access plus 1 year"
+  ExpiresByType image/webp "access plus 6 months"
+  ExpiresByType image/jpeg "access plus 6 months"
+  ExpiresByType image/png "access plus 6 months"
+  ExpiresByType image/svg+xml "access plus 6 months"
+  ExpiresByType font/woff2 "access plus 1 year"
+  ExpiresByType text/html "access plus 0 seconds"
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html)$">
+    Header set Cache-Control "public, max-age=0, must-revalidate"
+  </FilesMatch>
+  <FilesMatch "\.(js|css|woff2|webp|jpg|jpeg|png|svg|ico)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+</IfModule>
+
+# -----------------------------------------------------------------------------
+# 6. Block access to dotfiles and source maps
+# -----------------------------------------------------------------------------
+<FilesMatch "^\.|\.map$">
+  Require all denied
+</FilesMatch>

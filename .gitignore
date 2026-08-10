@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# Secrets — never commit
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+.pnp
+.pnp.js
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+dist/
+build/
+out/
+.next/
+frontend/out/
+frontend/.next/
+backend/dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# ---------------------------------------------------------------------------
+# Runtime data
+# ---------------------------------------------------------------------------
+uploads/
+storage/
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+pids/
+*.pid
+
+# ---------------------------------------------------------------------------
+# Generated assets
+# The social card is rebuilt by `prebuild` on every build, so it is output,
+# not source. Committing it would dirty the tree on every local build.
+# ---------------------------------------------------------------------------
+frontend/public/images/og/og-default.png
+
+# ---------------------------------------------------------------------------
+# Editors / OS / tooling
+# ---------------------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Per-developer Claude Code permissions — local to each machine.
+.claude/settings.local.json
+
+# ---------------------------------------------------------------------------
+# Misc
+# ---------------------------------------------------------------------------
+coverage/
+.cache/
+.eslintcache
+*.local
