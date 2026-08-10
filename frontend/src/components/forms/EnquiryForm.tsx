@@ -19,6 +19,12 @@ import {
   TextAreaField,
   TextField,
 } from '@/components/forms/Fields';
+import {
+  Recaptcha,
+  isRecaptchaConfigured,
+  type RecaptchaHandle,
+} from '@/components/forms/Recaptcha';
+import { Icon } from '@/components/ui/Icon';
 
 type EnquiryFormProps = {
   source: EnquiryPayload['source'];
@@ -87,6 +93,19 @@ export function EnquiryForm({
   const renderedAt = useRef<number>(Date.now());
   const abortRef = useRef<AbortController | null>(null);
 
+  /**
+   * reCAPTCHA gate. The submit button stays hidden until the visitor solves the
+   * checkbox. `recaptchaBlocked` covers the case where the widget cannot load at all —
+   * the button is restored so a genuine visitor is never trapped behind a broken
+   * third-party script, and the backend still validates everything it receives.
+   */
+  const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
+  const [recaptchaBlocked, setRecaptchaBlocked] = useState(false);
+  const recaptchaRef = useRef<RecaptchaHandle | null>(null);
+
+  const verificationRequired = isRecaptchaConfigured && !recaptchaBlocked;
+  const canSubmit = !verificationRequired || Boolean(recaptchaToken);
+
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const setField = (field: keyof FormState) => (value: string) => {
@@ -122,6 +141,12 @@ export function EnquiryForm({
       return;
     }
 
+    if (verificationRequired && !recaptchaToken) {
+      setStatus('error');
+      setFormError('Please complete the "I am not a robot" verification.');
+      return;
+    }
+
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -141,6 +166,7 @@ export function EnquiryForm({
           source,
           website: values.website,
           renderedAt: renderedAt.current,
+          recaptchaToken: recaptchaToken ?? undefined,
         },
         controller.signal,
       );
@@ -149,6 +175,9 @@ export function EnquiryForm({
       setValues({ ...EMPTY, interestedIn: defaultInterest ?? '' });
       setTouched({});
       renderedAt.current = Date.now();
+      // A v2 token is single-use, so re-arm the widget for any further submission.
+      recaptchaRef.current?.reset();
+      setRecaptchaToken(null);
       onSuccess?.();
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -161,6 +190,9 @@ export function EnquiryForm({
       } else {
         setFormError('Something went wrong. Please try again in a moment.');
       }
+      // The token was consumed by the rejected attempt; the visitor must solve it again.
+      recaptchaRef.current?.reset();
+      setRecaptchaToken(null);
     } finally {
       setPending(false);
     }
@@ -266,7 +298,23 @@ export function EnquiryForm({
 
       <HoneypotField value={values.website} onChange={setField('website')} />
 
-      <SubmitButton pending={pending}>{submitLabel}</SubmitButton>
+      <Recaptcha
+        handleRef={recaptchaRef}
+        onChange={setRecaptchaToken}
+        onUnavailable={() => setRecaptchaBlocked(true)}
+      />
+
+      {canSubmit ? (
+        <SubmitButton pending={pending}>{submitLabel}</SubmitButton>
+      ) : (
+        <p className="submit-gate">
+          <Icon name="shield" size={18} />
+          <span>
+            Complete the &ldquo;I&rsquo;m not a robot&rdquo; check above and the submit button
+            will appear.
+          </span>
+        </p>
+      )}
 
       <p className="field__hint">
         By submitting this form you agree to be contacted by JMK Global Holdings regarding your

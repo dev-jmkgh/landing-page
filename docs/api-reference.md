@@ -70,6 +70,7 @@ Used by the floating enquiry widget, the contact page and the business-page CTAs
 | `source` | `floating-widget` \| `contact-page` \| `business-page` |
 | `website` | honeypot — must be empty |
 | `renderedAt` | epoch ms when the form was rendered; submissions faster than 2.5 s or older than 12 h are rejected |
+| `recaptchaToken` | reCAPTCHA v2 response token. Required whenever `RECAPTCHA_SECRET_KEY` is set on the server; ignored when it is not |
 
 **201**
 
@@ -88,7 +89,7 @@ the `notification_sent` and `autoreply_sent` columns record what actually went o
 ### `POST /applications`
 
 `multipart/form-data`. Fields: `fullName`, `email`, `phone`, `position`, `message`
-(optional), `website` (honeypot), `renderedAt`, and `resume` (the file).
+(optional), `website` (honeypot), `renderedAt`, `recaptchaToken`, and `resume` (the file).
 
 `position` must be one of the 13 published roles. `resume` must be `.pdf`, `.doc` or
 `.docx`, at most 5 MB, and its **contents** must match its extension — a `.pdf` that
@@ -169,6 +170,22 @@ Per IP, in a 15-minute window by default (`RATE_LIMIT_WINDOW_MINUTES`):
 
 Beyond the limiters, the database is checked directly: 8 enquiries per IP per hour and
 5 applications per IP per day.
+
+## reCAPTCHA
+
+Both public endpoints verify a reCAPTCHA v2 token with Google before anything is stored.
+
+- Verification is **skipped entirely** when `RECAPTCHA_SECRET_KEY` is empty, so local
+  development needs no keys.
+- A missing or rejected token returns **400** with a message asking the visitor to
+  complete the check. The token is single-use, so the widget is reset on both success
+  and failure.
+- If Google itself is unreachable the submission is **allowed through** and the failure
+  is logged — an outage at Google should not cost the business a real enquiry, and the
+  honeypot, timing check and rate limits still apply. Set `RECAPTCHA_FAIL_CLOSED=1` to
+  reject instead.
+- The verifier also understands a v3 score response, so a v3 key can be swapped in by
+  changing the two keys and nothing else.
 
 Set `TRUST_PROXY=1` in production. Without it every request behind Hostinger's proxy
 appears to come from the same address, and one visitor can exhaust the limit for everyone.

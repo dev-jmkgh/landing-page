@@ -8,7 +8,11 @@ import {
   applicationNotification,
   type ApplicationEmailData,
 } from '../../services/emailTemplates';
-import { screenSubmission, type SubmissionContext } from '../enquiries/enquiry.service';
+import {
+  assertHumanVerified,
+  screenSubmission,
+  type SubmissionContext,
+} from '../enquiries/enquiry.service';
 import {
   countRecentByIp,
   insertApplication,
@@ -71,6 +75,8 @@ export async function createApplication(
     logger.warn('Application rejected as spam', { reason: verdict.reason, ip: context.ipAddress });
     throw badRequest('We could not process this submission. Please try again.');
   }
+
+  await assertHumanVerified(input.recaptchaToken, context.ipAddress, 'application');
 
   if (context.ipAddress) {
     const recent = await countRecentByIp(context.ipAddress, 24 * 60).catch(() => 0);

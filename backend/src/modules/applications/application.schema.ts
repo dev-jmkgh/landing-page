@@ -73,6 +73,8 @@ export const applicationSchema = z.object({
   /** Honeypot — must stay empty. */
   website: z.string().optional().default(''),
   renderedAt: z.coerce.number().int().positive().optional(),
+  /** reCAPTCHA v2 response token; enforced in the service layer. */
+  recaptchaToken: z.string().max(4096).optional(),
 });
 
 export type ApplicationInput = z.infer<typeof applicationSchema>;

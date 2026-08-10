@@ -43,6 +43,18 @@ compiles and every route was exported.
 - [ ] Career form accepts a real PDF and reports success
 - [ ] With the API stopped, forms show the network error rather than hanging
 
+### reCAPTCHA
+
+- [ ] The "I'm not a robot" checkbox renders on the enquiry modal, contact form and careers form
+- [ ] The submit button is **not** visible until the checkbox is solved
+- [ ] Solving the checkbox reveals the submit button
+- [ ] After a successful submission the widget resets and the button hides again
+- [ ] After a failed submission the widget resets (a v2 token is single-use)
+- [ ] Letting the challenge expire (~2 minutes) hides the button again
+- [ ] The domain is registered in the reCAPTCHA admin console — `localhost` for development, plus `jmkglobalholdings.com` and `www.jmkglobalholdings.com`
+- [ ] A submission posted directly to the API without a token is rejected with 400
+- [ ] The secret key appears nowhere in `frontend/out/` (`grep -r` the export)
+
 ## Backend
 
 - [ ] `GET /api/health` returns `ok`

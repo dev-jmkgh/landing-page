@@ -44,6 +44,7 @@ jobs:
         env:
           NEXT_PUBLIC_SITE_URL: https://www.jmkglobalholdings.com
           NEXT_PUBLIC_API_BASE_URL: https://api.jmkglobalholdings.com/api
+          NEXT_PUBLIC_RECAPTCHA_SITE_KEY: 6LdAg34tAAAAABGX0N_Frb412nVyp__WGjDxNy9A
         run: npm run build
 
       - name: Check the export is complete

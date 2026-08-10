@@ -52,6 +52,7 @@ jobs:
           NEXT_PUBLIC_YOUTUBE_URL: ${{ vars.YOUTUBE_URL }}
           NEXT_PUBLIC_GOOGLE_MAPS_EMBED_URL: ${{ vars.GOOGLE_MAPS_EMBED_URL }}
           NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
+          NEXT_PUBLIC_RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
         run: npm run build
 
       - name: Verify the export looks complete

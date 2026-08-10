@@ -430,6 +430,46 @@
   box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.18);
 }
 
+/* --- reCAPTCHA ------------------------------------------------------------ */
+
+.recaptcha-field {
+  display: grid;
+  gap: 0.5rem;
+  /* The widget iframe is a fixed 304px; let it shrink rather than overflow on
+     360px screens. */
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.recaptcha-field__status {
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+.recaptcha-field__status--error {
+  color: var(--danger-600);
+}
+
+/* Shown in place of the submit button until the challenge is solved. */
+.submit-gate {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem;
+  border: 1px dashed var(--line-200);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-muted);
+  font-size: 0.92rem;
+  line-height: var(--leading-snug);
+  color: var(--ink-500);
+}
+
+.submit-gate svg {
+  color: var(--accent-600);
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
 /* Honeypot — hidden from humans, present for bots. */
 .hp-field {
   position: absolute !important;

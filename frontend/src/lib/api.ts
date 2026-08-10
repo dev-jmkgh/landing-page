@@ -130,6 +130,8 @@ export type EnquiryPayload = {
   website?: string;
   /** Anti-spam: epoch ms when the form was rendered. */
   renderedAt: number;
+  /** reCAPTCHA v2 response token, when reCAPTCHA is configured. */
+  recaptchaToken?: string;
 };
 
 export type EnquiryResponse = { reference: string };

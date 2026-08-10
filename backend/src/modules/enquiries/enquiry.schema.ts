@@ -87,6 +87,11 @@ export const enquirySchema = z.object({
   website: z.string().optional().default(''),
   /** Epoch milliseconds recorded when the form was rendered. */
   renderedAt: z.coerce.number().int().positive().optional(),
+  /**
+   * reCAPTCHA v2 response token. Optional in the schema because verification is
+   * enforced in the service, which knows whether reCAPTCHA is configured at all.
+   */
+  recaptchaToken: z.string().max(4096).optional(),
 });
 
 export type EnquiryInput = z.infer<typeof enquirySchema>;

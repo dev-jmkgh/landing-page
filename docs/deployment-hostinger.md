@@ -169,6 +169,8 @@ ADMIN_EMAIL=admin@jmkglobalholdings.com
 ADMIN_PASSWORD_HASH=paste-the-bcrypt-hash-here
 JWT_SECRET=paste-a-64-character-random-string-here
 
+RECAPTCHA_SECRET_KEY=paste-the-recaptcha-v2-secret-here
+
 UPLOAD_DIR=/home/u123456789/api-storage/resumes
 ```
 

@@ -48,6 +48,11 @@ const schema = z.object({
   SESSION_TTL_HOURS: z.coerce.number().int().positive().max(168).default(8),
   COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 
+  RECAPTCHA_SECRET_KEY: z.string().default(''),
+  RECAPTCHA_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
+  /** Reject the submission when Google cannot be reached. Default: fail open. */
+  RECAPTCHA_FAIL_CLOSED: booleanish.default('0'),
+
   UPLOAD_DIR: z.string().default('storage/resumes'),
   MAX_UPLOAD_MB: z.coerce.number().positive().max(25).default(5),
 
@@ -151,6 +156,14 @@ export const config = {
     cookieSameSite: raw.COOKIE_SAMESITE,
     sessionCookieName: 'jmk_session',
     csrfCookieName: 'jmk_csrf',
+  },
+
+  recaptcha: {
+    secretKey: raw.RECAPTCHA_SECRET_KEY,
+    /** Verification is skipped entirely without a secret, so development needs no keys. */
+    enabled: raw.RECAPTCHA_SECRET_KEY.trim().length > 0,
+    minimumScore: raw.RECAPTCHA_MIN_SCORE,
+    failClosed: raw.RECAPTCHA_FAIL_CLOSED,
   },
 
   uploads: {

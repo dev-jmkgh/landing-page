@@ -3,6 +3,7 @@ import { badRequest } from '../../utils/httpError';
 import { describeError, logger } from '../../utils/logger';
 import { createReference, truncate } from '../../utils/text';
 import { sendMail } from '../../services/mailer';
+import { verifyRecaptcha } from '../../services/recaptcha';
 import { enquiryAutoReply, enquiryNotification, type EnquiryEmailData } from '../../services/emailTemplates';
 import {
   countRecentByIp,
@@ -35,6 +36,37 @@ export type SubmissionContext = {
 };
 
 export type SpamVerdict = { spam: true; reason: string } | { spam: false };
+
+/**
+ * Verifies the reCAPTCHA token and throws a client-safe error if it does not hold up.
+ *
+ * Shared by the enquiry and application flows so both endpoints behave identically.
+ * When Google itself is unreachable the submission is allowed through unless
+ * RECAPTCHA_FAIL_CLOSED is set — an outage at Google should not cost the business a
+ * genuine enquiry, and the honeypot, timing check and rate limits are still in force.
+ */
+export async function assertHumanVerified(
+  token: string | undefined,
+  ipAddress: string | null,
+  formName: 'enquiry' | 'application',
+): Promise<void> {
+  const result = await verifyRecaptcha(token, ipAddress);
+  if (result.ok) return;
+
+  if (result.reason === 'unavailable' && !config.recaptcha.failClosed) {
+    logger.warn('reCAPTCHA unavailable — allowing submission through', { form: formName, ip: ipAddress });
+    return;
+  }
+
+  logger.warn('Submission failed reCAPTCHA', { form: formName, reason: result.reason, ip: ipAddress });
+
+  throw badRequest(
+    result.reason === 'missing_token'
+      ? 'Please complete the "I am not a robot" verification and try again.'
+      : 'Verification failed. Please complete the verification again and resubmit.',
+    { recaptcha: 'Please complete the verification and try again.' },
+  );
+}
 
 export function screenSubmission(
   input: { website?: string; renderedAt?: number },
@@ -99,6 +131,8 @@ export async function createEnquiry(
     // Deliberately vague: a bot learns nothing about which signal caught it.
     throw badRequest('We could not process this submission. Please try again.');
   }
+
+  await assertHumanVerified(input.recaptchaToken, context.ipAddress, 'enquiry');
 
   if (context.ipAddress) {
     const recent = await countRecentByIp(context.ipAddress, 60).catch(() => 0);

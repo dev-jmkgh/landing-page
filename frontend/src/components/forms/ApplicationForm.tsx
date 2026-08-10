@@ -20,6 +20,12 @@ import {
   TextAreaField,
   TextField,
 } from '@/components/forms/Fields';
+import {
+  Recaptcha,
+  isRecaptchaConfigured,
+  type RecaptchaHandle,
+} from '@/components/forms/Recaptcha';
+import { Icon } from '@/components/ui/Icon';
 
 type FormState = {
   fullName: string;
@@ -71,6 +77,14 @@ export function ApplicationForm() {
   const renderedAt = useRef<number>(Date.now());
   const abortRef = useRef<AbortController | null>(null);
 
+  /** Submit stays hidden until the reCAPTCHA checkbox is solved. */
+  const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
+  const [recaptchaBlocked, setRecaptchaBlocked] = useState(false);
+  const recaptchaRef = useRef<RecaptchaHandle | null>(null);
+
+  const verificationRequired = isRecaptchaConfigured && !recaptchaBlocked;
+  const canSubmit = !verificationRequired || Boolean(recaptchaToken);
+
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const setField = (field: keyof FormState) => (value: string) => {
@@ -96,6 +110,12 @@ export function ApplicationForm() {
       return;
     }
 
+    if (verificationRequired && !recaptchaToken) {
+      setStatus('error');
+      setFormError('Please complete the "I am not a robot" verification.');
+      return;
+    }
+
     const formData = new FormData();
     formData.append('fullName', values.fullName.trim());
     formData.append('email', values.email.trim());
@@ -104,6 +124,7 @@ export function ApplicationForm() {
     formData.append('message', values.message.trim());
     formData.append('website', values.website);
     formData.append('renderedAt', String(renderedAt.current));
+    if (recaptchaToken) formData.append('recaptchaToken', recaptchaToken);
     if (resume) formData.append('resume', resume);
 
     abortRef.current?.abort();
@@ -119,6 +140,9 @@ export function ApplicationForm() {
       setValues(EMPTY);
       setResume(null);
       renderedAt.current = Date.now();
+      // A v2 token is single-use, so re-arm the widget for any further submission.
+      recaptchaRef.current?.reset();
+      setRecaptchaToken(null);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
 
@@ -130,6 +154,9 @@ export function ApplicationForm() {
       } else {
         setFormError('Something went wrong. Please try again in a moment.');
       }
+      // The token was consumed by the rejected attempt; it must be solved again.
+      recaptchaRef.current?.reset();
+      setRecaptchaToken(null);
     } finally {
       setPending(false);
     }
@@ -227,9 +254,25 @@ export function ApplicationForm() {
 
       <HoneypotField value={values.website} onChange={setField('website')} />
 
-      <SubmitButton pending={pending} pendingLabel="Sending application…">
-        Submit Application
-      </SubmitButton>
+      <Recaptcha
+        handleRef={recaptchaRef}
+        onChange={setRecaptchaToken}
+        onUnavailable={() => setRecaptchaBlocked(true)}
+      />
+
+      {canSubmit ? (
+        <SubmitButton pending={pending} pendingLabel="Sending application…">
+          Submit Application
+        </SubmitButton>
+      ) : (
+        <p className="submit-gate">
+          <Icon name="shield" size={18} />
+          <span>
+            Complete the &ldquo;I&rsquo;m not a robot&rdquo; check above and the submit button
+            will appear.
+          </span>
+        </p>
+      )}
 
       <p className="field__hint">
         Your details and resume are used solely to assess your application. See our{' '}

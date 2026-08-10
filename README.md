@@ -250,6 +250,7 @@ Full reference with comments: [`.env.example`](.env.example).
 | `NEXT_PUBLIC_API_BASE_URL` | API base including `/api` |
 | `NEXT_PUBLIC_YOUTUBE_URL` | Official channel. Blank hides the link — no URL is invented |
 | `NEXT_PUBLIC_GOOGLE_MAPS_EMBED_URL` | Maps embed `src`. Blank shows an accessible placeholder with directions |
+| `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` | reCAPTCHA v2 site key. Public by design. Blank disables the checkbox and shows submit buttons normally |
 | `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` | Optional Search Console token |
 
 ### `backend/.env` — secret
@@ -267,6 +268,8 @@ Full reference with comments: [`.env.example`](.env.example).
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` | Fallback admin when `admin_users` is empty |
 | `JWT_SECRET` | Session signing key. **≥ 32 characters, or the API refuses to start in production** |
 | `SESSION_TTL_HOURS`, `COOKIE_SAMESITE` | Session lifetime and cookie policy |
+| `RECAPTCHA_SECRET_KEY` | reCAPTCHA v2 secret. **Server-side only.** Blank disables verification |
+| `RECAPTCHA_MIN_SCORE`, `RECAPTCHA_FAIL_CLOSED` | v3 score threshold (unused by v2); whether a Google outage blocks submissions (default: no) |
 | `UPLOAD_DIR`, `MAX_UPLOAD_MB` | Resume storage — keep it outside the web root |
 | `RATE_LIMIT_*`, `FORM_RATE_LIMIT_MAX`, `LOGIN_RATE_LIMIT_MAX` | Throttling |
 | `LOG_LEVEL` | `error` \| `warn` \| `info` \| `debug` |
@@ -426,8 +429,10 @@ when a fact changes, so the record of what is verifiable stays accurate.
   `LIMIT`/`OFFSET` integers that Zod has already validated.
 - **XSS** — React escapes page content, and user text placed into HTML emails is escaped
   explicitly.
-- **Spam** — honeypot field, minimum fill time, per-IP rate limits and per-IP database
-  ceilings. The architecture accepts a CAPTCHA later without restructuring.
+- **Spam** — reCAPTCHA v2 (the submit button only appears once the checkbox is solved,
+  and the token is verified server-side with Google), plus a honeypot field, a minimum
+  fill time, per-IP rate limits and per-IP database ceilings. Every one of those still
+  applies if reCAPTCHA is disabled or fails to load.
 - **Uploads** — extension allowlist, MIME allowlist, size cap, generated filename,
   magic-byte verification after write, and storage outside the web root. Rejected
   uploads are deleted.
