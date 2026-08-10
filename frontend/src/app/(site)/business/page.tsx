@@ -102,7 +102,7 @@ export default function BusinessPage() {
             <SectionHeading
               eyebrow="Group Sectors"
               title="Exports, agriculture, renewable energy and real estate"
-              description="These sectors sit within the group's diversified portfolio. We publish only what has been confirmed — detailed service catalogues will follow as each business formalises its offering."
+              description="These sectors sit within the group's diversified portfolio."
             />
           </Reveal>
 

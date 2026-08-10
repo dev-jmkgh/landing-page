@@ -36,6 +36,24 @@ function readCookie(name: string): string | null {
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
+/**
+ * CSRF token for the current admin session, held in memory.
+ *
+ * The cookie the API sets is host-only on the API's own domain, so when the site and
+ * the API live on different subdomains (www. and api.) the page cannot read it. The
+ * API therefore also returns the token in the sign-in and session responses, and that
+ * value is kept here. The cookie remains a fallback for same-origin deployments.
+ */
+let csrfToken: string | null = null;
+
+function rememberCsrfToken(value: unknown): void {
+  if (typeof value === 'string' && value.length > 0) csrfToken = value;
+}
+
+function currentCsrfToken(): string | null {
+  return csrfToken ?? readCookie('jmk_csrf');
+}
+
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
@@ -58,8 +76,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   if (authenticated && method !== 'GET') {
-    const csrfToken = readCookie('jmk_csrf');
-    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+    const token = currentCsrfToken();
+    if (token) headers['X-CSRF-Token'] = token;
   }
 
   let response: Response;
@@ -190,16 +208,28 @@ function toQueryString(query: AdminListQuery): string {
 
 export const adminApi = {
   login: (email: string, password: string) =>
-    request<{ email: string }>('/admin/auth/login', {
+    request<{ email: string; csrfToken?: string }>('/admin/auth/login', {
       method: 'POST',
       body: { email, password },
       authenticated: true,
+    }).then((session) => {
+      rememberCsrfToken(session.csrfToken);
+      return session;
     }),
 
-  logout: () => request<null>('/admin/auth/logout', { method: 'POST', authenticated: true }),
+  logout: () =>
+    request<null>('/admin/auth/logout', { method: 'POST', authenticated: true }).finally(() => {
+      csrfToken = null;
+    }),
 
   session: (signal?: AbortSignal) =>
-    request<{ email: string }>('/admin/auth/session', { authenticated: true, signal }),
+    request<{ email: string; csrfToken?: string }>('/admin/auth/session', {
+      authenticated: true,
+      signal,
+    }).then((session) => {
+      rememberCsrfToken(session.csrfToken);
+      return session;
+    }),
 
   listEnquiries: (query: AdminListQuery, signal?: AbortSignal) =>
     request<Paginated<AdminEnquiry>>(`/admin/enquiries${toQueryString(query)}`, {

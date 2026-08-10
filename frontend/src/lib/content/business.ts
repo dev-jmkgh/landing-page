@@ -344,7 +344,7 @@ export const groupSectors: GroupSector[] = [
     id: 'real-estate',
     name: 'Real Estate',
     description:
-      'Real estate is one of the seven sectors within the group’s diversified operating portfolio. Talk to us for current opportunities.',
+      'Real estate is one of the seven sectors within the group’s diversified operating portfolio.',
     icon: 'building',
   },
 ];

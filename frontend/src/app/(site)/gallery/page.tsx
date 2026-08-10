@@ -8,7 +8,7 @@ import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
 export const metadata: Metadata = buildMetadata({
   title: 'Gallery',
   description:
-    'Images from across JMK Global Holdings: training, engineering design, software delivery, exports and renewable energy.',
+    'Gallery of JMK Global Holdings: training, engineering design, software delivery, exports and renewable energy.',
   path: '/gallery',
 });
 
@@ -27,7 +27,7 @@ export default function GalleryPage() {
         trail={trail}
         eyebrow="Gallery"
         title="Our work across the group"
-        intro="Images from across JMK Global Holdings. Photography is published business by business as each team releases it — nothing here is stock imagery presented as our own."
+        intro="Work from across JMK Global Holdings, published business by business as each team releases it. Nothing here is stock imagery presented as our own."
       />
 
       <section className="section">

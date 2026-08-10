@@ -6,7 +6,7 @@
  * renders a branded geometric placeholder — never a fabricated caption or invented project.
  *
  * To publish a real image:
- *   1. Drop the file into `frontend/public/images/gallery/` (see that folder's README).
+ *   1. Drop the file into `frontend/public/images/gallery/` (see docs/image-assets.md).
  *   2. Set `src` to `/images/gallery/<filename>` and write a truthful `alt` description.
  *   3. Optionally add a `caption` — only if the caption is factually accurate.
  */

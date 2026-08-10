@@ -24,6 +24,7 @@ is what the front-end forms use to highlight individual inputs.
 | Status | `code` | Meaning |
 | --- | --- | --- |
 | 400 | `bad_request` | Rejected by an anti-spam or business rule |
+| 400 | `upload_failed` | Resume rejected by the upload layer (too large, wrong type, unexpected field); `errors.resume` carries the message |
 | 401 | `unauthorized` | Missing, expired or invalid admin session |
 | 403 | `forbidden` | CSRF token missing/incorrect, or origin not allowed |
 | 404 | `not_found` | Unknown endpoint or record |
@@ -99,13 +100,22 @@ does not begin with `%PDF` is rejected and deleted.
 
 ## Admin endpoints
 
-All require a valid session cookie. Every state-changing request additionally requires
-the `X-CSRF-Token` header, whose value is the `jmk_csrf` cookie set at sign-in.
+All require a valid session cookie. Every state-changing request additionally requires the
+`X-CSRF-Token` header.
+
+**Where the CSRF token comes from.** Sign-in returns it in the response body *and* sets it
+as a readable `jmk_csrf` cookie. The body copy is the one that matters in production: the
+admin page is served from `www.jmkglobalholdings.com` while the API answers on
+`api.jmkglobalholdings.com`, and a cookie set by the API is host-only, so the page cannot
+read it back out of `document.cookie`. The client keeps the token in memory and re-fetches
+it from `GET /admin/auth/session` after a reload. Reading either copy requires a response
+the browser will hand to the page, which CORS denies to any other origin.
 
 ### `POST /admin/auth/login`
 
-`{ "email": "...", "password": "..." }` → **200** `{ "success": true, "email": "..." }`
-and two cookies: `jmk_session` (HttpOnly) and `jmk_csrf` (readable).
+`{ "email": "...", "password": "..." }` → **200**
+`{ "success": true, "email": "...", "csrfToken": "..." }`, plus the `jmk_session`
+(HttpOnly) and `jmk_csrf` (readable) cookies.
 
 A wrong email and a wrong password produce the same 401 and take the same amount of
 time, so accounts cannot be enumerated.
@@ -116,7 +126,8 @@ Requires CSRF. Clears both cookies.
 
 ### `GET /admin/auth/session`
 
-**200** `{ "success": true, "email": "..." }` when signed in, **401** otherwise.
+**200** `{ "success": true, "email": "...", "csrfToken": "..." }` when signed in,
+**401** otherwise.
 
 ### `GET /admin/enquiries`
 

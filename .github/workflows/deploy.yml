@@ -16,7 +16,9 @@ on:
 
 concurrency:
   group: deploy-website
-  cancel-in-progress: true
+  # Never cancel mid-upload: the FTP step writes into the live public_html in place,
+  # so an aborted transfer would leave the site half-updated. A queued run waits instead.
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:

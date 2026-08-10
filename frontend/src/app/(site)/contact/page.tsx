@@ -32,7 +32,7 @@ export default function ContactPage() {
         eyebrow="Contact Us"
         title="Talk to JMK Global Holdings"
         intro="Reach the group directly by phone or email, or send an enquiry and we will route it to the right business vertical."
-        meta={['Coimbatore, Tamil Nadu', 'Mon–Sat enquiries']}
+        meta={['Coimbatore, Tamil Nadu']}
       />
 
       <section className="section">

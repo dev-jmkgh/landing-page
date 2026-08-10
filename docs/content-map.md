@@ -206,4 +206,4 @@ The document contains stock photographs only (office, CAD workstation, developer
 container). No JMK-owned photography, office photos, staff photos, client logos or project
 photos were supplied, so **none are fabricated**. Every image slot renders a branded
 geometric placeholder until a real asset is dropped in — see
-`frontend/public/images/README.md`.
+[`docs/image-assets.md`](./image-assets.md).

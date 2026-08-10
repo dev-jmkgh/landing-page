@@ -36,7 +36,7 @@ development, exports, agriculture, renewable energy and real estate.
 
 ## 1. Project overview
 
-Ten public pages, a persistent enquiry widget, a career application form with resume
+Eleven public pages, a persistent enquiry widget, a career application form with resume
 upload, and a protected admin area for handling what comes in.
 
 | Route | Page |
@@ -89,19 +89,21 @@ edit: if a fact is not in the content map, it does not belong on the site.
   double-submit CSRF token for the admin session.
 - Nodemailer for Gmail SMTP.
 
-Only four components ship JavaScript to the browser: the header, the enquiry modal, the
-gallery filter and the admin screen. Everything else is static HTML.
+JavaScript is limited to the genuinely interactive surfaces: the header and mobile drawer,
+the enquiry widget and its forms, the careers application form, the gallery filter, the
+scroll-reveal and counter helpers, and the admin screen. Page content itself is
+pre-rendered HTML — the homepage ships roughly 116 KB of JavaScript in total.
 
 ---
 
 ## 3. Folder structure
 
 ```
-jmk-global-holdings/
+landing-page/
 ├── frontend/                     Next.js website (static export)
 │   ├── public/
 │   │   ├── .htaccess             Apache config — deployed with the site
-│   │   └── images/               Image slots + replacement guide
+│   │   └── images/               Image slots (guide: docs/image-assets.md)
 │   ├── scripts/
 │   │   └── generate-og-image.mjs Builds the 1200×630 social card
 │   └── src/
@@ -144,6 +146,7 @@ jmk-global-holdings/
 │   ├── content-map.md            Extracted source content — the factual authority
 │   ├── deployment-hostinger.md   Step-by-step deployment
 │   ├── api-reference.md          Endpoint documentation
+│   ├── image-assets.md           How to replace the image placeholders
 │   └── testing-checklist.md      Release checklist
 ├── .github/workflows/deploy.yml  Build + FTPS publish
 ├── .env.example                  Every variable, documented in one place
@@ -157,8 +160,8 @@ jmk-global-holdings/
 **Requirements:** Node.js 18.18 or newer, npm 9+, MySQL 8 (or MariaDB 10.6+).
 
 ```bash
-git clone https://github.com/<your-account>/jmk-global-holdings.git
-cd jmk-global-holdings
+git clone https://github.com/dev-jmkgh/landing-page.git
+cd landing-page
 npm install                # root tooling (concurrently)
 npm run install:all        # frontend + backend dependencies
 ```
@@ -335,7 +338,7 @@ cd frontend && npm run build
 cd backend && npm run build
 ```
 
-`frontend/out/` contains the pre-rendered HTML for all ten public pages plus the admin
+`frontend/out/` contains the pre-rendered HTML for all eleven public pages plus the admin
 shell, `sitemap.xml`, `robots.txt`, the social card and the `.htaccess`.
 
 Because pages are pre-rendered, **any content change requires a rebuild and re-upload**.
@@ -357,8 +360,8 @@ The short version:
    the contents of `frontend/out/` into `public_html` — including the hidden `.htaccess`.
    Or let `.github/workflows/deploy.yml` do it on every push once the FTP secrets are set.
 4. **API.** Create the `api.jmkglobalholdings.com` subdomain, upload `backend/dist/`,
-   `package.json`, `package-lock.json` and `database/` to a folder **outside**
-   `public_html`, run `npm ci --omit=dev`, add `.env` (`chmod 600`), and start it with
+   `backend/package.json`, `backend/package-lock.json` and `backend/database/` to a folder
+   **outside** `public_html`, run `npm ci --omit=dev`, add `.env` (`chmod 600`), and start it with
    hPanel ▸ Advanced ▸ Node.js (startup file `dist/server.js`) or PM2 on a VPS.
 5. **Storage.** `mkdir -p ~/api-storage/resumes && chmod 700 ~/api-storage/resumes`, and
    point `UPLOAD_DIR` at it. It must not be inside `public_html`.
@@ -408,7 +411,7 @@ sitemap uses the same origin, so search engines see one address for one page.
 | Gallery slots | `frontend/src/lib/content/gallery.ts` |
 | Address, phones, email, social links, navigation | `frontend/src/lib/site.ts` |
 | Colours, typography, spacing | `frontend/src/styles/tokens.css` |
-| Images | Drop files into `frontend/public/images/…` — see the README in that folder |
+| Images | Drop files into `frontend/public/images/…` — see [docs/image-assets.md](docs/image-assets.md) |
 
 Rebuild and re-upload after any change. Update `docs/content-map.md` in the same commit
 when a fact changes, so the record of what is verifiable stays accurate.

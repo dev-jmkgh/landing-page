@@ -97,12 +97,12 @@ Check 1920, 1440, 1024, 768, 480, 390 and 360 px wide.
 - [ ] Every page has a unique title and meta description
 - [ ] Canonical URLs use `https://www.jmkglobalholdings.com`
 - [ ] `og:image` resolves to the generated 1200×630 PNG
-- [ ] `/sitemap.xml` lists all 10 public pages; `/robots.txt` disallows `/admin/`
+- [ ] `/sitemap.xml` lists all 11 public pages; `/robots.txt` disallows `/admin/`
 - [ ] Organization, WebSite, LocalBusiness and BreadcrumbList JSON-LD validate in the Rich Results Test
 - [ ] No page claims a fact absent from `docs/content-map.md`
 
 ## Performance
 
 - [ ] Lighthouse (mobile) — Performance, Accessibility, Best Practices and SEO all ≥ 90
-- [ ] Only the four client components ship JavaScript (header, enquiry modal, gallery filter, admin)
+- [ ] Homepage first-load JavaScript stays at or below ~120 KB (check the `next build` route table)
 - [ ] `_next/static` assets are served with a long cache lifetime; HTML revalidates

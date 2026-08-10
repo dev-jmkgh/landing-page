@@ -2,6 +2,7 @@
   "name": "jmk-frontend",
   "version": "1.0.0",
   "private": true,
+  "license": "UNLICENSED",
   "description": "JMK Global Holdings — corporate website (Next.js App Router, static export)",
   "scripts": {
     "dev": "next dev -p 3000",

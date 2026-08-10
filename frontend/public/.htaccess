@@ -81,9 +81,19 @@ ErrorDocument 404 /404.html
   <FilesMatch "\.(html)$">
     Header set Cache-Control "public, max-age=0, must-revalidate"
   </FilesMatch>
-  <FilesMatch "\.(js|css|woff2|webp|jpg|jpeg|png|svg|ico)$">
+
+  # Only /_next/static/ filenames carry a content hash, so only they are safe to mark
+  # immutable. FilesMatch would match on basename alone and cover the whole document
+  # root, which would make a replaced photo uncacheable-to-update for a year.
+  <LocationMatch "^/_next/static/">
     Header set Cache-Control "public, max-age=31536000, immutable"
-  </FilesMatch>
+  </LocationMatch>
+
+  # Unhashed assets: cache for a day, then revalidate, so replacing an image or the
+  # social card takes effect without waiting out a long TTL.
+  <LocationMatch "^/(images/|icon\.svg|favicon\.ico)">
+    Header set Cache-Control "public, max-age=86400, must-revalidate"
+  </LocationMatch>
 </IfModule>
 
 # -----------------------------------------------------------------------------

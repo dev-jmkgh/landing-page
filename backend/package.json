@@ -2,6 +2,7 @@
   "name": "jmk-backend",
   "version": "1.0.0",
   "private": true,
+  "license": "UNLICENSED",
   "description": "JMK Global Holdings — enquiry, career application and admin API",
   "main": "dist/server.js",
   "scripts": {

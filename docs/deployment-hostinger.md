@@ -32,12 +32,12 @@
 ## 1. Push the project to GitHub
 
 ```bash
-cd jmk-global-holdings
+cd landing-page
 git init                       # skip if the repo already exists
 git add .
 git commit -m "JMK Global Holdings website"
 git branch -M main
-git remote add origin https://github.com/<your-account>/jmk-global-holdings.git
+git remote add origin https://github.com/dev-jmkgh/landing-page.git
 git push -u origin main
 ```
 

@@ -1,5 +1,8 @@
 # Image assets
 
+> Lives in `docs/` rather than `frontend/public/images/` so it is not published as part
+> of the website.
+
 No JMK-owned photography was supplied with the content document, so **every image slot on
 the site currently renders a branded geometric placeholder**. Nothing on the site pretends
 to be a photo of a JMK office, team, project or client.
