@@ -463,16 +463,11 @@
   color: var(--accent-700);
 }
 
-.mega-menu__title {
-  font-weight: 600;
-  font-size: 0.94rem;
-  color: var(--navy-900);
-}
-
-.mega-menu__description {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  margin-top: 0.15rem;
+/* Title and description come from the shared .label-stack pattern; the menu only
+   needs to say what changes on hover. */
+.mega-menu__link:hover .label-stack__title,
+.mega-menu__link:focus-visible .label-stack__title {
+  color: var(--accent-700);
 }
 
 /* --- Header actions ------------------------------------------------------- */

@@ -167,9 +167,9 @@ export function SiteHeader() {
                         <span className="mega-menu__icon" aria-hidden="true">
                           <Icon name="arrowRight" size={16} />
                         </span>
-                        <span>
-                          <span className="mega-menu__title">{child.label}</span>
-                          <span className="mega-menu__description">{child.description}</span>
+                        <span className="label-stack">
+                          <span className="label-stack__title">{child.label}</span>
+                          <span className="label-stack__description">{child.description}</span>
                         </span>
                       </Link>
                     ))}

@@ -66,9 +66,9 @@ export default function AboutPage() {
                     <span className="founder-card__initials" aria-hidden="true">
                       {initials(founder.name)}
                     </span>
-                    <span>
-                      <span className="founder-card__name">{founder.name}</span>
-                      <span className="founder-card__role">{founder.role}</span>
+                    <span className="label-stack">
+                      <span className="label-stack__title">{founder.name}</span>
+                      <span className="label-stack__description">{founder.role}</span>
                     </span>
                   </div>
                 ))}

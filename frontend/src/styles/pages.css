@@ -832,15 +832,7 @@
   font-weight: 700;
 }
 
-.founder-card__name {
-  font-weight: 600;
-  color: var(--navy-900);
-}
-
-.founder-card__role {
-  font-size: var(--text-sm);
-  color: var(--ink-500);
-}
+/* Founder name and role use the shared .label-stack pattern. */
 
 /* --- Service groups (vertical detail pages) ------------------------------ */
 
