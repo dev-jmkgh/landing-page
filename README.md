@@ -379,10 +379,15 @@ code — the worse failure, because nothing on screen says the artifacts are old
 source. Use `npm run start:web` / `npm run start:api` to serve an existing build without
 rebuilding.
 
-Before building, it checks that ports 3000 and 5000 are free and stops immediately if
-they are not. That saves a minute when a dev server is already up, and more importantly
-protects it: `next build` clears the `.next` directory a running `next dev` reads from,
-and the errors that follow look like bundler bugs rather than a stomped cache.
+Before building, it clears ports 3000 and 5000 — if `npm run dev` is running, it is
+stopped first. That is not just convenience: `next build` clears the `.next` directory a
+running `next dev` reads from, and the errors that follow ("Cannot find module
+'./331.js'", missing React Client Manifest entries) look like bundler bugs rather than a
+stomped cache. Stopping the dev server first makes that impossible.
+
+Only Node processes are stopped, and the whole supervisor chain goes with them so a
+watcher cannot respawn a child that grabs the port back. A port held by anything else —
+a database, a container proxy, another application — is reported and left alone.
 
 The static server mirrors the production host: `/about/` resolves to `about/index.html`,
 unknown paths return `404.html` with a real 404, and hashed `_next/static` assets are
