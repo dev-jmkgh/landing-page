@@ -6,6 +6,7 @@ import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { verticals, type Vertical } from '@/lib/content/business';
+import { verticalVisuals } from '@/lib/content/visuals';
 import { breadcrumbJsonLd } from '@/lib/seo';
 
 type VerticalDetailProps = {
@@ -39,6 +40,7 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
         title={vertical.hero.heading}
         intro={vertical.hero.intro}
         meta={vertical.cardServices.slice(0, 5)}
+        visual={verticalVisuals[vertical.slug]}
       />
 
       <section className="section">

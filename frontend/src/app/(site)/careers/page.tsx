@@ -6,6 +6,7 @@ import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { benefits, careersIntro, openPositions, roleGroups } from '@/lib/content/careers';
+import { careersVisual } from '@/lib/content/visuals';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
 import { contactDetails } from '@/lib/site';
 
@@ -33,6 +34,7 @@ export default function CareersPage() {
         title={careersIntro.heading}
         intro={careersIntro.intro}
         meta={[`${openPositions.length} open role types`, 'Coimbatore, Tamil Nadu']}
+        visual={careersVisual}
       />
 
       {/* ------------------------------------------------------ Open positions */}

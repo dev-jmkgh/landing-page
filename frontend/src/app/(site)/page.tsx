@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { EnquiryTrigger } from '@/components/enquiry/EnquiryTrigger';
-import { GroupDiagram } from '@/components/home/GroupDiagram';
+import { HeroVisualization } from '@/components/home/HeroVisualization';
 import { CtaBand } from '@/components/layout/CtaBand';
 import { CountUp } from '@/components/ui/CountUp';
 import { Icon } from '@/components/ui/Icon';
@@ -47,9 +47,9 @@ export default function HomePage() {
                   Explore Our Businesses
                   <Icon name="arrowRight" size={17} />
                 </Link>
-                <Link className="btn btn--ghost-light btn--lg" href="/contact">
-                  Contact Us
-                </Link>
+                <EnquiryTrigger className="btn btn--ghost-light btn--lg">
+                  Enquire Now
+                </EnquiryTrigger>
               </div>
 
               <ul className="hero__sectors" aria-label="Sectors we operate in">
@@ -62,13 +62,11 @@ export default function HomePage() {
             </div>
 
             <div className="hero__visual">
-              <div className="hero__visual-frame">
-                <p className="hero__visual-caption">
-                  <span>Group Structure</span>
-                  <span>3 Verticals</span>
-                </p>
-                <GroupDiagram />
-              </div>
+              <p className="hero__visual-caption">
+                <span>Group Architecture</span>
+                <span>Six operating spokes</span>
+              </p>
+              <HeroVisualization />
             </div>
           </div>
         </div>

@@ -38,9 +38,9 @@
   align-items: center;
 }
 
-@media (min-width: 1000px) {
+@media (min-width: 1100px) {
   .hero__inner {
-    grid-template-columns: 1.12fr 0.88fr;
+    grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
   }
 }
 
@@ -122,13 +122,6 @@
   position: relative;
 }
 
-.hero__visual-frame {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
-  padding: clamp(1.25rem, 2.5vw, 2rem);
-}
-
 .hero__visual-caption {
   display: flex;
   align-items: center;
@@ -139,128 +132,6 @@
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   color: var(--color-on-dark-muted);
-}
-
-/* Group structure diagram (hero visual) */
-.group-diagram {
-  display: grid;
-  gap: var(--space-4);
-}
-
-.group-diagram__root {
-  display: grid;
-  gap: 0.2rem;
-  padding: var(--space-5);
-  border-radius: var(--radius-md);
-  background-color: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-left: 3px solid var(--accent-500);
-}
-
-.group-diagram__root-label {
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-widest);
-  text-transform: uppercase;
-  color: var(--accent-400);
-}
-
-.group-diagram__root-name {
-  font-family: var(--font-display);
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: #fff;
-}
-
-.group-diagram__root-meta {
-  font-size: var(--text-sm);
-  color: var(--color-on-dark-muted);
-}
-
-.group-diagram__branches {
-  display: grid;
-  gap: 0.6rem;
-  padding-left: var(--space-5);
-  position: relative;
-}
-
-.group-diagram__branches::before {
-  content: '';
-  position: absolute;
-  left: 0.6rem;
-  top: -0.5rem;
-  bottom: 1.4rem;
-  width: 1px;
-  background-color: rgba(255, 255, 255, 0.22);
-}
-
-.group-diagram__branch {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.7rem 0.9rem;
-  border-radius: var(--radius-sm);
-  background-color: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.group-diagram__branch::before {
-  content: '';
-  position: absolute;
-  left: -0.9rem;
-  top: 50%;
-  width: 0.9rem;
-  height: 1px;
-  background-color: rgba(255, 255, 255, 0.22);
-}
-
-.group-diagram__mark {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  border-radius: var(--radius-xs);
-  background-color: rgba(192, 139, 46, 0.16);
-  color: var(--accent-400);
-  font-family: var(--font-display);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.group-diagram__branch-name {
-  display: block;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: #fff;
-}
-
-.group-diagram__branch-tagline {
-  display: block;
-  font-size: var(--text-xs);
-  color: var(--color-on-dark-muted);
-}
-
-.group-diagram__sectors {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  padding-top: var(--space-2);
-}
-
-.group-diagram__sectors li {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: var(--text-xs);
-  color: var(--color-on-dark-muted);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius-pill);
-  padding: 0.3rem 0.65rem;
-}
-
-.group-diagram__sectors svg {
-  color: var(--accent-400);
 }
 
 .hero-stats {

@@ -1,0 +1,249 @@
+/* ===========================================================================
+   Home hero visualisation
+   ---------------------------------------------------------------------------
+   Five staged phases, all CSS, all on transform/opacity/stroke so the browser can
+   composite them without layout work — this sits above the fold and must not cost
+   the hero its paint time.
+
+   The FINISHED state is what every rule declares by default. Animations are added
+   only inside `prefers-reduced-motion: no-preference`, so a reduced-motion visitor
+   (or anyone before the CSS animations run) sees the completed drawing rather than
+   a blank or half-built frame.
+   =========================================================================== */
+
+.hero-viz {
+  position: relative;
+  width: 100%;
+  /* Authored at 600x560; rendered at or near 1:1 so strokes stay sharp. */
+  max-width: 640px;
+  margin-inline-start: auto;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background:
+    radial-gradient(120% 100% at 15% 0%, rgba(30, 69, 111, 0.5), transparent 62%),
+    linear-gradient(155deg, rgba(16, 41, 70, 0.92), rgba(5, 15, 28, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: var(--glass-shadow);
+}
+
+.hero-viz__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* --- Typography inside the drawing --------------------------------------- */
+
+.hv-node__label {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.hv-core__word {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  fill: #ffffff;
+}
+
+.hv-core__sub {
+  font-family: var(--font-sans);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  fill: rgba(214, 226, 240, 0.75);
+}
+
+.hv-dims__label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  fill: rgba(217, 165, 74, 0.95);
+}
+
+/* --- Finished state (the default) ---------------------------------------- */
+
+.hv-grid,
+.hv-frame,
+.hv-nodes,
+.hv-core,
+.hv-dims,
+.hv-dims__label {
+  opacity: 1;
+}
+
+.hv-draw,
+.hv-link {
+  stroke-dashoffset: 0;
+}
+
+.hv-node,
+.hv-core {
+  transform: none;
+}
+
+/* The pulses and the sweep are motion-only: with reduced motion they simply are
+   not drawn, rather than sitting frozen mid-path. */
+.hv-pulses,
+.hv-sweep {
+  opacity: 0;
+}
+
+.hv-node__ring {
+  opacity: 0;
+}
+
+/* --- Animated build ------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Stage 1 — grid and frame */
+  .hv-grid {
+    animation: hv-fade 900ms var(--ease-out) both;
+  }
+
+  .hv-frame {
+    opacity: 0;
+    animation: hv-fade 700ms var(--ease-out) 500ms forwards;
+  }
+
+  /* Stage 2 — geometry draws itself */
+  .hv-draw {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+    animation: hv-draw 1700ms cubic-bezier(0.62, 0, 0.3, 1) forwards;
+  }
+
+  .hv-draw--1 { animation-delay: 700ms; }
+  .hv-draw--2 { animation-delay: 1000ms; }
+  .hv-draw--3 { animation-delay: 1350ms; }
+  .hv-draw--4 { animation-delay: 1550ms; }
+  .hv-draw--5 { animation-delay: 1750ms; }
+
+  /* Stage 3 — links extend outwards, turning the drawing into a network */
+  .hv-link {
+    stroke-dasharray: 200;
+    stroke-dashoffset: 200;
+    animation: hv-draw 700ms var(--ease-out) forwards;
+  }
+
+  .hv-link--1 { animation-delay: 2300ms; }
+  .hv-link--2 { animation-delay: 2420ms; }
+  .hv-link--3 { animation-delay: 2540ms; }
+  .hv-link--4 { animation-delay: 2660ms; }
+  .hv-link--5 { animation-delay: 2780ms; }
+  .hv-link--6 { animation-delay: 2900ms; }
+
+  /* Stage 4 — nodes settle into place */
+  .hv-node {
+    opacity: 0;
+    transform: scale(0.6);
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: hv-node-in 600ms var(--ease-out) forwards;
+  }
+
+  .hv-node--1 { animation-delay: 2900ms; }
+  .hv-node--2 { animation-delay: 3020ms; }
+  .hv-node--3 { animation-delay: 3140ms; }
+  .hv-node--4 { animation-delay: 3260ms; }
+  .hv-node--5 { animation-delay: 3380ms; }
+  .hv-node--6 { animation-delay: 3500ms; }
+
+  /* A slow breathing ring — the only element that keeps moving indefinitely, and
+     it is a 1px stroke at low opacity. */
+  .hv-node__ring {
+    animation: hv-ring 3800ms ease-in-out infinite;
+  }
+
+  .hv-node--1 .hv-node__ring { animation-delay: 4200ms; }
+  .hv-node--2 .hv-node__ring { animation-delay: 4500ms; }
+  .hv-node--3 .hv-node__ring { animation-delay: 4800ms; }
+  .hv-node--4 .hv-node__ring { animation-delay: 5100ms; }
+  .hv-node--5 .hv-node__ring { animation-delay: 5400ms; }
+  .hv-node--6 .hv-node__ring { animation-delay: 5700ms; }
+
+  /* Stage 5 — the mark resolves */
+  .hv-core {
+    opacity: 0;
+    transform: scale(0.9);
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: hv-node-in 700ms var(--ease-out) 3700ms forwards;
+  }
+
+  .hv-dims,
+  .hv-dims__label {
+    opacity: 0;
+    animation: hv-fade 600ms var(--ease-out) 4400ms forwards;
+  }
+
+  /* Measurement rule: one slow pass, then it leaves. */
+  .hv-sweep {
+    opacity: 0;
+    animation: hv-sweep 4600ms cubic-bezier(0.4, 0, 0.2, 1) 4700ms forwards;
+  }
+
+  /* Data pulses travelling outward, starting once the network exists. */
+  .hv-pulses {
+    opacity: 1;
+  }
+
+  .hv-pulse {
+    stroke-dasharray: 3 190;
+    stroke-dashoffset: 193;
+    animation: hv-pulse 3200ms linear infinite;
+  }
+
+  .hv-pulse--1 { animation-delay: 5000ms; }
+  .hv-pulse--2 { animation-delay: 5300ms; }
+  .hv-pulse--3 { animation-delay: 5600ms; }
+  .hv-pulse--4 { animation-delay: 5900ms; }
+  .hv-pulse--5 { animation-delay: 6200ms; }
+  .hv-pulse--6 { animation-delay: 6500ms; }
+}
+
+@media (min-width: 1500px) {
+  .hero-viz {
+    max-width: 720px;
+  }
+}
+
+/* --- Keyframes ------------------------------------------------------------ */
+
+@keyframes hv-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hv-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes hv-node-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes hv-ring {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(1.32); }
+}
+
+@keyframes hv-pulse {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes hv-sweep {
+  0% { transform: translateX(0); opacity: 0; }
+  10% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateX(760px); opacity: 0; }
+}
+
+/* The ring scales about the node centre. */
+.hv-node__ring {
+  transform-box: fill-box;
+  transform-origin: center;
+}

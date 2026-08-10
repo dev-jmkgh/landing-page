@@ -18,6 +18,7 @@
  * Usage: node scripts/prepare-work-dir.mjs <dev|build>
  */
 import { readFileSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { Socket } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,7 +44,43 @@ function readPreviousMode() {
   }
 }
 
+/**
+ * Is something already listening on the dev port?
+ *
+ * A production build clears `.next`, and doing that underneath a live `next dev`
+ * corrupts it — the dev server then throws "Could not find the module … in the React
+ * Client Manifest", "__webpack_modules__ is not a function" and missing-chunk errors
+ * that look like bundler bugs rather than a stomped cache. Refusing to build is far
+ * kinder than silently breaking a running server.
+ *
+ * Only relevant when the directory is currently in dev mode: `npm start` also uses
+ * port 3000, but it serves `out/` and does not care about `.next`.
+ */
+function devPortInUse(port = 3000) {
+  return new Promise((resolve) => {
+    const socket = new Socket();
+    const done = (result) => {
+      socket.destroy();
+      resolve(result);
+    };
+    socket.setTimeout(400);
+    socket.once('connect', () => done(true));
+    socket.once('timeout', () => done(false));
+    socket.once('error', () => done(false));
+    socket.connect(port, '127.0.0.1');
+  });
+}
+
 const previous = readPreviousMode();
+
+if (mode === 'build' && previous === 'dev' && (await devPortInUse())) {
+  console.error(
+    '\n[prepare-work-dir] A dev server appears to be running on port 3000.\n' +
+      '  Building now would clear .next underneath it and break that server.\n' +
+      '  Stop `npm run dev` first, then build again.\n',
+  );
+  process.exit(1);
+}
 
 if (previous && previous !== mode) {
   console.log(

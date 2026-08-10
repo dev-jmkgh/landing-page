@@ -1,0 +1,253 @@
+/* ===========================================================================
+   JMK technical visualisation system
+   ---------------------------------------------------------------------------
+   The shared animation vocabulary used by every page visual. Each element opts in
+   with a class and sets its own `--tv-delay`, so the choreography is data-driven
+   from the spec rather than hard-coded per page.
+
+   As with the hero, the FINISHED state is the default and animation is added only
+   under `prefers-reduced-motion: no-preference` — a reduced-motion visitor sees the
+   completed drawing, never a blank frame.
+   =========================================================================== */
+
+.tv {
+  width: 100%;
+}
+
+.tv__caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-on-dark-muted);
+}
+
+.tv__frame {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background:
+    radial-gradient(120% 100% at 15% 0%, rgba(30, 69, 111, 0.5), transparent 62%),
+    linear-gradient(155deg, rgba(16, 41, 70, 0.9), rgba(5, 15, 28, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: var(--glass-shadow);
+}
+
+.tv__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* --- Type inside the drawing --------------------------------------------- */
+
+.tv-node__label {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.tv-core__word {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  fill: #ffffff;
+}
+
+.tv-core__sub {
+  font-family: var(--font-sans);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  fill: rgba(214, 226, 240, 0.75);
+}
+
+.tv-dims__label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  fill: rgba(217, 165, 74, 0.95);
+}
+
+/* --- Finished state ------------------------------------------------------- */
+
+.tv-grid,
+.tv-frame,
+.tv-construct,
+.tv-nodes,
+.tv-core,
+.tv-dims,
+.tv-dims__label {
+  opacity: 1;
+}
+
+.tv-draw,
+.tv-link {
+  stroke-dashoffset: 0;
+}
+
+.tv-node,
+.tv-core {
+  transform: none;
+}
+
+/* Motion-only layers: absent rather than frozen when motion is reduced. */
+.tv-pulses,
+.tv-sweep,
+.tv-node__ring {
+  opacity: 0;
+}
+
+.tv-node,
+.tv-core,
+.tv-node__ring {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* --- Animated build ------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .tv-grid {
+    animation: tv-fade 900ms var(--ease-out) both;
+  }
+
+  .tv-frame {
+    opacity: 0;
+    animation: tv-fade 700ms var(--ease-out) 500ms forwards;
+  }
+
+  /* Paths carry pathLength="1", so a dash of 1 covers the whole outline whatever its
+     real length — every line takes the same time to draw. */
+  .tv-draw {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: tv-draw 1700ms cubic-bezier(0.62, 0, 0.3, 1) var(--tv-delay, 700ms) forwards;
+  }
+
+  /* Construction lines keep their own dash pattern, so they fade rather than draw. */
+  .tv-construct {
+    opacity: 0;
+    animation: tv-fade 900ms var(--ease-out) var(--tv-delay, 700ms) forwards;
+  }
+
+  .tv-link {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: tv-draw 700ms var(--ease-out) var(--tv-delay, 2300ms) forwards;
+  }
+
+  .tv-node {
+    opacity: 0;
+    transform: scale(0.6);
+    animation: tv-node-in 600ms var(--ease-out) var(--tv-delay, 2900ms) forwards;
+  }
+
+  .tv-node__ring {
+    animation: tv-ring 3800ms ease-in-out var(--tv-delay, 4200ms) infinite;
+  }
+
+  .tv-core {
+    opacity: 0;
+    transform: scale(0.9);
+    animation: tv-node-in 700ms var(--ease-out) 3700ms forwards;
+  }
+
+  .tv-dims,
+  .tv-dims__label {
+    opacity: 0;
+    animation: tv-fade 600ms var(--ease-out) 4400ms forwards;
+  }
+
+  .tv-sweep {
+    opacity: 0;
+    animation: tv-sweep 4600ms cubic-bezier(0.4, 0, 0.2, 1) 4700ms forwards;
+  }
+
+  .tv-pulses {
+    opacity: 1;
+  }
+
+  /* A short lit segment travelling the length of the connector. */
+  .tv-pulse {
+    stroke-dasharray: 0.07 1;
+    stroke-dashoffset: 1.07;
+    animation: tv-draw 3200ms linear var(--tv-delay, 5000ms) infinite;
+  }
+}
+
+/* --- Keyframes ------------------------------------------------------------ */
+
+@keyframes tv-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes tv-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes tv-node-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tv-ring {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.3); }
+}
+
+/* `--tv-travel` is in viewBox units, set from the spec width by the renderer, so a
+   wider drawing still gets a sweep that clears the whole frame. */
+@keyframes tv-sweep {
+  0% { transform: translateX(0); opacity: 0; }
+  10% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateX(var(--tv-travel, 720px)); opacity: 0; }
+}
+
+/* --- Page hero with a visual ---------------------------------------------
+   The vertical rhythm moves from `.page-hero__inner` to the grid, so the drawing
+   sits inside the same padded band as the copy instead of hanging off the bottom
+   edge of the section on narrow screens.                                      */
+
+.page-hero__grid {
+  display: grid;
+  gap: clamp(2rem, 4vw, 3.5rem);
+  align-items: center;
+  grid-template-columns: 1fr;
+  padding-block: clamp(2.5rem, 6vw, 4.5rem);
+}
+
+.page-hero__grid .page-hero__inner {
+  padding-block: 0;
+}
+
+@media (min-width: 1100px) {
+  .page-hero__grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
+  }
+
+  /* Only widen the copy once it has a column of its own to sit in. */
+  .page-hero__grid .page-hero__inner {
+    max-width: none;
+  }
+}
+
+.page-hero__visual {
+  max-width: 560px;
+  margin-inline-start: auto;
+  width: 100%;
+}
+
+/* Below the split, the drawing reads better centred under the copy. */
+@media (max-width: 1099px) {
+  .page-hero__visual {
+    margin-inline: auto;
+  }
+}

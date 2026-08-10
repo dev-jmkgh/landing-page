@@ -7,6 +7,7 @@ import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { groupSectors, verticals } from '@/lib/content/business';
+import { businessVisual } from '@/lib/content/visuals';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
 
 export const metadata: Metadata = buildMetadata({
@@ -34,6 +35,7 @@ export default function BusinessPage() {
         title="One group. Multiple industries. Unlimited possibilities."
         intro="Three service verticals form the core of JMK Global Holdings, supported by group activity in exports, agriculture, renewable energy and real estate."
         meta={verticals.map((vertical) => vertical.name)}
+        visual={businessVisual}
       />
 
       {/* ------------------------------------------------------------ Verticals */}

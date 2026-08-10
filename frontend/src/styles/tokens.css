@@ -97,7 +97,7 @@
   --gutter: clamp(1.25rem, 4vw, 2.5rem);
 
   /* --- Structure --------------------------------------------------------- */
-  --container-max: 1200px;
+  --container-max: 1280px;
   --container-narrow: 820px;
   --radius-xs: 2px;
   --radius-sm: 4px;
