@@ -41,6 +41,13 @@ jobs:
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
+        with:
+          # Creates the Pages site on the first run instead of failing with
+          # "Get Pages site failed … verify that the repository has Pages enabled".
+          # Without this the workflow needs a manual visit to Settings ▸ Pages first;
+          # with it the deployment is self-contained. Requires the `pages: write`
+          # permission granted above.
+          enablement: true
 
       - name: Install dependencies
         working-directory: frontend
