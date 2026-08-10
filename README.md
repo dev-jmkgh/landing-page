@@ -357,8 +357,8 @@ Run from the repository root:
 | `npm run db:migrate` | Apply pending migrations |
 | `npm run db:seed` | Seed the admin user (+ dev sample data) |
 | `npm run hash:password -- "password"` | Generate a bcrypt hash |
-| `npm start` | Serve the **production build** locally — website (`:3000`) + API (`:5000`) |
-| `npm run start:web` / `npm run start:api` | One at a time |
+| `npm start` | **Builds both, then serves the production build** — website (`:3000`) + API (`:5000`) |
+| `npm run start:web` / `npm run start:api` | Serve one side without rebuilding |
 
 Frontend-only extras: `npm --prefix frontend run og:generate` regenerates the social card
 (it also runs automatically before every build).
@@ -371,9 +371,18 @@ npm start                  # http://localhost:3000  (API on :5000)
 
 `npm start` runs what a visitor gets, not the dev server: the static export in
 `frontend/out/` served by a dependency-free file server, plus the compiled API from
-`backend/dist/`. Anything missing is built first, so a fresh clone needs no separate build
-step; an existing build is reused, so repeat runs start immediately. After changing source,
-run `npm run build` before `npm start` — the export is pre-rendered and does not hot-reload.
+`backend/dist/`.
+
+It **rebuilds both sides every time**, so what you see is always the current source. The
+export is pre-rendered and does not hot-reload, so a stale build would silently show old
+code — the worse failure, because nothing on screen says the artifacts are older than the
+source. Use `npm run start:web` / `npm run start:api` to serve an existing build without
+rebuilding.
+
+Before building, it checks that ports 3000 and 5000 are free and stops immediately if
+they are not. That saves a minute when a dev server is already up, and more importantly
+protects it: `next build` clears the `.next` directory a running `next dev` reads from,
+and the errors that follow look like bundler bugs rather than a stomped cache.
 
 The static server mirrors the production host: `/about/` resolves to `about/index.html`,
 unknown paths return `404.html` with a real 404, and hashed `_next/static` assets are

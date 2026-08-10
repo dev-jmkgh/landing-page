@@ -11,7 +11,7 @@
     "build": "npm --prefix frontend run build && npm --prefix backend run build",
     "build:web": "npm --prefix frontend run build",
     "build:api": "npm --prefix backend run build",
-    "prestart": "node scripts/ensure-build.mjs",
+    "prestart": "node scripts/prestart.mjs",
     "start": "concurrently -n web,api -c cyan,magenta \"npm --prefix frontend run start\" \"npm --prefix backend run start\"",
     "start:web": "npm --prefix frontend run start --",
     "start:api": "npm --prefix backend run start",
