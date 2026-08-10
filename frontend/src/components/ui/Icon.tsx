@@ -150,6 +150,12 @@ const outline: Record<string, ReactNode> = {
       <path d="m11 6-6 6 6 6" />
     </>
   ),
+  arrowUp: (
+    <>
+      <path d="M12 19.5V5" />
+      <path d="m5.5 11.5 6.5-6.5 6.5 6.5" />
+    </>
+  ),
   external: (
     <>
       <path d="M14 3.5h6.5V10" />

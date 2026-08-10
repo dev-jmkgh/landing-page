@@ -3,6 +3,7 @@ import { EnquiryProvider } from '@/components/enquiry/EnquiryProvider';
 import { FloatingEnquiryButton } from '@/components/enquiry/EnquiryTrigger';
 import { SiteFooter } from '@/components/layout/SiteFooter';
 import { SiteHeader } from '@/components/layout/SiteHeader';
+import { BackToTopButton } from '@/components/ui/BackToTopButton';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { organizationJsonLd, webSiteJsonLd } from '@/lib/seo';
 
@@ -26,6 +27,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </main>
           <SiteFooter />
         </div>
+        <BackToTopButton />
         <FloatingEnquiryButton />
       </EnquiryProvider>
     </>
