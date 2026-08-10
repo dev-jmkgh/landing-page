@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="JMK Global Holdings">
+  <rect width="64" height="64" rx="12" fill="#0a1b2e"/>
+  <rect x="14" y="34" width="8" height="16" rx="1.5" fill="#ffffff"/>
+  <rect x="28" y="26" width="8" height="24" rx="1.5" fill="#ffffff" opacity="0.82"/>
+  <rect x="42" y="16" width="8" height="34" rx="1.5" fill="#c08b2e"/>
+</svg>

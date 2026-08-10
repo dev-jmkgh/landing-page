@@ -1,0 +1,7 @@
+User-Agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /admin
+
+Host: https://dev-jmkgh.github.io/landing-page
+Sitemap: https://dev-jmkgh.github.io/landing-page/sitemap.xml
