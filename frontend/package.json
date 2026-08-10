@@ -10,7 +10,7 @@
     "prebuild": "node scripts/prepare-work-dir.mjs build && node scripts/generate-og-image.mjs",
     "build": "next build",
     "og:generate": "node scripts/generate-og-image.mjs",
-    "start": "npx serve out -l 3000",
+    "start": "node scripts/serve-static.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },

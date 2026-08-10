@@ -327,10 +327,28 @@ Run from the repository root:
 | `npm run db:migrate` | Apply pending migrations |
 | `npm run db:seed` | Seed the admin user (+ dev sample data) |
 | `npm run hash:password -- "password"` | Generate a bcrypt hash |
-| `npm run start:api` | Run the compiled API |
+| `npm start` | Serve the **production build** locally — website (`:3000`) + API (`:5000`) |
+| `npm run start:web` / `npm run start:api` | One at a time |
 
 Frontend-only extras: `npm --prefix frontend run og:generate` regenerates the social card
 (it also runs automatically before every build).
+
+### Local demo of the real build
+
+```bash
+npm start                  # http://localhost:3000  (API on :5000)
+```
+
+`npm start` runs what a visitor gets, not the dev server: the static export in
+`frontend/out/` served by a dependency-free file server, plus the compiled API from
+`backend/dist/`. Anything missing is built first, so a fresh clone needs no separate build
+step; an existing build is reused, so repeat runs start immediately. After changing source,
+run `npm run build` before `npm start` — the export is pre-rendered and does not hot-reload.
+
+The static server mirrors the production host: `/about/` resolves to `about/index.html`,
+unknown paths return `404.html` with a real 404, and hashed `_next/static` assets are
+cached while HTML is revalidated. Serve a different port with
+`npm run start:web -- --port 4000`.
 
 ---
 

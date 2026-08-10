@@ -41,6 +41,14 @@ const nextConfig = {
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error'] } : false,
   },
+
+  /**
+   * `next dev` rejects cross-origin requests for its dev assets, which breaks the page
+   * when it is reached through a VS Code dev tunnel rather than localhost. Listing the
+   * tunnel host here keeps HMR and `/_next/*` working during a shared demo. Dev only —
+   * it has no effect on a production build.
+   */
+  allowedDevOrigins: ['*.devtunnels.ms'],
 };
 
 export default nextConfig;
