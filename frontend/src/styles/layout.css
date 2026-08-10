@@ -149,6 +149,50 @@
   justify-content: center;
 }
 
+/* ---------------------------------------------------------------------------
+   Section heading with a top-right action
+   ---------------------------------------------------------------------------
+   The action pins to the top of the row rather than centring against the heading
+   block, so it holds the corner however long the description runs. Below the
+   breakpoint it stacks under the heading and stretches, which is the only
+   arrangement that stays tappable on a narrow screen.
+   --------------------------------------------------------------------------- */
+
+.section-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+/* The heading already owns the section's bottom spacing; the row must not double it. */
+.section-bar .section-head {
+  margin-bottom: 0;
+  flex: 1 1 24rem;
+}
+
+.section-bar__action {
+  flex: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 719px) {
+  .section-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .section-bar__action {
+    justify-content: center;
+  }
+}
+
+/* Restore the gap the heading normally provides beneath itself. */
+.section-bar + * {
+  margin-top: clamp(2rem, 4vw, 3.25rem);
+}
+
 /* --- Grid helpers -------------------------------------------------------- */
 
 .grid {

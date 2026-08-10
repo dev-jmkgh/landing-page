@@ -1,5 +1,6 @@
 ﻿import { execute, query, queryOne, type RowDataPacket, type SqlParam } from '../../db/pool';
-import type { EnquiryStatus, ListQuery } from '../enquiries/enquiry.schema';
+import type { ListQuery } from '../enquiries/enquiry.schema';
+import type { ApplicationStatus } from './application.schema';
 
 export interface ApplicationRow extends RowDataPacket {
   id: number;
@@ -9,11 +10,15 @@ export interface ApplicationRow extends RowDataPacket {
   phone: string;
   position: string;
   message: string | null;
+  linkedin_url: string | null;
+  portfolio_url: string | null;
+  experience: string | null;
+  location: string | null;
   resume_filename: string | null;
   resume_original_name: string | null;
   resume_mime: string | null;
   resume_size: number | null;
-  status: EnquiryStatus;
+  status: ApplicationStatus;
   created_at: Date;
   updated_at: Date;
 }
@@ -26,11 +31,15 @@ export type ApplicationRecord = {
   phone: string;
   position: string;
   message: string | null;
+  linkedinUrl: string | null;
+  portfolioUrl: string | null;
+  experience: string | null;
+  location: string | null;
   resumeFilename: string | null;
   resumeOriginalName: string | null;
   resumeMime: string | null;
   resumeSize: number | null;
-  status: EnquiryStatus;
+  status: ApplicationStatus;
   createdAt: string;
   updatedAt: string;
 };
@@ -44,6 +53,10 @@ export function toRecord(row: ApplicationRow): ApplicationRecord {
     phone: row.phone,
     position: row.position,
     message: row.message,
+    linkedinUrl: row.linkedin_url,
+    portfolioUrl: row.portfolio_url,
+    experience: row.experience,
+    location: row.location,
     resumeFilename: row.resume_filename,
     resumeOriginalName: row.resume_original_name,
     resumeMime: row.resume_mime,
@@ -61,6 +74,10 @@ export type CreateApplicationData = {
   phone: string;
   position: string;
   message: string | null;
+  linkedinUrl: string | null;
+  portfolioUrl: string | null;
+  experience: string | null;
+  location: string | null;
   resumeFilename: string | null;
   resumeOriginalName: string | null;
   resumeMime: string | null;
@@ -73,9 +90,10 @@ export async function insertApplication(data: CreateApplicationData): Promise<nu
   const result = await execute(
     `INSERT INTO job_applications
        (reference, full_name, email, phone, position, message,
+        linkedin_url, portfolio_url, experience, location,
         resume_filename, resume_original_name, resume_mime, resume_size,
         ip_address, user_agent)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.reference,
       data.fullName,
@@ -83,6 +101,10 @@ export async function insertApplication(data: CreateApplicationData): Promise<nu
       data.phone,
       data.position,
       data.message,
+      data.linkedinUrl,
+      data.portfolioUrl,
+      data.experience,
+      data.location,
       data.resumeFilename,
       data.resumeOriginalName,
       data.resumeMime,
@@ -129,6 +151,7 @@ export type PaginatedApplications = {
 };
 
 const SELECT_COLUMNS = `id, reference, full_name, email, phone, position, message,
+        linkedin_url, portfolio_url, experience, location,
         resume_filename, resume_original_name, resume_mime, resume_size, status,
         created_at, updated_at`;
 
@@ -185,7 +208,7 @@ export async function findApplication(id: number): Promise<ApplicationRecord | n
 
 export async function updateApplicationStatus(
   id: number,
-  status: EnquiryStatus,
+  status: ApplicationStatus,
 ): Promise<ApplicationRecord | null> {
   const result = await execute('UPDATE job_applications SET status = ? WHERE id = ?', [status, id]);
   if (result.affectedRows === 0) return null;

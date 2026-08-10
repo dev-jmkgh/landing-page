@@ -16,6 +16,7 @@ import {
 } from '../applications/application.repository';
 import { listEnquiries, updateEnquiryStatus } from '../enquiries/enquiry.repository';
 import { listQuerySchema, statusUpdateSchema, type ListQuery } from '../enquiries/enquiry.schema';
+import { applicationStatusUpdateSchema } from '../applications/application.schema';
 import {
   authenticate,
   clearSessionCookies,
@@ -146,10 +147,10 @@ adminRouter.patch(
   '/applications/:id/status',
   requireAuth,
   requireCsrf,
-  validateBody(statusUpdateSchema),
+  validateBody(applicationStatusUpdateSchema),
   asyncHandler(async (request, response) => {
     const id = parseId(request.params.id);
-    const { status } = request.body as z.infer<typeof statusUpdateSchema>;
+    const { status } = request.body as z.infer<typeof applicationStatusUpdateSchema>;
 
     const updated = await updateApplicationStatus(id, status);
     if (!updated) throw notFound('Application not found.');

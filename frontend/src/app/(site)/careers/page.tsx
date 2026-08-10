@@ -40,12 +40,20 @@ export default function CareersPage() {
       {/* ------------------------------------------------------ Open positions */}
       <section className="section">
         <div className="container">
+          {/* One shared Apply Now, aligned to the top right of the section. The
+              form's position select is where the applicant chooses the role. */}
           <Reveal>
-            <SectionHeading
-              eyebrow="Current Opportunities"
-              title="Roles we are hiring for"
-              description="Grouped by discipline. Apply through the form below and mention the role you are interested in."
-            />
+            <div className="section-bar">
+              <SectionHeading
+                eyebrow="Current Opportunities"
+                title="Roles we are hiring for"
+                description="Grouped by discipline. Apply once using the form below and choose the role you are interested in."
+              />
+              <a className="btn btn--primary btn--lg section-bar__action" href="#apply">
+                Apply Now
+                <Icon name="arrowRight" size={16} />
+              </a>
+            </div>
           </Reveal>
 
           <div className="card-grid card-grid--3">
@@ -61,7 +69,7 @@ export default function CareersPage() {
                   <ul className="role-list">
                     {group.roles.map((role) => (
                       <li className="role-list__item" key={role}>
-                        <span>{role}</span>
+                        <span className="role-list__name">{role}</span>
                       </li>
                     ))}
                   </ul>
@@ -99,7 +107,7 @@ export default function CareersPage() {
               <SectionHeading
                 eyebrow="Apply"
                 title="Send us your application"
-                description="Complete the form and attach your resume. Our HR team reviews every application and will contact you if there is a suitable match."
+                description="Complete the form, choose the position you are applying for and attach your resume. Our team reviews every application."
               />
 
               <div className="contact-block">

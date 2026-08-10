@@ -7,6 +7,7 @@ import { globalLimiter } from './middleware/rateLimit';
 import { corsMiddleware, securityHeaders } from './middleware/security';
 import { adminRouter } from './modules/admin/admin.routes';
 import { applicationRouter } from './modules/applications/application.routes';
+import { diagnosticsRouter } from './modules/diagnostics/diagnostics.routes';
 import { enquiryRouter } from './modules/enquiries/enquiry.routes';
 import { logger } from './utils/logger';
 
@@ -48,8 +49,12 @@ export function createApp(): Express {
     });
   });
 
+  app.use('/api/diagnostics', diagnosticsRouter);
   app.use('/api/enquiries', enquiryRouter);
   app.use('/api/applications', applicationRouter);
+  // The careers form posts to /api/careers/apply, which reads better from the client
+  // and matches the page it comes from. Same router, so there is one implementation.
+  app.use('/api/careers', applicationRouter);
   app.use('/api/admin', adminRouter);
 
   app.use(notFoundHandler);

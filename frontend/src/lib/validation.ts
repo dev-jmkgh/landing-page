@@ -60,6 +60,19 @@ export function validateSelection(value: string, label: string): string | null {
   return value.trim().length === 0 ? `Please choose ${label}.` : null;
 }
 
+/**
+ * Optional profile link. Empty is fine; anything present must be a full http(s) URL —
+ * the same rule the API applies, so the two never disagree.
+ */
+export function validateOptionalUrl(value: string, label: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > 255) return `That ${label} link is too long.`;
+  return /^https?:\/\/[^\s]+\.[^\s]+$/i.test(trimmed)
+    ? null
+    : `Please enter a full ${label} URL starting with https://`;
+}
+
 export function validateResume(file: File | null, required = false): string | null {
   if (!file) return required ? 'Please attach your resume.' : null;
 

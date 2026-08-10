@@ -41,15 +41,19 @@ const schema = z.object({
   SMTP_FROM_EMAIL: z.string().default(''),
 
   /**
-   * Where website enquiries are delivered. This is the canonical name; CONTACT_EMAIL
-   * is accepted as a legacy alias so existing deployments keep working. No address is
-   * hard-coded as a default — see `resolveRecipient` below.
+   * The single source of truth for administrative notification recipients — website
+   * enquiries and career applications alike. Comma-separated; every address receives
+   * every notification. No address is hard-coded as a default.
    */
-  ENQUIRY_RECEIVER_EMAIL: z.string().default(''),
-  CONTACT_EMAIL: z.string().default(''),
-  /** Optional separate inbox for career applications. */
-  CAREERS_EMAIL: z.string().default(''),
+  ADMIN_EMAILS: z.string().default(''),
 
+  /**
+   * Sign-in identity for the fallback admin account. This is a *credential*, not a
+   * notification recipient — it is deliberately not named ADMIN_EMAIL any more,
+   * because one letter of difference from ADMIN_EMAILS is too easy to misread.
+   * ADMIN_EMAIL is still accepted for existing deployments.
+   */
+  ADMIN_LOGIN_EMAIL: z.string().default(''),
   ADMIN_EMAIL: z.string().default(''),
   ADMIN_PASSWORD_HASH: z.string().default(''),
   JWT_SECRET: z.string().default(''),
@@ -103,36 +107,58 @@ if (isProduction && !raw.ADMIN_PASSWORD_HASH && !raw.DATABASE_URL && !raw.DB_PAS
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
 
 /**
- * Picks the first configured, syntactically valid address from a list of candidates.
+ * Parses ADMIN_EMAILS into the list of administrative notification recipients.
  *
- * Mail recipients are deliberately never hard-coded: an address baked into the source
- * would silently keep delivering to the wrong inbox after the business changes it.
- * Returns an empty string when nothing is configured — the mailer then logs and skips
- * rather than sending somewhere unintended.
+ * Recipients are deliberately never hard-coded: an address baked into the source would
+ * silently keep delivering to the wrong inbox after the business changes it. Invalid
+ * entries are dropped with a warning rather than failing startup, so one typo in a list
+ * of four cannot take the whole API down — but an empty result is reported loudly,
+ * because it means notifications will be skipped.
  */
-function resolveRecipient(candidates: string[], label: string): string {
-  for (const candidate of candidates) {
-    const value = candidate.trim();
-    if (!value) continue;
-    if (!EMAIL_PATTERN.test(value)) {
-      console.warn(`[config] ${label} is not a valid email address and was ignored.`);
+function parseAdminEmails(value: string): string[] {
+  const seen = new Set<string>();
+  const valid: string[] = [];
+
+  for (const entry of value.split(',')) {
+    const address = entry.trim();
+    if (!address) continue;
+
+    if (!EMAIL_PATTERN.test(address)) {
+      console.warn(`[config] ADMIN_EMAILS contains an invalid address and it was ignored: ${address}`);
       continue;
     }
-    return value;
+
+    const key = address.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    valid.push(address);
   }
-  return '';
+
+  return valid;
 }
 
-const enquiryReceiver = resolveRecipient(
-  [raw.ENQUIRY_RECEIVER_EMAIL, raw.CONTACT_EMAIL, raw.SMTP_USER],
-  'ENQUIRY_RECEIVER_EMAIL',
-);
+const adminEmails = parseAdminEmails(raw.ADMIN_EMAILS);
 
-if (!enquiryReceiver) {
-  console.warn(
-    '[config] No enquiry recipient configured. Set ENQUIRY_RECEIVER_EMAIL in .env, ' +
-      'or enquiry notifications will be skipped (submissions are still stored).',
+if (adminEmails.length === 0) {
+  console.error(
+    '[config] ADMIN_EMAILS is empty or contains no valid address. Enquiries and career ' +
+      'applications will still be validated and stored, but no notification will be sent. ' +
+      'Set ADMIN_EMAILS in the backend .env file, e.g. ADMIN_EMAILS=info@example.com,hr@example.com',
   );
+}
+
+/**
+ * These configured recipients were replaced by the single ADMIN_EMAILS list. A
+ * deployment still carrying them would otherwise lose notifications with no clue why,
+ * so name them explicitly instead of ignoring them in silence.
+ */
+for (const legacy of ['ENQUIRY_RECEIVER_EMAIL', 'CONTACT_EMAIL', 'CAREERS_EMAIL'] as const) {
+  if ((process.env[legacy] ?? '').trim()) {
+    console.error(
+      `[config] ${legacy} is no longer used and its value is being ignored. ` +
+        'Move the address into ADMIN_EMAILS (comma-separated) and delete this line from .env.',
+    );
+  }
 }
 
 function parseDatabaseUrl(url: string) {
@@ -183,20 +209,21 @@ export const config = {
     fromName: raw.SMTP_FROM_NAME,
     // Gmail rewrites the envelope sender to the authenticated account unless the
     // address is a verified alias, so defaulting to SMTP_USER matches reality.
-    fromEmail: raw.SMTP_FROM_EMAIL.trim() || raw.SMTP_USER || enquiryReceiver,
+    fromEmail: raw.SMTP_FROM_EMAIL.trim() || raw.SMTP_USER || (adminEmails[0] ?? ''),
     /** Email is optional in development; the API stays fully functional without it. */
     enabled: Boolean(raw.SMTP_USER && raw.SMTP_PASSWORD),
   },
 
   mail: {
-    /** Enquiry notifications. Configured, never hard-coded. */
-    enquiryReceiver: enquiryReceiver,
-    /** Career applications; falls back to the enquiry receiver. */
-    careersReceiver: resolveRecipient([raw.CAREERS_EMAIL], 'CAREERS_EMAIL') || enquiryReceiver,
+    /**
+     * Everyone who receives administrative notifications — enquiries and career
+     * applications both. This is the only recipient configuration in the project.
+     */
+    adminRecipients: adminEmails,
   },
 
   admin: {
-    email: raw.ADMIN_EMAIL.trim().toLowerCase(),
+    email: (raw.ADMIN_LOGIN_EMAIL.trim() || raw.ADMIN_EMAIL.trim()).toLowerCase(),
     passwordHash: raw.ADMIN_PASSWORD_HASH,
     jwtSecret: raw.JWT_SECRET || 'development-only-insecure-secret-change-me',
     sessionTtlHours: raw.SESSION_TTL_HOURS,

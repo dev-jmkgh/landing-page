@@ -1,12 +1,19 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, api, API_NOT_CONFIGURED_MESSAGE, isApiConfigured } from '@/lib/api';
-import { FIELD_LIMITS, RESUME_UPLOAD, SUCCESS_MESSAGES } from '@/lib/constants';
+import {
+  ApiError,
+  api,
+  type EmailStatus,
+  API_NOT_CONFIGURED_MESSAGE,
+  isApiConfigured,
+} from '@/lib/api';
+import { EXPERIENCE_LEVELS, FIELD_LIMITS, RESUME_UPLOAD } from '@/lib/constants';
 import { openPositions } from '@/lib/content/careers';
 import {
   validateEmail,
   validateName,
+  validateOptionalUrl,
   validatePhone,
   validateResume,
   validateSelection,
@@ -33,6 +40,10 @@ type FormState = {
   phone: string;
   position: string;
   message: string;
+  experience: string;
+  location: string;
+  linkedinUrl: string;
+  portfolioUrl: string;
   website: string;
 };
 
@@ -42,6 +53,10 @@ const EMPTY: FormState = {
   phone: '',
   position: '',
   message: '',
+  experience: '',
+  location: '',
+  linkedinUrl: '',
+  portfolioUrl: '',
   website: '',
 };
 
@@ -49,19 +64,24 @@ type Errors = Partial<Record<keyof FormState | 'resume', string>>;
 
 function validateAll(values: FormState, resume: File | null): Errors {
   const errors: Errors = {};
-  const fullName = validateName(values.fullName);
-  const email = validateEmail(values.email);
-  const phone = validatePhone(values.phone);
-  const position = validateSelection(values.position, 'the position you are applying for');
-  const resumeError = validateResume(resume, true);
 
-  if (fullName) errors.fullName = fullName;
-  if (email) errors.email = email;
-  if (phone) errors.phone = phone;
-  if (position) errors.position = position;
-  if (resumeError) errors.resume = resumeError;
-  if (values.message.trim().length > FIELD_LIMITS.message.max)
-    errors.message = `Message must be ${FIELD_LIMITS.message.max} characters or fewer.`;
+  const checks: [keyof FormState | 'resume', string | null][] = [
+    ['fullName', validateName(values.fullName)],
+    ['email', validateEmail(values.email)],
+    ['phone', validatePhone(values.phone)],
+    ['position', validateSelection(values.position, 'the position you are applying for')],
+    ['resume', validateResume(resume, true)],
+    ['linkedinUrl', validateOptionalUrl(values.linkedinUrl, 'LinkedIn')],
+    ['portfolioUrl', validateOptionalUrl(values.portfolioUrl, 'portfolio')],
+  ];
+
+  for (const [field, message] of checks) {
+    if (message) errors[field] = message;
+  }
+
+  if (values.message.trim().length > FIELD_LIMITS.message.max) {
+    errors.message = `Cover letter must be ${FIELD_LIMITS.message.max} characters or fewer.`;
+  }
 
   return errors;
 }
@@ -73,6 +93,12 @@ export function ApplicationForm() {
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [formError, setFormError] = useState<string | null>(null);
+  /** Kept for the success panel, which greets the applicant after the form is cleared. */
+  const [submitted, setSubmitted] = useState<{
+    name: string;
+    position: string;
+    emailStatus: EmailStatus | null;
+  } | null>(null);
 
   const renderedAt = useRef<number>(Date.now());
   const abortRef = useRef<AbortController | null>(null);
@@ -99,6 +125,9 @@ export function ApplicationForm() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // A second submit while the first is in flight would create a duplicate record.
+    if (pending) return;
+
     setFormError(null);
 
     const nextErrors = validateAll(values, resume);
@@ -122,6 +151,10 @@ export function ApplicationForm() {
     formData.append('phone', values.phone.trim());
     formData.append('position', values.position);
     formData.append('message', values.message.trim());
+    formData.append('experience', values.experience);
+    formData.append('location', values.location.trim());
+    formData.append('linkedinUrl', values.linkedinUrl.trim());
+    formData.append('portfolioUrl', values.portfolioUrl.trim());
     formData.append('website', values.website);
     formData.append('renderedAt', String(renderedAt.current));
     if (recaptchaToken) formData.append('recaptchaToken', recaptchaToken);
@@ -135,7 +168,12 @@ export function ApplicationForm() {
     setStatus('idle');
 
     try {
-      await api.submitApplication(formData, controller.signal);
+      const result = await api.submitApplication(formData, controller.signal);
+      setSubmitted({
+        name: values.fullName.trim(),
+        position: values.position,
+        emailStatus: result?.emailStatus ?? null,
+      });
       setStatus('success');
       setValues(EMPTY);
       setResume(null);
@@ -162,15 +200,41 @@ export function ApplicationForm() {
     }
   }
 
-  if (status === 'success') {
+  if (status === 'success' && submitted) {
     return (
-      <div className="form">
-        <FormAlert variant="success">
-          <strong>{SUCCESS_MESSAGES.application}</strong>
-        </FormAlert>
-        <button type="button" className="btn btn--outline" onClick={() => setStatus('idle')}>
-          Submit another application
-        </button>
+      <div className="apply-success">
+        <span className="apply-success__mark" aria-hidden="true">
+          <Icon name="check" size={26} />
+        </span>
+        <h3 className="apply-success__title">Application Received</h3>
+        <p className="apply-success__lead">Thank you, {submitted.name}.</p>
+        <p className="apply-success__body">
+          Your application for <strong>{submitted.position}</strong> has been received
+          successfully. We appreciate your interest in JMK Global Holdings.
+        </p>
+        {/* Say so plainly when the confirmation email could not be delivered. The
+            application itself is already stored, so this is a note, not an error. */}
+        {submitted.emailStatus === 'failed' || submitted.emailStatus === 'partial' ? (
+          <p className="apply-success__note">
+            We could not send your confirmation email, but your application and resume are
+            safely stored and our team can see them.
+          </p>
+        ) : null}
+        <div className="apply-success__actions">
+          <a className="btn btn--primary" href="#roles">
+            Back to Careers
+          </a>
+          <button
+            type="button"
+            className="btn btn--outline"
+            onClick={() => {
+              setStatus('idle');
+              setSubmitted(null);
+            }}
+          >
+            Submit another application
+          </button>
+        </div>
       </div>
     );
   }
@@ -235,25 +299,72 @@ export function ApplicationForm() {
         />
       </div>
 
+      <div className="form-row form-row--2">
+        <SelectField
+          label="Years of Experience"
+          name="experience"
+          value={values.experience}
+          options={[...EXPERIENCE_LEVELS]}
+          onChange={setField('experience')}
+          error={errors.experience}
+          placeholder="Select (optional)"
+        />
+        <TextField
+          label="Current Location"
+          name="location"
+          value={values.location}
+          onChange={setField('location')}
+          error={errors.location}
+          autoComplete="address-level2"
+          maxLength={120}
+          placeholder="City (optional)"
+        />
+      </div>
+
+      <div className="form-row form-row--2">
+        <TextField
+          label="LinkedIn URL"
+          name="linkedinUrl"
+          type="url"
+          value={values.linkedinUrl}
+          onChange={setField('linkedinUrl')}
+          error={errors.linkedinUrl}
+          maxLength={255}
+          placeholder="https://www.linkedin.com/in/… (optional)"
+        />
+        <TextField
+          label="Portfolio URL"
+          name="portfolioUrl"
+          type="url"
+          value={values.portfolioUrl}
+          onChange={setField('portfolioUrl')}
+          error={errors.portfolioUrl}
+          maxLength={255}
+          placeholder="https://… (optional)"
+        />
+      </div>
+
       <TextAreaField
-        label="Message"
+        label="Cover Letter"
         name="message"
         value={values.message}
         onChange={setField('message')}
         error={errors.message}
         rows={4}
         maxLength={FIELD_LIMITS.message.max}
-        placeholder="Briefly tell us about your experience (optional)."
+        placeholder="Tell us why you are a good fit for this role."
       />
 
       <FileField
-        label="Resume"
+        label="Resume / CV"
         name="resume"
         file={resume}
         accept={RESUME_UPLOAD.accept}
         onChange={handleResumeChange}
         error={errors.resume}
         required
+        disabled={pending}
+        uploading={pending}
         hint={`${RESUME_UPLOAD.acceptedExtensions.join(', ')} — up to ${RESUME_UPLOAD.maxSizeLabel}`}
       />
 
@@ -266,7 +377,7 @@ export function ApplicationForm() {
       />
 
       {canSubmit ? (
-        <SubmitButton pending={pending} pendingLabel="Sending application…">
+        <SubmitButton pending={pending} pendingLabel="Submitting Application…">
           Submit Application
         </SubmitButton>
       ) : (

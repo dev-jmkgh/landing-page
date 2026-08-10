@@ -59,7 +59,7 @@ compiles and every route was exported.
 
 - [ ] `GET /api/health` returns `ok`
 - [ ] Submissions appear in `enquiries` / `job_applications`
-- [ ] `info@jmkglobalholdings.com` receives the notification
+- [ ] `developer.jmkgh@gmail.com` receives the notification
 - [ ] The submitter receives the auto-reply
 - [ ] With SMTP misconfigured, the submission still saves and the user still sees success
 - [ ] `notification_sent` / `autoreply_sent` reflect what really happened

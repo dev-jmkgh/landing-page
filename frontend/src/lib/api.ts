@@ -180,9 +180,24 @@ export type EnquiryPayload = {
   recaptchaToken?: string;
 };
 
-export type EnquiryResponse = { reference: string };
+/**
+ * How the notification emails actually went.
+ *
+ * The submission itself is stored before any email is attempted, so none of these
+ * values means the enquiry or application was lost — they describe delivery only.
+ */
+export type EmailStatus = 'sent' | 'partial' | 'pending' | 'failed' | 'skipped';
 
-export type ApplicationResponse = { reference: string };
+export type SubmissionResponse = {
+  reference: string;
+  /** Server-authored confirmation. Reflects what really happened to the email. */
+  message?: string;
+  emailStatus?: EmailStatus;
+};
+
+export type EnquiryResponse = SubmissionResponse;
+
+export type ApplicationResponse = SubmissionResponse;
 
 export const api = {
   health: () => request<{ status: string }>('/health'),
@@ -191,7 +206,7 @@ export const api = {
     request<EnquiryResponse>('/enquiries', { method: 'POST', body: payload, signal }),
 
   submitApplication: (formData: FormData, signal?: AbortSignal) =>
-    request<ApplicationResponse>('/applications', { method: 'POST', body: formData, signal }),
+    request<ApplicationResponse>('/careers/apply', { method: 'POST', body: formData, signal }),
 };
 
 /* -------------------------------------------------------------------------- */
@@ -199,6 +214,9 @@ export const api = {
 /* -------------------------------------------------------------------------- */
 
 export type EnquiryStatus = 'new' | 'contacted' | 'in_progress' | 'closed';
+export type ApplicationStatus = 'new' | 'reviewing' | 'shortlisted' | 'rejected' | 'hired';
+/** The list filter serves both tables, so it accepts either vocabulary. */
+export type RecordStatus = EnquiryStatus | ApplicationStatus;
 
 export type AdminEnquiry = {
   id: number;
@@ -223,8 +241,13 @@ export type AdminApplication = {
   phone: string;
   position: string;
   message: string | null;
+  linkedinUrl: string | null;
+  portfolioUrl: string | null;
+  experience: string | null;
+  location: string | null;
   resumeFilename: string | null;
-  status: EnquiryStatus;
+  resumeOriginalName: string | null;
+  status: ApplicationStatus;
   createdAt: string;
   updatedAt: string;
 };
@@ -238,7 +261,7 @@ export type Paginated<T> = {
 };
 
 export type AdminListQuery = {
-  status?: EnquiryStatus | 'all';
+  status?: RecordStatus | 'all';
   q?: string;
   page?: number;
   pageSize?: number;
@@ -298,7 +321,7 @@ export const adminApi = {
       signal,
     }),
 
-  updateApplicationStatus: (id: number, status: EnquiryStatus) =>
+  updateApplicationStatus: (id: number, status: ApplicationStatus) =>
     request<AdminApplication>(`/admin/applications/${id}/status`, {
       method: 'PATCH',
       body: { status },

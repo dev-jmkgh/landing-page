@@ -384,6 +384,24 @@
   color: var(--success-600);
 }
 
+/* Application review states. */
+.status-badge--reviewing {
+  background-color: var(--warning-050);
+  color: var(--warning-600);
+}
+.status-badge--shortlisted {
+  background-color: var(--accent-050);
+  color: var(--accent-700);
+}
+.status-badge--rejected {
+  background-color: var(--danger-050);
+  color: var(--danger-600);
+}
+.status-badge--hired {
+  background-color: var(--success-050);
+  color: var(--success-600);
+}
+
 /* --- Forms --------------------------------------------------------------- */
 
 .form {
@@ -567,11 +585,62 @@
   opacity: 0;
 }
 
+.file-field--filled {
+  border-style: solid;
+  border-color: var(--accent-200);
+  background-color: var(--accent-050);
+}
+
+.file-field__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 8rem;
+}
+
 .file-field__name {
   font-size: var(--text-sm);
-  color: var(--ink-700);
+  font-weight: 600;
+  color: var(--ink-900);
   overflow-wrap: anywhere;
   min-width: 0;
+}
+
+.file-field__name--empty {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.file-field__size {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.file-field__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Shares the button spinner's keyframes; sized for inline text. */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
 }
 
 /* --- Alerts -------------------------------------------------------------- */

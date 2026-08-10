@@ -72,7 +72,7 @@ function describedBy(hint: string | undefined, error: string | undefined, hintId
 /* -------------------------------------------------------------------------- */
 
 type TextFieldProps = BaseProps & {
-  type?: 'text' | 'email' | 'tel' | 'password';
+  type?: 'text' | 'email' | 'tel' | 'password' | 'url';
   value: string;
   placeholder?: string;
   maxLength?: number;
@@ -252,10 +252,19 @@ export function SelectField({
 
 /* -------------------------------------------------------------------------- */
 
+/** Bytes as KB or MB, whichever reads better for a resume-sized file. */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(2)} MB`;
+}
+
 type FileFieldProps = BaseProps & {
   file: File | null;
   accept: string;
   buttonLabel?: string;
+  /** True while the form is submitting, so the file row can show it is being sent. */
+  uploading?: boolean;
   onChange: (file: File | null) => void;
 };
 
@@ -269,6 +278,7 @@ export function FileField({
   hint,
   error,
   disabled,
+  uploading = false,
   buttonLabel = 'Choose file',
 }: FileFieldProps) {
   const uid = useId();
@@ -286,7 +296,7 @@ export function FileField({
       hintId={hintId}
       errorId={errorId}
     >
-      <div className="file-field">
+      <div className={`file-field${file ? ' file-field--filled' : ''}`}>
         <input
           id={id}
           name={name}
@@ -300,16 +310,31 @@ export function FileField({
         />
         <label className="btn btn--outline btn--sm" htmlFor={id}>
           <Icon name="upload" size={16} />
-          {buttonLabel}
+          {file ? 'Change file' : buttonLabel}
         </label>
-        <span className="file-field__name">
-          {file ? `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)` : 'No file selected'}
-        </span>
+
         {file ? (
+          <span className="file-field__meta">
+            <span className="file-field__name" title={file.name}>
+              {file.name}
+            </span>
+            <span className="file-field__size">{formatFileSize(file.size)}</span>
+          </span>
+        ) : (
+          <span className="file-field__name file-field__name--empty">No file selected</span>
+        )}
+
+        {uploading ? (
+          <span className="file-field__status" role="status">
+            <span className="spinner" aria-hidden="true" />
+            Uploading…
+          </span>
+        ) : file ? (
           <button
             type="button"
             className="btn btn--sm btn--outline"
             onClick={() => onChange(null)}
+            disabled={disabled}
           >
             Remove
           </button>

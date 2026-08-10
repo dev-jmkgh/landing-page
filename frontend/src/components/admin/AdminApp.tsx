@@ -10,13 +10,20 @@ import {
   adminApi,
   type AdminApplication,
   type AdminEnquiry,
+  type ApplicationStatus,
   type EnquiryStatus,
+  type RecordStatus,
   type Paginated,
 } from '@/lib/api';
-import { ENQUIRY_STATUS_LABELS } from '@/lib/constants';
+import {
+  APPLICATION_STATUSES,
+  APPLICATION_STATUS_LABELS,
+  ENQUIRY_STATUSES,
+  ENQUIRY_STATUS_LABELS,
+} from '@/lib/constants';
 
 type Tab = 'enquiries' | 'applications';
-type StatusFilter = EnquiryStatus | 'all';
+type StatusFilter = RecordStatus | 'all';
 
 const PAGE_SIZE = 20;
 const EMPTY_PAGE = { items: [], page: 1, pageSize: PAGE_SIZE, total: 0, totalPages: 1 };
@@ -108,18 +115,24 @@ export function AdminApp() {
 
   /* ------------------------------------------------------------------ actions */
 
-  async function changeStatus(id: number, next: EnquiryStatus) {
+  /**
+   * Each table offers only its own statuses, but the handler is shared, so the value is
+   * checked against the active tab's vocabulary before it reaches the typed API call.
+   */
+  async function changeStatus(id: number, next: RecordStatus) {
     setBusyId(id);
     setError(null);
     try {
       if (tab === 'enquiries') {
-        const updated = await adminApi.updateEnquiryStatus(id, next);
+        if (!ENQUIRY_STATUSES.includes(next as EnquiryStatus)) return;
+        const updated = await adminApi.updateEnquiryStatus(id, next as EnquiryStatus);
         setEnquiries((current) => ({
           ...current,
           items: current.items.map((item) => (item.id === id ? updated : item)),
         }));
       } else {
-        const updated = await adminApi.updateApplicationStatus(id, next);
+        if (!APPLICATION_STATUSES.includes(next as ApplicationStatus)) return;
+        const updated = await adminApi.updateApplicationStatus(id, next as ApplicationStatus);
         setApplications((current) => ({
           ...current,
           items: current.items.map((item) => (item.id === id ? updated : item)),
@@ -235,9 +248,11 @@ export function AdminApp() {
                 onChange={(event) => setStatus(event.target.value as StatusFilter)}
               >
                 <option value="all">All statuses</option>
-                {(Object.keys(ENQUIRY_STATUS_LABELS) as EnquiryStatus[]).map((value) => (
+                {(tab === 'enquiries' ? ENQUIRY_STATUSES : APPLICATION_STATUSES).map((value) => (
                   <option key={value} value={value}>
-                    {ENQUIRY_STATUS_LABELS[value]}
+                    {tab === 'enquiries'
+                      ? ENQUIRY_STATUS_LABELS[value as EnquiryStatus]
+                      : APPLICATION_STATUS_LABELS[value as ApplicationStatus]}
                   </option>
                 ))}
               </select>

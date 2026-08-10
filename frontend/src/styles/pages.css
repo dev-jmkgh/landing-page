@@ -999,11 +999,12 @@
 
 .role-list__item {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 0.6rem;
   align-items: baseline;
   font-size: 0.95rem;
   color: var(--ink-700);
+  padding: 0.3rem 0;
 }
 
 .role-list__item::before {
@@ -1013,6 +1014,74 @@
   border-radius: 50%;
   background-color: var(--accent-500);
   transform: translateY(-2px);
+}
+
+.role-list__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Application success state ------------------------------------------- */
+
+.apply-success {
+  text-align: center;
+  padding: clamp(1.25rem, 4vw, 2rem) 0;
+}
+
+.apply-success__mark {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin: 0 auto var(--space-5);
+  border-radius: 50%;
+  color: #0f5c47;
+  background-color: var(--success-050);
+  border: 1px solid rgba(23, 121, 94, 0.28);
+}
+
+.apply-success__title {
+  font-size: var(--text-2xl);
+  color: var(--navy-900);
+}
+
+.apply-success__lead {
+  margin-top: var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--navy-900);
+}
+
+.apply-success__body {
+  margin-top: var(--space-3);
+  margin-inline: auto;
+  max-width: 34rem;
+  line-height: var(--leading-relaxed);
+  color: var(--color-text-muted);
+}
+
+.apply-success__body strong {
+  color: var(--navy-900);
+}
+
+.apply-success__note {
+  margin-top: var(--space-4);
+  margin-inline: auto;
+  max-width: 34rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--warning-050);
+  color: var(--warning-600);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.apply-success__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
 }
 
 .benefit-strip {

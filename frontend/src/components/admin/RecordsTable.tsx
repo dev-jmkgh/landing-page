@@ -2,10 +2,22 @@
 
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { ENQUIRY_STATUS_LABELS } from '@/lib/constants';
-import type { AdminApplication, AdminEnquiry, EnquiryStatus } from '@/lib/api';
+import {
+  APPLICATION_STATUSES,
+  APPLICATION_STATUS_LABELS,
+  ENQUIRY_STATUSES,
+  ENQUIRY_STATUS_LABELS,
+} from '@/lib/constants';
+import type { AdminApplication, AdminEnquiry, RecordStatus } from '@/lib/api';
 
-const STATUSES: EnquiryStatus[] = ['new', 'contacted', 'in_progress', 'closed'];
+/**
+ * The two record types move through different workflows, so each table offers its own
+ * status vocabulary — sharing one list would let an enquiry be marked "hired".
+ */
+const ALL_LABELS: Record<RecordStatus, string> = {
+  ...ENQUIRY_STATUS_LABELS,
+  ...APPLICATION_STATUS_LABELS,
+};
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -19,18 +31,20 @@ function formatDate(value: string): string {
   });
 }
 
-export function StatusBadge({ status }: { status: EnquiryStatus }) {
-  return <span className={`status-badge status-badge--${status}`}>{ENQUIRY_STATUS_LABELS[status]}</span>;
+export function StatusBadge({ status }: { status: RecordStatus }) {
+  return <span className={`status-badge status-badge--${status}`}>{ALL_LABELS[status]}</span>;
 }
 
 function StatusSelect({
   value,
+  options,
   disabled,
   onChange,
 }: {
-  value: EnquiryStatus;
+  value: RecordStatus;
+  options: readonly RecordStatus[];
   disabled: boolean;
-  onChange: (status: EnquiryStatus) => void;
+  onChange: (status: RecordStatus) => void;
 }) {
   return (
     <select
@@ -38,12 +52,12 @@ function StatusSelect({
       style={{ minWidth: '9.5rem', padding: '0.4rem 2rem 0.4rem 0.6rem', fontSize: '0.85rem' }}
       value={value}
       disabled={disabled}
-      onChange={(event) => onChange(event.target.value as EnquiryStatus)}
+      onChange={(event) => onChange(event.target.value as RecordStatus)}
       aria-label="Change status"
     >
-      {STATUSES.map((status) => (
+      {options.map((status) => (
         <option key={status} value={status}>
-          {ENQUIRY_STATUS_LABELS[status]}
+          {ALL_LABELS[status]}
         </option>
       ))}
     </select>
@@ -59,7 +73,7 @@ export function EnquiriesTable({
 }: {
   rows: AdminEnquiry[];
   busyId: number | null;
-  onStatusChange: (id: number, status: EnquiryStatus) => void;
+  onStatusChange: (id: number, status: RecordStatus) => void;
 }) {
   const [expanded, setExpanded] = useState<number | null>(null);
 
@@ -103,6 +117,7 @@ export function EnquiriesTable({
               <td>
                 <StatusSelect
                   value={row.status}
+                  options={ENQUIRY_STATUSES}
                   disabled={busyId === row.id}
                   onChange={(status) => onStatusChange(row.id, status)}
                 />
@@ -147,7 +162,7 @@ export function ApplicationsTable({
 }: {
   rows: AdminApplication[];
   busyId: number | null;
-  onStatusChange: (id: number, status: EnquiryStatus) => void;
+  onStatusChange: (id: number, status: RecordStatus) => void;
   resumeUrl: (id: number) => string;
 }) {
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -188,6 +203,7 @@ export function ApplicationsTable({
               <td>
                 <StatusSelect
                   value={row.status}
+                  options={APPLICATION_STATUSES}
                   disabled={busyId === row.id}
                   onChange={(status) => onStatusChange(row.id, status)}
                 />

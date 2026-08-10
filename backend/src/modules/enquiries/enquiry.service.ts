@@ -2,9 +2,18 @@ import { config } from '../../config/env';
 import { badRequest } from '../../utils/httpError';
 import { describeError, logger } from '../../utils/logger';
 import { createReference, truncate } from '../../utils/text';
-import { sendMail } from '../../services/mailer';
+import { sendAdminNotification, sendMail, type MailResult } from '../../services/mailer';
+import {
+  awaitDelivery,
+  summariseDelivery,
+  type DeliveryStatus,
+} from '../../services/deliveryStatus';
 import { verifyRecaptcha } from '../../services/recaptcha';
-import { enquiryAutoReply, enquiryNotification, type EnquiryEmailData } from '../../services/emailTemplates';
+import {
+  enquiryAdminEmail,
+  enquiryConfirmationEmail,
+  type EnquiryEmailData,
+} from '../../services/email';
 import {
   countRecentByIp,
   insertEnquiry,
@@ -15,12 +24,13 @@ import type { EnquiryInput } from './enquiry.schema';
 
 /**
  * Enquiry submission flow:
- *   1. Anti-spam checks (honeypot + submission timing + per-IP burst check)
- *   2. Store the enquiry — this is what determines success for the user
- *   3. Send the internal notification and the applicant auto-reply in the background
+ *   1. reCAPTCHA verification against Google, plus honeypot, timing and per-IP checks
+ *   2. Store the enquiry — this alone determines whether the request succeeded
+ *   3. Send the admin notification and the visitor confirmation, and report how it went
  *
- * Steps 2 and 3 are deliberately independent: an SMTP outage must never lose an
- * enquiry or show the visitor an error.
+ * Steps 2 and 3 are deliberately independent: an SMTP outage must never lose an enquiry
+ * or turn a stored submission into an error. It must not be papered over either, so the
+ * result of step 3 is summarised into the response rather than discarded.
  */
 
 /** A form completed faster than this was almost certainly not filled in by a person. */
@@ -85,26 +95,33 @@ export function screenSubmission(
   return { spam: false };
 }
 
-async function deliverEnquiryEmails(id: number, data: EnquiryEmailData): Promise<void> {
-  const notification = enquiryNotification(data);
-  const notificationResult = await sendMail({
-    to: config.mail.enquiryReceiver,
+/**
+ * How long the response waits for the two emails before reporting them as still in
+ * flight. See the equivalent constant in the application service.
+ */
+const EMAIL_WAIT_MS = 12_000;
+
+async function deliverEnquiryEmails(id: number, data: EnquiryEmailData): Promise<MailResult[]> {
+  const notification = enquiryAdminEmail(data);
+  const notificationResult = await sendAdminNotification({
+    type: 'enquiry-admin',
     subject: notification.subject,
     html: notification.html,
     text: notification.text,
     replyTo: data.email,
   });
 
-  const autoReply = enquiryAutoReply(data);
+  const autoReply = enquiryConfirmationEmail(data);
   const autoReplyResult = await sendMail({
+    type: 'enquiry-confirmation',
     to: data.email,
     subject: autoReply.subject,
     html: autoReply.html,
     text: autoReply.text,
-    replyTo: config.mail.enquiryReceiver,
+    ...(config.mail.adminRecipients[0] ? { replyTo: config.mail.adminRecipients[0] } : {}),
   });
 
-  if (notificationResult === 'failed' || autoReplyResult === 'failed') {
+  if (notificationResult !== 'sent' || autoReplyResult !== 'sent') {
     logger.warn('Enquiry stored but email delivery was incomplete', {
       reference: data.reference,
       notification: notificationResult,
@@ -113,12 +130,18 @@ async function deliverEnquiryEmails(id: number, data: EnquiryEmailData): Promise
   }
 
   await markNotifications(id, {
-    notificationSent: notificationResult === 'sent',
+    notificationSent: notificationResult === 'sent' || notificationResult === 'partial',
     autoReplySent: autoReplyResult === 'sent',
   }).catch((error) => logger.warn('Could not record email status', describeError(error)));
+
+  return [notificationResult, autoReplyResult];
 }
 
-export type CreateEnquiryResult = { reference: string; id: number };
+export type CreateEnquiryResult = {
+  reference: string;
+  id: number;
+  emailStatus: DeliveryStatus;
+};
 
 export async function createEnquiry(
   input: EnquiryInput,
@@ -174,10 +197,20 @@ export async function createEnquiry(
     submittedAt: new Date(),
   };
 
-  // Fire and forget: the visitor's response does not wait on SMTP.
-  void deliverEnquiryEmails(id, emailData).catch((error) =>
-    logger.error('Enquiry email pipeline failed', { reference, ...describeError(error) }),
-  );
+  // Wait for delivery so the response can report what actually happened, but never
+  // longer than EMAIL_WAIT_MS — a slow mail server must not hold up the visitor.
+  const delivery = deliverEnquiryEmails(id, emailData).catch((error) => {
+    logger.error('Enquiry email pipeline failed', { reference, ...describeError(error) });
+    return ['failed', 'failed'] satisfies MailResult[];
+  });
 
-  return { reference, id };
+  const outcome = await awaitDelivery(delivery, EMAIL_WAIT_MS);
+  const emailStatus: DeliveryStatus =
+    outcome === 'timeout' ? 'pending' : summariseDelivery(outcome);
+
+  if (emailStatus === 'pending') {
+    logger.warn('Enquiry email still in flight when the response was sent', { reference });
+  }
+
+  return { reference, id, emailStatus };
 }

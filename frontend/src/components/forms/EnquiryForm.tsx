@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, api, type EnquiryPayload, API_NOT_CONFIGURED_MESSAGE, isApiConfigured } from '@/lib/api';
+import {
+  ApiError,
+  api,
+  type EmailStatus,
+  type EnquiryPayload,
+  API_NOT_CONFIGURED_MESSAGE,
+  isApiConfigured,
+} from '@/lib/api';
 import { INTEREST_OPTIONS, FIELD_LIMITS, SUCCESS_MESSAGES } from '@/lib/constants';
 import {
   validateCompany,
@@ -88,6 +95,9 @@ export function EnquiryForm({
   const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  /** The server's own wording, which reflects whether the emails actually went out. */
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const renderedAt = useRef<number>(Date.now());
@@ -155,7 +165,7 @@ export function EnquiryForm({
     setStatus('idle');
 
     try {
-      await api.submitEnquiry(
+      const result = await api.submitEnquiry(
         {
           name: values.name.trim(),
           email: values.email.trim(),
@@ -171,6 +181,8 @@ export function EnquiryForm({
         controller.signal,
       );
 
+      setSuccessMessage(result?.message ?? null);
+      setEmailStatus(result?.emailStatus ?? null);
       setStatus('success');
       setValues({ ...EMPTY, interestedIn: defaultInterest ?? '' });
       setTouched({});
@@ -201,8 +213,10 @@ export function EnquiryForm({
   if (status === 'success') {
     return (
       <div className="form">
-        <FormAlert variant="success">
-          <strong>{SUCCESS_MESSAGES.enquiry}</strong>
+        {/* The server's message is authoritative: it knows whether the notification
+            emails actually went out, and says so rather than always claiming success. */}
+        <FormAlert variant={emailStatus === 'failed' || emailStatus === 'partial' ? 'info' : 'success'}>
+          <strong>{successMessage ?? SUCCESS_MESSAGES.enquiry}</strong>
         </FormAlert>
         <button type="button" className="btn btn--outline" onClick={() => setStatus('idle')}>
           Send another enquiry

@@ -34,6 +34,16 @@ export const RESUME_UPLOAD = {
   accept: '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 } as const;
 
+/** Experience bands offered by the application form. Mirrors the backend enum. */
+export const EXPERIENCE_LEVELS = [
+  'Fresher',
+  'Less than 1 year',
+  '1–3 years',
+  '3–5 years',
+  '5–10 years',
+  'More than 10 years',
+] as const;
+
 export const SUCCESS_MESSAGES = {
   enquiry:
     'Thank you! Your enquiry has been submitted successfully. Our team will get back to you shortly.',
@@ -47,3 +57,24 @@ export const ENQUIRY_STATUS_LABELS = {
   in_progress: 'In Progress',
   closed: 'Closed',
 } as const;
+
+/**
+ * Applications move through a hiring review, not an enquiry follow-up, so they have
+ * their own vocabulary. Mirrors APPLICATION_STATUSES in the backend schema.
+ */
+export const APPLICATION_STATUS_LABELS = {
+  new: 'New',
+  reviewing: 'Reviewing',
+  shortlisted: 'Shortlisted',
+  rejected: 'Rejected',
+  hired: 'Hired',
+} as const;
+
+/** Ordered vocabularies, derived so the lists and the labels cannot drift apart. */
+export const ENQUIRY_STATUSES = Object.keys(
+  ENQUIRY_STATUS_LABELS,
+) as (keyof typeof ENQUIRY_STATUS_LABELS)[];
+
+export const APPLICATION_STATUSES = Object.keys(
+  APPLICATION_STATUS_LABELS,
+) as (keyof typeof APPLICATION_STATUS_LABELS)[];

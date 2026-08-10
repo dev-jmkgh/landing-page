@@ -3,6 +3,7 @@ import { asyncHandler } from '../../middleware/errorHandler';
 import { enquiryLimiter } from '../../middleware/rateLimit';
 import { validateBody } from '../../middleware/validate';
 import { clientIp } from '../../utils/request';
+import { deliveryMessage } from '../../services/deliveryStatus';
 import { createEnquiry } from './enquiry.service';
 import { enquirySchema } from './enquiry.schema';
 
@@ -24,11 +25,13 @@ enquiryRouter.post(
       userAgent: request.get('user-agent'),
     });
 
+    // The enquiry is stored either way; the message reflects what happened to the
+    // email rather than claiming a delivery that may not have occurred.
     response.status(201).json({
       success: true,
-      message:
-        'Thank you! Your enquiry has been submitted successfully. Our team will get back to you shortly.',
+      message: deliveryMessage(result.emailStatus, 'enquiry'),
       reference: result.reference,
+      emailStatus: result.emailStatus,
     });
   }),
 );

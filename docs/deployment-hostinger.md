@@ -14,7 +14,7 @@
 | Hostinger account with an active hosting plan | hostinger.com |
 | `jmkglobalholdings.com` domain | Registered at Hostinger, or pointed to Hostinger nameservers |
 | A GitHub repository containing this project | See [GitHub setup](#1-push-the-project-to-github) |
-| Gmail App Password for `info@jmkglobalholdings.com` | See [Gmail SMTP setup](#6-gmail-smtp-setup) |
+| Gmail App Password for `developer.jmkgh@gmail.com` | See [Gmail SMTP setup](#6-gmail-smtp-setup) |
 | Node.js 18.18+ on your own machine | For building the frontend |
 
 **Which Hostinger plan do I need?**
@@ -161,11 +161,16 @@ DB_NAME=u123456789_jmk
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=465
 SMTP_SECURE=true
-SMTP_USER=info@jmkglobalholdings.com
+SMTP_USER=the-gmail-account@gmail.com
 SMTP_PASSWORD=your-16-character-gmail-app-password
-ENQUIRY_RECEIVER_EMAIL=info@jmkglobalholdings.com
+# Leave blank unless it is a verified alias on SMTP_USER - a mismatched domain
+# fails DMARC at the receiving end and the mail is filed as spam.
+SMTP_FROM_EMAIL=
 
-ADMIN_EMAIL=admin@jmkglobalholdings.com
+# Every enquiry and job application notification goes to every address here.
+ADMIN_EMAILS=info@jmkglobalholdings.com
+
+ADMIN_LOGIN_EMAIL=admin@jmkglobalholdings.com
 ADMIN_PASSWORD_HASH=paste-the-bcrypt-hash-here
 JWT_SECRET=paste-a-64-character-random-string-here
 
@@ -264,12 +269,24 @@ through the authenticated admin download route, never as static files.
 
 ## 6. Gmail SMTP setup
 
-1. Sign in to the Google account for `info@jmkglobalholdings.com`.
+1. Sign in to the Google account for `developer.jmkgh@gmail.com`.
 2. **Google Account ▸ Security ▸ 2-Step Verification** — turn it on. App passwords do
    not exist without it.
 3. **Google Account ▸ Security ▸ App passwords** — create one, name it
    "JMK Website", and copy the 16-character password.
 4. Put it in `SMTP_PASSWORD` in `~/api/.env`. Remove the spaces Google displays.
+5. Confirm the pipeline on the server before announcing the site is live:
+
+   ```bash
+   # From the server, with an admin session cookie in production:
+   curl http://127.0.0.1:5000/api/diagnostics/mail
+   curl -X POST http://127.0.0.1:5000/api/diagnostics/mail/test
+   ```
+
+   A local `.env` does **not** travel to production automatically. If these report
+   `passwordConfigured: false` or `adminRecipientCount: 0`, the variables never reached
+   the Node process — check how the service is started (Passenger, PM2 or systemd each
+   pass the environment differently) rather than the application code.
 5. Restart the API. The startup log prints `SMTP connection verified` on success, or a
    clear error if the credentials are wrong.
 
@@ -362,7 +379,7 @@ see the commented SSH job at the bottom of that workflow file.
 [ ] The floating "Enquire Now" button opens the modal on desktop and mobile
 [ ] Submitting an enquiry shows the success message
 [ ] The enquiry appears in the database (phpMyAdmin ▸ enquiries)
-[ ] info@jmkglobalholdings.com receives the notification email
+[ ] developer.jmkgh@gmail.com receives the notification email
 [ ] The sender receives the auto-reply
 [ ] A career application with a PDF resume submits successfully
 [ ] The resume file lands in the storage directory, not in public_html

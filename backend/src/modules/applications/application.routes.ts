@@ -5,19 +5,21 @@ import { removeUpload, uploadResume, verifyResumeContents } from '../../middlewa
 import { toFieldErrors } from '../../middleware/validate';
 import { validationFailed } from '../../utils/httpError';
 import { clientIp } from '../../utils/request';
+import { deliveryMessage } from '../../services/deliveryStatus';
 import { applicationSchema } from './application.schema';
 import { createApplication } from './application.service';
 
 export const applicationRouter = Router();
 
 /**
- * POST /api/applications  (multipart/form-data)
+ * POST /api/careers/apply  (multipart/form-data)
+ * POST /api/applications   — the original path, still accepted.
  *
  * Multer writes the file before the text fields can be validated, so every failure path
  * below deletes the uploaded file — a rejected application never leaves a file behind.
  */
 applicationRouter.post(
-  '/',
+  ['/', '/apply'],
   applicationLimiter,
   uploadResume,
   asyncHandler(async (request, response) => {
@@ -53,11 +55,14 @@ applicationRouter.post(
         },
       );
 
+      // The application and its resume are stored either way; the message reflects
+      // what happened to the email rather than claiming a delivery that may not
+      // have occurred.
       response.status(201).json({
         success: true,
-        message:
-          'Thank you! Your application has been submitted successfully. Our team will review it and get back to you shortly.',
+        message: deliveryMessage(result.emailStatus, 'application'),
         reference: result.reference,
+        emailStatus: result.emailStatus,
       });
     } catch (error) {
       await removeUpload(file?.path);

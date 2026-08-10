@@ -105,8 +105,24 @@ export const statusUpdateSchema = z.object({
   }),
 });
 
+/**
+ * Statuses accepted by the shared list filter.
+ *
+ * Enquiries and applications have different workflows, and this one query schema serves
+ * both admin listings, so it accepts either vocabulary. The value is still bound into
+ * the SQL as a parameter, and a status that does not exist in the table being queried
+ * simply matches nothing.
+ */
+const LIST_FILTER_STATUSES = [
+  ...ENQUIRY_STATUSES,
+  'reviewing',
+  'shortlisted',
+  'rejected',
+  'hired',
+] as const;
+
 export const listQuerySchema = z.object({
-  status: z.enum(ENQUIRY_STATUSES).optional(),
+  status: z.enum(LIST_FILTER_STATUSES).optional(),
   q: z.string().trim().max(120).optional(),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),

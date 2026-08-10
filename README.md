@@ -263,10 +263,9 @@ Full reference with comments: [`.env.example`](.env.example).
 | `CORS_ORIGINS` | Comma-separated allowlist of browser origins |
 | `DATABASE_URL` *or* `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME` | Connection |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` | Gmail App Password |
-| `SMTP_FROM_NAME`, `SMTP_FROM_EMAIL` | Display sender |
-| `ENQUIRY_RECEIVER_EMAIL` | **Where enquiries are delivered.** Canonical name; no address is hard-coded in the code. `CONTACT_EMAIL` is a legacy alias |
-| `CAREERS_EMAIL` | Optional separate inbox for applications; defaults to the enquiry receiver |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` | Fallback admin when `admin_users` is empty |
+| `SMTP_FROM_NAME`, `SMTP_FROM_EMAIL` | Display sender. **Leave `SMTP_FROM_EMAIL` blank unless it is a verified alias on `SMTP_USER`** — see below |
+| `ADMIN_EMAILS` | **The single source of truth for notification recipients.** Comma-separated; every address receives every enquiry and application. No address is hard-coded anywhere |
+| `ADMIN_LOGIN_EMAIL`, `ADMIN_PASSWORD_HASH` | Fallback admin sign-in when `admin_users` is empty. A credential, not a recipient (`ADMIN_EMAIL` still accepted) |
 | `JWT_SECRET` | Session signing key. **≥ 32 characters, or the API refuses to start in production** |
 | `SESSION_TTL_HOURS`, `COOKIE_SAMESITE` | Session lifetime and cookie policy |
 | `RECAPTCHA_SECRET_KEY` | reCAPTCHA v2 secret. **Server-side only.** Blank disables verification |
@@ -293,23 +292,54 @@ at the first enquiry.
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=465
 SMTP_SECURE=true
-SMTP_USER=info@jmkglobalholdings.com
-SMTP_PASSWORD=your-app-password
-ENQUIRY_RECEIVER_EMAIL=info@jmkglobalholdings.com
+SMTP_USER=the-gmail-account@gmail.com
+SMTP_PASSWORD=your-16-character-app-password
+SMTP_FROM_EMAIL=
+ADMIN_EMAILS=info@jmkglobalholdings.com,hr@jmkglobalholdings.com
 ```
+
+Port 465 requires `SMTP_SECURE=true` (implicit TLS); port 587 requires
+`SMTP_SECURE=false` (STARTTLS). Mixing them makes Gmail hang until the socket times out,
+which looks like "email does nothing". The API warns at startup if they disagree.
 
 Never use the account password, and never put SMTP credentials in frontend code — they
 only ever exist in `backend/.env`.
 
-**What gets sent.** Each enquiry produces an internal notification to `ENQUIRY_RECEIVER_EMAIL`
-(with `Reply-To` set to the sender) and a branded auto-reply to the person who wrote in,
-carrying their reference number. Career applications do the same, to `CAREERS_EMAIL`.
-No recipient address appears anywhere in the source — if none is configured the mailer
-logs an error and skips sending rather than guessing an inbox.
-Email is sent after the record is stored: a failure is logged and recorded in the
-`notification_sent` / `autoreply_sent` columns, and the visitor still sees success
-because their enquiry is safely saved. Leave `SMTP_USER`/`SMTP_PASSWORD` empty in
-development and email is skipped entirely.
+### The "sent successfully but nothing arrives" trap
+
+If `SMTP_FROM_EMAIL` is on a different domain to `SMTP_USER` — say the mail claims to be
+from `info@jmkglobalholdings.com` but is sent through a `@gmail.com` account — Gmail
+still returns `250 OK`, so every log says the message was sent. The receiving server then
+finds no SPF or DKIM authorisation for that domain, DMARC fails, and the mail is filed as
+spam. **Leave `SMTP_FROM_EMAIL` blank** unless the address is a verified alias on the
+sending account; `Reply-To` still points replies at the business inbox. The API logs a
+warning at startup when the two domains disagree.
+
+### Checking the pipeline
+
+```bash
+curl http://localhost:5000/api/diagnostics/mail          # config + transporter.verify()
+curl -X POST http://localhost:5000/api/diagnostics/mail/test   # real message to ADMIN_EMAILS
+```
+
+Both routes are open in development and require an admin session in production. Neither
+ever returns a credential — the report says whether a password is *present*, never what
+it is. The response reports Gmail's own verdict (`accepted` / `rejected` counts), which
+is the only thing that distinguishes a working setup from one that merely returns a
+message id.
+
+**What gets sent.** Each enquiry produces a notification to every address in
+`ADMIN_EMAILS` (with `Reply-To` set to the sender) and a branded confirmation to the
+person who wrote in, carrying their reference number. Career applications do the same,
+with the resume attached to the admin notification. All four messages share one layout
+(`backend/src/services/email/layout`), so the header and footer exist once.
+
+The record is written before any email is attempted, so an SMTP outage can never lose an
+enquiry or an application. The outcome is not hidden either: `notification_sent` /
+`autoreply_sent` record it, and the API response carries an `emailStatus` so the
+confirmation shown to the visitor says the message could not be sent instead of claiming
+it was. Leave `SMTP_USER`/`SMTP_PASSWORD` empty in development and email is skipped
+entirely.
 
 ---
 
