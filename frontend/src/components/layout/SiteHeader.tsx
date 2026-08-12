@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { EnquiryTrigger } from '@/components/enquiry/EnquiryTrigger';
 import { Icon } from '@/components/ui/Icon';
+import { assetPath } from '@/lib/paths';
 import { contactDetails, mainNavigation, siteConfig } from '@/lib/site';
 
 const FOCUSABLE =
@@ -15,20 +16,39 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/**
+ * The company logo, linking home.
+ *
+ * Two files rather than one: the supplied lockup sets "JMK GLOBAL HOLDINGS" in the
+ * brand's dark blue and "EST 2023" in black, both of which disappear against the navy
+ * footer. `logo-on-dark.png` is the same artwork with the type knocked out to white and
+ * the shield left in full colour.
+ *
+ * Dimensions are declared so the header reserves the space before the image loads —
+ * without them the navigation shifts sideways on first paint. A plain `img` is used
+ * rather than `next/image` because the export is unoptimised anyway, so the component
+ * would add a wrapper and a srcset for a fixed-size asset that needs neither.
+ */
 function Brand({ variant = 'header' }: { variant?: 'header' | 'footer' }) {
+  const onDark = variant === 'footer';
+
   return (
     <Link
       href="/"
-      className={`brand${variant === 'footer' ? ' brand--footer' : ''}`}
+      className={`brand${onDark ? ' brand--footer' : ''}`}
       aria-label={`${siteConfig.name} — home`}
     >
-      <span className="brand__mark" aria-hidden="true">
-        JMK
-      </span>
-      <span className="brand__text">
-        <span className="brand__name">JMK Global</span>
-        <span className="brand__suffix">Holdings</span>
-      </span>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        className="brand__logo"
+        src={assetPath(onDark ? '/images/brand/logo-on-dark.png' : '/images/brand/logo.png')}
+        alt={siteConfig.name}
+        width={508}
+        height={160}
+        decoding="async"
+        // The header logo is above the fold on every page; the footer one never is.
+        {...(onDark ? { loading: 'lazy' as const } : { fetchPriority: 'high' as const })}
+      />
     </Link>
   );
 }

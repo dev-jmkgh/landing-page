@@ -329,64 +329,54 @@
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.7rem;
   flex-shrink: 0;
 }
 
-.brand__mark {
-  display: grid;
-  place-items: center;
-  width: 42px;
+/* ---------------------------------------------------------------------------
+   Logo
+   ---------------------------------------------------------------------------
+   Height-driven: the lockup is a fixed-ratio image, so setting the height and
+   letting the width follow keeps it undistorted at every breakpoint. The
+   intrinsic width/height on the element still reserve the right box before the
+   file arrives, which is what stops the navigation jumping on first paint.
+   --------------------------------------------------------------------------- */
+
+.brand__logo {
+  display: block;
   height: 42px;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(160deg, var(--navy-800), var(--navy-900));
-  color: #fff;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 0.9rem;
-  letter-spacing: 0.02em;
-  position: relative;
-  overflow: hidden;
+  width: auto;
+  flex: none;
+  /* The base reset applies `max-width: 100%` to images. Here 100% resolves against a
+     shrink-to-fit parent whose own width is derived from this image *plus* the negative
+     margin below, so the constraint feeds back and the logo renders about 1.3% narrow —
+     not obvious by eye, but a distorted logo all the same. The size is set explicitly
+     here, so the reset has nothing useful left to do. */
+  max-width: none;
+  /* The artwork carries a little internal padding; nudging it left keeps the
+     shield optically aligned with the container edge below it. */
+  margin-left: -2px;
 }
 
-.brand__mark::after {
-  content: '';
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  height: 3px;
-  background-color: var(--accent-500);
+@media (min-width: 1024px) {
+  .brand__logo {
+    height: 48px;
+  }
 }
 
-.brand__text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.05;
+/* The drawer and footer have more room around them than the header bar. */
+.brand--footer .brand__logo {
+  height: 52px;
+  margin-left: -3px;
 }
 
-.brand__name {
-  font-family: var(--font-display);
-  font-size: 1.02rem;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-  color: var(--navy-900);
-}
+@media (max-width: 479px) {
+  .brand__logo {
+    height: 38px;
+  }
 
-.brand__suffix {
-  font-size: 0.62rem;
-  font-weight: 600;
-  letter-spacing: var(--tracking-widest);
-  text-transform: uppercase;
-  color: var(--ink-400);
-}
-
-.brand--footer .brand__name,
-.brand--footer .brand__suffix {
-  color: #fff;
-}
-
-.brand--footer .brand__suffix {
-  color: var(--color-on-dark-muted);
+  .brand--footer .brand__logo {
+    height: 46px;
+  }
 }
 
 /* --- Desktop navigation --------------------------------------------------- */
