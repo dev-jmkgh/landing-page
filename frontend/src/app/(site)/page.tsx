@@ -78,10 +78,10 @@ export default function HomePage() {
               */}
               <figure className="hero-photo">
                 <Photo
-                  src="/images/gallery/design-technical-drawing-parts.jpg"
-                  alt="Precision-machined flange components resting on dimensioned engineering drawings"
-                  width={1400}
-                  height={788}
+                  src="/images/gallery/hero-engineering-design-review.jpg"
+                  alt="Two engineers reviewing a detailed technical cross-section drawing alongside the physical assembly"
+                  width={1600}
+                  height={1067}
                   sizes="(max-width: 1099px) 92vw, 46vw"
                   priority
                 />

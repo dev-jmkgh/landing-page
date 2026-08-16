@@ -19,12 +19,7 @@
 
 import { assetPath } from '@/lib/paths';
 
-export type GalleryCategoryId =
-  | 'academy'
-  | 'design-studio'
-  | 'software'
-  | 'sustainability'
-  | 'group';
+export type GalleryCategoryId = 'academy' | 'design-studio' | 'software' | 'sustainability';
 
 export type GalleryCategory = {
   id: GalleryCategoryId | 'all';
@@ -39,7 +34,6 @@ export const galleryCategories: GalleryCategory[] = [
   { id: 'design-studio', label: 'Design Studio', short: 'Design Studio' },
   { id: 'software', label: 'Software Solutions', short: 'Software' },
   { id: 'sustainability', label: 'Sustainability', short: 'Sustainability' },
-  { id: 'group', label: 'Group', short: 'Group' },
 ];
 
 export type GalleryItem = {
@@ -201,43 +195,12 @@ export const galleryItems: GalleryItem[] = [
   },
 
   /* ------------------------------------------------------------------ group */
-  {
-    id: 'export-terminal',
-    category: 'group',
-    title: 'Export & International Trade',
-    description:
-      'Container handling and freight movement — the logistics chain behind our export division.',
-    src: `${BASE}/group-container-terminal.jpg`,
-    alt: 'Aerial view of a container terminal with stacked containers, gantry cranes and berthed ships',
-    width: 1400,
-    height: 1101,
-    credit: { photographer: 'Haris Illahi', url: 'https://unsplash.com/photos/JJCrTi0lvTs' },
-  },
-  {
-    id: 'container-yard',
-    category: 'group',
-    title: 'Logistics & Freight',
-    description: 'Container yard operations supporting agricultural exports.',
-    src: `${BASE}/group-container-yard-aerial.jpg`,
-    alt: 'Overhead view of shipping containers stacked either side of a haulage lane',
-    width: 1400,
-    height: 1049,
-    credit: { photographer: 'Weichao Deng', url: 'https://unsplash.com/photos/iDlVmSKg_Is' },
-  },
-  {
-    id: 'container-stacks',
-    category: 'group',
-    title: 'Global Business Network',
-    description: 'Stacked freight containers, including refrigerated units for perishable cargo.',
-    src: `${BASE}/group-container-stacks.jpg`,
-    alt: 'Ground-level view of weathered shipping containers stacked at a port',
-    width: 1400,
-    height: 933,
-    credit: {
-      photographer: 'Aldward Castillo',
-      url: 'https://unsplash.com/photos/05baZrTifdw',
-    },
-  },
+  /*
+    The three container photographs that stood here were removed: each was dominated
+    by another company's livery (MAERSK, Hapag-Lloyd), and a JMK page is not the place
+    to advertise a shipping line. The export sector is represented by the agriculture
+    and energy frames below until photography of JMK's own trade operations exists.
+  */
 ];
 
 export function itemsForCategory(category: GalleryCategoryId | 'all'): GalleryItem[] {

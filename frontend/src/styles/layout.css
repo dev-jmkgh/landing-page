@@ -36,6 +36,17 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Section rhythm
+   ---------------------------------------------------------------------------
+   Pages alternate white and very light blue. Two shades only: a page where every
+   section is a different tone reads as stripes rather than as rhythm.
+   --------------------------------------------------------------------------- */
+.section--blue {
+  background-color: var(--surface-blue);
+  border-block: 1px solid var(--blue-100);
+}
+
+/* ---------------------------------------------------------------------------
    Canvas: a quiet layered backdrop for glass panels.
 
    Two very low-opacity radial glows (navy, then gold) plus a faint grid give the
@@ -48,7 +59,7 @@
   /* A touch deeper than --surface-muted so the translucent cards have something to
      lift away from; still light enough that body text keeps full contrast. Warm, to
      match the surface set — the cool version read as grey haze behind the cards. */
-  background: linear-gradient(180deg, var(--surface-sunken) 0%, var(--surface-warm) 58%, var(--surface-muted) 100%);
+  background: linear-gradient(180deg, var(--surface-sunken) 0%, var(--surface-blue) 55%, var(--surface-muted) 100%);
   overflow: hidden;
 }
 
@@ -64,15 +75,15 @@
   inset: -20% -10% auto -10%;
   height: 70%;
   background:
-    radial-gradient(65% 65% at 15% -5%, rgba(30, 69, 111, 0.1), transparent 70%),
-    radial-gradient(55% 55% at 90% 8%, rgba(192, 139, 46, 0.14), transparent 70%);
+    radial-gradient(65% 65% at 15% -5%, rgba(56, 93, 122, 0.14), transparent 70%),
+    radial-gradient(55% 55% at 90% 8%, rgba(192, 139, 46, 0.1), transparent 70%);
 }
 
 .section--canvas::after {
   inset: 0;
   background-image:
-    linear-gradient(to right, rgba(16, 24, 40, 0.032) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(16, 24, 40, 0.032) 1px, transparent 1px);
+    linear-gradient(to right, rgba(56, 93, 122, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 93, 122, 0.07) 1px, transparent 1px);
   background-size: 56px 56px;
   /* Fade the grid out towards the edges so it never draws a hard boundary. */
   mask-image: radial-gradient(120% 80% at 50% 30%, #000 35%, transparent 78%);

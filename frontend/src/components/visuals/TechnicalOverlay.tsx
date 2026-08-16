@@ -31,8 +31,16 @@ type Props = {
   id?: string;
 };
 
-const STROKE = 'rgba(255, 255, 255, 0.72)';
+/**
+ * Construction lines are light blue; gold is kept for measurements only.
+ *
+ * When every line was gold the drawing read as decoration laid on the photograph.
+ * Blue lines look like draughting on it, and the few gold marks that remain — the
+ * dimension, the registration corners — are then genuinely the thing you notice.
+ */
+const STROKE = 'rgba(196, 222, 244, 0.9)';
 const ACCENT = 'rgba(217, 165, 74, 0.95)';
+const FRAME = 'rgba(168, 198, 221, 0.85)';
 
 function delay(ms: number): CSSProperties {
   return { '--tv-delay': `${ms}ms` } as CSSProperties;
@@ -53,7 +61,7 @@ export function TechnicalOverlay({ variant = 'measure', className, id = 'ov' }: 
     >
       <defs>
         <pattern id={`${uid}-grid`} width="48" height="48" patternUnits="userSpaceOnUse">
-          <path d="M48 0H0V48" fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="1" />
+          <path d="M48 0H0V48" fill="none" stroke="rgba(196,222,244,0.2)" strokeWidth="1" />
         </pattern>
         <linearGradient id={`${uid}-sweep`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="rgba(217,165,74,0)" />
@@ -70,7 +78,7 @@ export function TechnicalOverlay({ variant = 'measure', className, id = 'ov' }: 
         className="tech-overlay__frame"
         d="M22 52V22h30M548 22h30v30M578 368v30h-30M52 398H22v-30"
         fill="none"
-        stroke={ACCENT}
+        stroke={FRAME}
         strokeWidth="1.4"
       />
 
@@ -114,7 +122,7 @@ export function TechnicalOverlay({ variant = 'measure', className, id = 'ov' }: 
             style={delay(1200)}
             pathLength={1}
             d="M120 110 480 310M480 110 120 310"
-            stroke={ACCENT}
+            stroke={FRAME}
             strokeWidth="1.1"
           />
         </g>
@@ -164,7 +172,7 @@ export function TechnicalOverlay({ variant = 'measure', className, id = 'ov' }: 
             style={delay(1200)}
             pathLength={1}
             d="M300 130v200M160 250h280"
-            stroke={ACCENT}
+            stroke={FRAME}
             strokeWidth="1.1"
           />
           {[

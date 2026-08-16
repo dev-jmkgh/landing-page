@@ -19,11 +19,18 @@ import type { VisualSpec } from '@/lib/content/visuals';
  * drawing is shown immediately — see `styles/technical-visuals.css`.
  */
 
+/**
+ * Light blue does the drawing; gold marks the measurements.
+ *
+ * `accent` is used sparingly on purpose — a drawing rendered entirely in gold reads
+ * as ornament, where a blue drawing with two or three gold marks reads as a
+ * technical document.
+ */
 const STROKES = {
-  line: { stroke: 'rgba(255,255,255,0.5)', width: 1.6 },
-  faint: { stroke: 'rgba(255,255,255,0.24)', width: 1.2 },
+  line: { stroke: 'rgba(196,222,244,0.72)', width: 1.6 },
+  faint: { stroke: 'rgba(168,198,221,0.34)', width: 1.2 },
   accent: { stroke: 'rgba(217,165,74,0.9)', width: 2 },
-  accentSoft: { stroke: 'rgba(217,165,74,0.6)', width: 1.6 },
+  accentSoft: { stroke: 'rgba(140,183,219,0.75)', width: 1.6 },
 } as const;
 
 type Props = {
@@ -55,10 +62,10 @@ export function TechnicalVisual({ spec, className }: Props) {
         >
           <defs>
             <pattern id={`${uid}-fine`} width="24" height="24" patternUnits="userSpaceOnUse">
-              <path d="M24 0H0V24" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+              <path d="M24 0H0V24" fill="none" stroke="rgba(196,222,244,0.08)" strokeWidth="1" />
             </pattern>
             <pattern id={`${uid}-coarse`} width="120" height="120" patternUnits="userSpaceOnUse">
-              <path d="M120 0H0V120" fill="none" stroke="rgba(255,255,255,0.11)" strokeWidth="1" />
+              <path d="M120 0H0V120" fill="none" stroke="rgba(196,222,244,0.14)" strokeWidth="1" />
             </pattern>
             <linearGradient id={`${uid}-sweep`} x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="rgba(217,165,74,0)" />
@@ -82,7 +89,7 @@ export function TechnicalVisual({ spec, className }: Props) {
             </g>
 
             {/* Corner registration marks */}
-            <g className="tv-frame" stroke="rgba(217,165,74,0.55)" strokeWidth="1.2" fill="none">
+            <g className="tv-frame" stroke="rgba(168,198,221,0.7)" strokeWidth="1.2" fill="none">
               <path
                 d={`M24 54V24h30M${spec.width - 54} 24h30v30M${spec.width - 24} ${
                   spec.height - 54
@@ -129,7 +136,7 @@ export function TechnicalVisual({ spec, className }: Props) {
             {/* Connections from the centre to each node */}
             {centre && spec.connect !== false ? (
               <>
-                <g className="tv-links" fill="none" strokeWidth="1.3" stroke="rgba(255,255,255,0.32)">
+                <g className="tv-links" fill="none" strokeWidth="1.3" stroke="rgba(168,198,221,0.42)">
                   {spec.nodes.map((node, index) => (
                     <path
                       key={node.label}
@@ -173,10 +180,10 @@ export function TechnicalVisual({ spec, className }: Props) {
                     cy={node.y}
                     r="22"
                     fill="rgba(10,27,46,0.92)"
-                    stroke="rgba(255,255,255,0.24)"
+                    stroke="rgba(168,198,221,0.4)"
                     strokeWidth="1.2"
                   />
-                  <circle cx={node.x} cy={node.y} r="6" fill="rgba(217,165,74,0.95)" />
+                  <circle cx={node.x} cy={node.y} r="6" fill="rgba(140,183,219,0.95)" />
                   <circle
                     className="tv-node__ring"
                     style={{ '--tv-delay': `${4200 + index * 300}ms` } as React.CSSProperties}

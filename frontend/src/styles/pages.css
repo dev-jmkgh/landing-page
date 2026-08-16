@@ -18,7 +18,7 @@
 
 .hero {
   position: relative;
-  background-color: var(--surface-warm);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-blue) 100%);
   color: var(--color-text);
   overflow: hidden;
   isolation: isolate;
