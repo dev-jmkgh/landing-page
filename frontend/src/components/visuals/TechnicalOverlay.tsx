@@ -38,9 +38,9 @@ type Props = {
  * Blue lines look like draughting on it, and the few gold marks that remain — the
  * dimension, the registration corners — are then genuinely the thing you notice.
  */
-const STROKE = 'rgba(196, 222, 244, 0.9)';
-const ACCENT = 'rgba(217, 165, 74, 0.95)';
-const FRAME = 'rgba(168, 198, 221, 0.85)';
+const STROKE = 'rgba(56, 93, 122, 0.55)';
+const ACCENT = 'rgba(160, 114, 32, 0.85)';
+const FRAME = 'rgba(56, 93, 122, 0.4)';
 
 function delay(ms: number): CSSProperties {
   return { '--tv-delay': `${ms}ms` } as CSSProperties;
@@ -61,11 +61,11 @@ export function TechnicalOverlay({ variant = 'measure', className, id = 'ov' }: 
     >
       <defs>
         <pattern id={`${uid}-grid`} width="48" height="48" patternUnits="userSpaceOnUse">
-          <path d="M48 0H0V48" fill="none" stroke="rgba(196,222,244,0.2)" strokeWidth="1" />
+          <path d="M48 0H0V48" fill="none" stroke="rgba(56,93,122,0.13)" strokeWidth="1" />
         </pattern>
         <linearGradient id={`${uid}-sweep`} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="rgba(217,165,74,0)" />
-          <stop offset="70%" stopColor="rgba(217,165,74,0.22)" />
+          <stop offset="70%" stopColor="rgba(160,114,32,0.18)" />
           <stop offset="100%" stopColor="rgba(217,165,74,0)" />
         </linearGradient>
       </defs>
@@ -198,7 +198,7 @@ export function TechnicalOverlay({ variant = 'measure', className, id = 'ov' }: 
       {/* One slow rule sweep, once the drawing has settled. */}
       <g className="tech-overlay__sweep">
         <rect x={-120} y="0" width="120" height="420" fill={`url(#${uid}-sweep)`} />
-        <path d="M0 0V420" stroke="rgba(217,165,74,0.55)" strokeWidth="1.2" />
+        <path d="M0 0V420" stroke="rgba(160,114,32,0.5)" strokeWidth="1.2" />
       </g>
     </svg>
   );

@@ -67,7 +67,7 @@ export default function HomePage() {
                 Explore Our Businesses
                 <Icon name="arrowRight" size={17} />
               </Link>
-              <EnquiryTrigger className="btn btn--ghost-light btn--lg">
+              <EnquiryTrigger className="btn btn--outline btn--lg">
                 Enquire Now
               </EnquiryTrigger>
             </div>

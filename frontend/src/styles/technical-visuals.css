@@ -276,7 +276,7 @@
 .tech-overlay__figure {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
-  fill: rgba(217, 165, 74, 0.95);
+  fill: var(--accent-700);
 }
 
 /* Finished state. */
