@@ -437,9 +437,29 @@
 }
 
 /* Sits on the bottom baseline no matter how many chips precede it. */
+/* ---------------------------------------------------------------------------
+   Card footer
+   ---------------------------------------------------------------------------
+   `margin-top: auto` is what holds the three CTAs on one baseline, and that has to
+   stay. The side effect is that the shortest card — Academy, with five services
+   against the others' seven — collects all the slack in a single gap above its
+   button, which reads as a hole rather than as spacing.
+
+   The rule is kept and the gap given a purpose instead: a hairline separates the
+   services from the action on every card, so the same whitespace reads as a
+   deliberate footer rather than as content that failed to load. The padding is also
+   pulled in, so the slack that remains is smaller to begin with.
+   --------------------------------------------------------------------------- */
 .vertical-card__footer {
   margin-top: auto;
-  padding-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line-100);
+}
+
+/* Guarantees a visible band between the last service and the divider even on the
+   tallest card, where `auto` contributes nothing. */
+.vertical-card__body > .check-list {
+  margin-bottom: var(--space-5);
 }
 
 /* --- Contribution grid --------------------------------------------------- */
