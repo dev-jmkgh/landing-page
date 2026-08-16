@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AcademyCatalogue } from '@/components/academy/AcademyCatalogue';
 import { CtaBand } from '@/components/layout/CtaBand';
 import { PageHero } from '@/components/layout/PageHero';
 import { Icon } from '@/components/ui/Icon';
@@ -42,6 +43,13 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
         meta={vertical.cardServices.slice(0, 5)}
         visual={verticalVisuals[vertical.slug]}
       />
+
+      {/*
+        The Academy gets a catalogue ahead of its service list: image-led CAD tiles,
+        then SAP as its own section with a banner and a "why" on every module. The
+        other two verticals go straight to their services, which is what they are.
+      */}
+      {vertical.slug === 'jmk-academy' ? <AcademyCatalogue /> : null}
 
       <section className="section">
         <div className="container">

@@ -4,8 +4,9 @@ import { PageHero } from '@/components/layout/PageHero';
 import { CountUp } from '@/components/ui/CountUp';
 import { Icon } from '@/components/ui/Icon';
 import { JsonLd } from '@/components/ui/JsonLd';
-import { MediaFigure } from '@/components/ui/MediaFigure';
+import { Photo } from '@/components/ui/Photo';
 import { Reveal } from '@/components/ui/Reveal';
+import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { coreValues, founders, missionPoints, visionStatement, whoWeAre } from '@/lib/content/about';
@@ -80,11 +81,19 @@ export default function AboutPage() {
             </Reveal>
 
             <Reveal delay={80}>
-              <MediaFigure
-                seed="about-who-we-are"
-                ratio="4 / 3"
-                sizes="(max-width: 900px) 100vw, 45vw"
-              />
+              {/* A real photograph with the drawing laid over it — the recurring JMK
+                  signature, rather than a generated placeholder composition. */}
+              <figure className="about-figure">
+                <Photo
+                  src="/images/gallery/about-team-collaboration.jpg"
+                  alt="Colleagues reviewing work together around a laptop in a bright meeting room"
+                  width={1800}
+                  height={1202}
+                  sizes="(max-width: 900px) 92vw, 45vw"
+                />
+                <span className="about-figure__wash" aria-hidden="true" />
+                <TechnicalOverlay variant="grid" id="about" className="about-figure__drawing" />
+              </figure>
               <div className="highlight-row" style={{ marginTop: '1.5rem' }}>
                 <div>
                   <p className="highlight-row__label">Founded</p>

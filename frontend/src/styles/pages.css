@@ -1600,3 +1600,435 @@
   color: var(--navy-100);
   letter-spacing: -0.04em;
 }
+
+/* ===========================================================================
+   Academy catalogue
+   ---------------------------------------------------------------------------
+   Image-led course tiles, a SAP banner, and module tiles that carry the drawing
+   language instead of photographs.
+   =========================================================================== */
+
+.course-grid {
+  display: grid;
+  gap: clamp(1rem, 2vw, 1.5rem);
+  align-items: stretch;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+}
+
+.course-grid > * {
+  display: flex;
+  min-width: 0;
+}
+
+.course-grid > * > * {
+  width: 100%;
+}
+
+.course-tile {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--surface);
+  border: 1px solid var(--blue-200);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+
+.course-tile:hover {
+  border-color: var(--blue-300);
+  box-shadow: var(--glass-shadow-hover);
+  transform: translateY(-3px);
+}
+
+.course-tile__media {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--blue-050);
+}
+
+/* One ratio for every tile, whatever the source proportions — this is what keeps a
+   row of them level. */
+.course-tile__media img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.course-tile:hover .course-tile__media img {
+  transform: scale(1.04);
+}
+
+/* A whisper of navy at the foot of the image so the card edge does not float. */
+.course-tile__wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(11, 31, 51, 0) 62%, rgba(11, 31, 51, 0.22) 100%);
+}
+
+.course-tile__body {
+  display: flex;
+  flex-direction: column;
+  padding: clamp(1.1rem, 2.2vw, 1.5rem);
+}
+
+.course-tile__category {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--blue-600);
+}
+
+.course-tile__title {
+  margin-top: 0.4rem;
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--navy-900);
+  line-height: var(--leading-snug);
+}
+
+.course-tile__text {
+  margin-top: var(--space-3);
+  font-size: 0.94rem;
+  line-height: var(--leading-relaxed);
+  color: var(--color-text-muted);
+}
+
+/* --- SAP banner ----------------------------------------------------------- */
+
+.sap-banner {
+  position: relative;
+  margin: 0 0 clamp(2rem, 4vw, 3rem);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--blue-200);
+  box-shadow: var(--glass-shadow);
+  isolation: isolate;
+}
+
+.sap-banner img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 21 / 9;
+  object-fit: cover;
+}
+
+@media (max-width: 767px) {
+  .sap-banner img {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+.sap-banner__wash {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(247, 250, 252, 0.95) 0%,
+    rgba(247, 250, 252, 0.82) 40%,
+    rgba(240, 246, 251, 0.35) 72%,
+    rgba(240, 246, 251, 0.1) 100%
+  );
+}
+
+@media (max-width: 767px) {
+  .sap-banner__wash {
+    background: linear-gradient(
+      180deg,
+      rgba(247, 250, 252, 0.92) 0%,
+      rgba(247, 250, 252, 0.86) 60%,
+      rgba(240, 246, 251, 0.78) 100%
+    );
+  }
+}
+
+/* Confined to the right, away from the caption — the same reason as the home hero. */
+.sap-banner .sap-banner__drawing {
+  position: absolute;
+  inset: 0 0 0 50%;
+  width: auto;
+  height: auto;
+  opacity: 0.55;
+}
+
+@media (max-width: 1023px) {
+  .sap-banner .sap-banner__drawing {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.25;
+  }
+}
+
+.sap-banner__caption {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: clamp(1.25rem, 4vw, 3rem);
+  max-width: 40rem;
+}
+
+.sap-banner__caption-title {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--navy-900);
+}
+
+.sap-banner__caption-text {
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  color: var(--ink-700);
+  max-width: 34rem;
+}
+
+@media (max-width: 559px) {
+  .sap-banner__caption-text {
+    font-size: 0.9rem;
+  }
+}
+
+/* --- SAP modules ---------------------------------------------------------- */
+
+.sap-grid__heading {
+  font-size: var(--text-xl);
+  color: var(--navy-900);
+  margin-bottom: var(--space-5);
+}
+
+/* Six modules, so the column count is set rather than left to auto-fit — auto-fit
+   gave four across and left two stranded on a second row. Three and three reads as
+   a deliberate set. */
+.sap-grid {
+  display: grid;
+  gap: clamp(1rem, 2vw, 1.25rem);
+  align-items: stretch;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .sap-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .sap-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.sap-grid > * {
+  display: flex;
+  min-width: 0;
+}
+
+.sap-grid > * > * {
+  width: 100%;
+}
+
+.sap-tile {
+  display: flex;
+  flex-direction: column;
+  padding: clamp(1.2rem, 2.4vw, 1.6rem);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--blue-200);
+  background-color: var(--surface);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out);
+}
+
+.sap-tile:hover {
+  border-color: var(--blue-300);
+  box-shadow: var(--glass-shadow-hover);
+}
+
+.sap-tile__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+/* The module code as a drawing plate rather than a heading. */
+.sap-tile__code {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.6rem;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--blue-200);
+  background-color: var(--blue-050);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--blue-700);
+}
+
+.sap-tile__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background-color: var(--blue-050);
+  color: var(--blue-600);
+}
+
+.sap-tile__name {
+  margin-top: var(--space-4);
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--navy-900);
+  line-height: var(--leading-snug);
+}
+
+.sap-tile__text {
+  margin-top: var(--space-3);
+  font-size: 0.93rem;
+  line-height: var(--leading-relaxed);
+  color: var(--color-text-muted);
+}
+
+/* The "why" sits apart, marked by a gold label — it answers a different question
+   from the description above it. */
+.sap-tile__why {
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line-100);
+  font-size: 0.9rem;
+  line-height: var(--leading-relaxed);
+  color: var(--ink-700);
+}
+
+.sap-tile__why-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--accent-700);
+}
+
+/* --- Why learn with JMK --------------------------------------------------- */
+
+.promise-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: clamp(1.2rem, 2.4vw, 1.6rem);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--blue-200);
+  background-color: var(--surface);
+  text-align: center;
+  align-items: center;
+}
+
+.promise-card__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: var(--blue-050);
+  color: var(--blue-600);
+}
+
+.promise-card__title {
+  margin-top: var(--space-4);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--navy-900);
+}
+
+.promise-card__text {
+  margin-top: var(--space-2);
+  font-size: 0.92rem;
+  line-height: var(--leading-relaxed);
+  color: var(--color-text-muted);
+}
+
+.course-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-top: clamp(2rem, 4vw, 3rem);
+  padding: clamp(1.25rem, 3vw, 1.75rem) clamp(1.25rem, 3vw, 2rem);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--blue-200);
+  background: linear-gradient(135deg, var(--blue-050), var(--surface));
+}
+
+.course-cta__text {
+  margin: 0;
+  flex: 1 1 20rem;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--navy-900);
+}
+
+@media (max-width: 559px) {
+  .course-cta {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .course-tile,
+  .course-tile:hover,
+  .course-tile__media img,
+  .course-tile:hover .course-tile__media img {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* --- About: photograph with the drawing signature ------------------------- */
+
+.about-figure {
+  position: relative;
+  margin: 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--blue-200);
+  box-shadow: var(--glass-shadow);
+  isolation: isolate;
+}
+
+.about-figure img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+/* Light enough that the photograph is unmistakably the subject; just enough tint
+   for the blue construction lines to register on top of it. */
+.about-figure__wash {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(200deg, rgba(240, 246, 251, 0.55) 0%, rgba(240, 246, 251, 0.05) 60%);
+}
+
+.about-figure .about-figure__drawing {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+}
