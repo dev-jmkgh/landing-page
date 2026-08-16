@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { EnquiryTrigger } from '@/components/enquiry/EnquiryTrigger';
-import { HeroVisualization } from '@/components/home/HeroVisualization';
 import { CtaBand } from '@/components/layout/CtaBand';
 import { CountUp } from '@/components/ui/CountUp';
 import { Icon } from '@/components/ui/Icon';
 import { PatternBackdrop } from '@/components/ui/PatternBackdrop';
 import { Reveal } from '@/components/ui/Reveal';
+import { Photo } from '@/components/ui/Photo';
+import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { coreValues, missionPoints, visionStatement } from '@/lib/content/about';
@@ -49,7 +50,7 @@ export default function HomePage() {
                   Explore Our Businesses
                   <Icon name="arrowRight" size={17} />
                 </Link>
-                <EnquiryTrigger className="btn btn--ghost-light btn--lg">
+                <EnquiryTrigger className="btn btn--outline btn--lg">
                   Enquire Now
                 </EnquiryTrigger>
               </div>
@@ -65,10 +66,29 @@ export default function HomePage() {
 
             <div className="hero__visual">
               <p className="hero__visual-caption">
-                <span>Group Architecture</span>
-                <span>Six operating spokes</span>
+                <span>Engineering, training and technology</span>
+                <span>Coimbatore</span>
               </p>
-              <HeroVisualization />
+
+              {/*
+                A photograph carries the hero now, with the drawing language reduced
+                to an overlay on top of it. The image is licensed stock that shows the
+                discipline JMK works in — it is not a photograph of JMK's own work, and
+                the alt text says what is in the frame rather than implying otherwise.
+              */}
+              <figure className="hero-photo">
+                <Photo
+                  src="/images/gallery/design-technical-drawing-parts.jpg"
+                  alt="Precision-machined flange components resting on dimensioned engineering drawings"
+                  width={1400}
+                  height={788}
+                  sizes="(max-width: 1099px) 92vw, 46vw"
+                  priority
+                />
+                <span className="hero-photo__scrim" aria-hidden="true" />
+                <TechnicalOverlay variant="measure" id="hero" />
+                <span className="hero-photo__tag">Precision by design</span>
+              </figure>
             </div>
           </div>
         </div>
@@ -149,6 +169,16 @@ export default function HomePage() {
             {verticals.map((vertical, index) => (
               <Reveal key={vertical.slug} delay={index * 70}>
                 <article className="vertical-card">
+                  {/* Image first: the card leads with the discipline, then names it. */}
+                  <div className="vertical-card__media">
+                    <Photo
+                      src={vertical.image.src}
+                      alt={vertical.image.alt}
+                      width={vertical.image.width}
+                      height={vertical.image.height}
+                      sizes="(max-width: 639px) 92vw, (max-width: 1199px) 46vw, 30vw"
+                    />
+                  </div>
                   <div className="vertical-card__head">
                     <span className="vertical-card__mark" aria-hidden="true">
                       {vertical.mark}

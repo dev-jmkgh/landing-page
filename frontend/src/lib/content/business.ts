@@ -35,6 +35,12 @@ export type Vertical = {
   icon: IconName;
   cardSummary: string;
   cardServices: string[];
+  /**
+   * Card photograph. Licensed stock that shows the *discipline* the vertical works
+   * in — never presented as a photograph of JMK's own premises, staff or projects.
+   * The same rule as the gallery; see `lib/content/gallery.ts`.
+   */
+  image: { src: string; alt: string; width: number; height: number };
   hero: {
     eyebrow: string;
     heading: string;
@@ -50,6 +56,12 @@ export const verticals: Vertical[] = [
     name: 'JMK Academy',
     mark: 'JA',
     tagline: 'CAD DESK and SAP training',
+    image: {
+      src: '/images/gallery/academy-cad-workstation.jpg',
+      alt: 'Engineering CAD software open on a workstation monitor during a training session',
+      width: 1400,
+      height: 933,
+    },
     icon: 'academy',
     cardSummary:
       'Engineering CAD training delivered through CAD DESK Coimbatore and SAP module training — with corporate programmes, industry workshops and placement assistance.',
@@ -121,6 +133,12 @@ export const verticals: Vertical[] = [
   {
     slug: 'jmk-design-studio',
     name: 'JMK Design Studio',
+    image: {
+      src: '/images/gallery/design-product-design-bench.jpg',
+      alt: 'Drafting instruments, sketches and a tablet on a product design bench',
+      width: 1400,
+      height: 933,
+    },
     mark: 'JD',
     tagline: 'All CAD Designing Works',
     icon: 'compass',
@@ -190,6 +208,12 @@ export const verticals: Vertical[] = [
   {
     slug: 'jmk-software-solutions',
     name: 'JMK Software Solutions',
+    image: {
+      src: '/images/gallery/software-analytics-dashboard.jpg',
+      alt: 'Business analytics dashboard showing conversion and quality-score charts',
+      width: 1400,
+      height: 1008,
+    },
     mark: 'JS',
     tagline: 'Software, web, mobile, cloud and digital infrastructure',
     icon: 'software',

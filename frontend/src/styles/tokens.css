@@ -28,11 +28,24 @@
   --ink-700: #344054;
   --ink-500: #5b6572;
   --ink-400: #7b8493;
-  --line-200: #e4e7ec;
-  --line-100: #eff1f4;
+  --line-200: #e6e3dd;
+  --line-100: #f0eeea;
+
+  /* ---------------------------------------------------------------------------
+     Surfaces
+     ---------------------------------------------------------------------------
+     Warm rather than cool. The previous set was blue-grey (#f7f9fb, #eef2f6), which
+     next to a navy palette reads as washed-out rather than clean — the light on the
+     page appeared to have no source. A trace of warmth gives the whites a
+     temperature, so navy type and gold accents sit on them instead of floating.
+
+     Kept close together on purpose: the hierarchy comes from the borders and
+     shadows, not from strong steps between backgrounds.
+     --------------------------------------------------------------------------- */
   --surface: #ffffff;
-  --surface-muted: #f7f9fb;
-  --surface-sunken: #eef2f6;
+  --surface-warm: #fdfcfa;
+  --surface-muted: #f8f6f2;
+  --surface-sunken: #f2efe9;
 
   /* --- Feedback ---------------------------------------------------------- */
   --success-600: #17795e;

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { CtaBand } from '@/components/layout/CtaBand';
 import { PageHero } from '@/components/layout/PageHero';
+import { Photo } from '@/components/ui/Photo';
 import { Icon } from '@/components/ui/Icon';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
@@ -61,6 +62,16 @@ export default function BusinessPage() {
             {verticals.map((vertical, index) => (
               <Reveal key={vertical.slug} delay={index * 70}>
                 <article className="vertical-card">
+                  {/* Image first: the card leads with the discipline, then names it. */}
+                  <div className="vertical-card__media">
+                    <Photo
+                      src={vertical.image.src}
+                      alt={vertical.image.alt}
+                      width={vertical.image.width}
+                      height={vertical.image.height}
+                      sizes="(max-width: 639px) 92vw, (max-width: 1199px) 46vw, 30vw"
+                    />
+                  </div>
                   <div className="vertical-card__head">
                     <span className="vertical-card__mark" aria-hidden="true">
                       {vertical.mark}
