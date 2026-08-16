@@ -4,9 +4,8 @@ import { EnquiryTrigger } from '@/components/enquiry/EnquiryTrigger';
 import { CtaBand } from '@/components/layout/CtaBand';
 import { CountUp } from '@/components/ui/CountUp';
 import { Icon } from '@/components/ui/Icon';
-import { PatternBackdrop } from '@/components/ui/PatternBackdrop';
 import { Reveal } from '@/components/ui/Reveal';
-import { Photo } from '@/components/ui/Photo';
+import { HERO_VARIANTS, Photo } from '@/components/ui/Photo';
 import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
@@ -29,87 +28,71 @@ export default function HomePage() {
   return (
     <>
       {/* ---------------------------------------------------------------- Hero */}
+      {/*
+        A cinematic band: the photograph fills the section and the copy sits on it,
+        rather than the copy sitting beside a picture in a card. The image is an <img>
+        rather than a CSS background so it can carry a srcset — a background-image
+        would hand every visitor the same file, and this is the largest contentful
+        paint on the site.
+      */}
       <section className="hero">
-        <PatternBackdrop className="hero__backdrop" id="hero" variant="blueprint" />
-        <span className="hero__glow" aria-hidden="true" />
+        <div className="hero__media">
+          <Photo
+            className="hero__image"
+            src="/images/gallery/hero-engineering-design-review.jpg"
+            alt="Two engineers reviewing a detailed technical cross-section drawing alongside the physical assembly"
+            width={2400}
+            height={1601}
+            sizes="100vw"
+            variants={HERO_VARIANTS}
+            priority
+          />
+          <span className="hero__scrim" aria-hidden="true" />
+          <TechnicalOverlay variant="measure" id="hero" className="hero__drawing" />
+        </div>
 
         <div className="container">
-          <div className="hero__inner">
-            <div>
-              <p className="hero__eyebrow">
-                <span>Since 2023</span>
-                Coimbatore, Tamil Nadu
-              </p>
+          <div className="hero__content">
+            <p className="hero__eyebrow">
+              <span>Since 2023</span>
+              Coimbatore, Tamil Nadu
+            </p>
 
-              <h1 className="hero__title">{heroContent.headline}</h1>
-              <p className="hero__subtitle">{heroContent.subheadline}</p>
-              <p className="hero__intro">{heroContent.intro}</p>
+            <h1 className="hero__title">{heroContent.headline}</h1>
+            <p className="hero__subtitle">{heroContent.subheadline}</p>
+            <p className="hero__intro">{heroContent.intro}</p>
 
-              <div className="hero__actions">
-                <Link className="btn btn--accent btn--lg" href="/business">
-                  Explore Our Businesses
-                  <Icon name="arrowRight" size={17} />
-                </Link>
-                <EnquiryTrigger className="btn btn--outline btn--lg">
-                  Enquire Now
-                </EnquiryTrigger>
-              </div>
-
-              <ul className="hero__sectors" aria-label="Sectors we operate in">
-                {siteConfig.sectors.map((sector) => (
-                  <li className="hero__sector" key={sector}>
-                    {sector}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="hero__visual">
-              <p className="hero__visual-caption">
-                <span>Engineering, training and technology</span>
-                <span>Coimbatore</span>
-              </p>
-
-              {/*
-                A photograph carries the hero now, with the drawing language reduced
-                to an overlay on top of it. The image is licensed stock that shows the
-                discipline JMK works in — it is not a photograph of JMK's own work, and
-                the alt text says what is in the frame rather than implying otherwise.
-              */}
-              <figure className="hero-photo">
-                <Photo
-                  src="/images/gallery/hero-engineering-design-review.jpg"
-                  alt="Two engineers reviewing a detailed technical cross-section drawing alongside the physical assembly"
-                  width={1600}
-                  height={1067}
-                  sizes="(max-width: 1099px) 92vw, 46vw"
-                  priority
-                />
-                <span className="hero-photo__scrim" aria-hidden="true" />
-                <TechnicalOverlay variant="measure" id="hero" />
-                <span className="hero-photo__tag">Precision by design</span>
-              </figure>
+            <div className="hero__actions">
+              <Link className="btn btn--accent btn--lg" href="/business">
+                Explore Our Businesses
+                <Icon name="arrowRight" size={17} />
+              </Link>
+              <EnquiryTrigger className="btn btn--ghost-light btn--lg">
+                Enquire Now
+              </EnquiryTrigger>
             </div>
           </div>
         </div>
 
-        {/* ------------------------------------------------ Success statistics */}
-        <div className="hero-stats">
-          <div className="container">
-            <h2 className="sr-only">Success stories</h2>
-            <ul className="hero-stats__grid">
-              {successStats.map((stat) => (
-                <li className="hero-stats__item" key={stat.label}>
-                  <span className="stat__value">
-                    <CountUp value={stat.value} suffix={stat.suffix} />
-                  </span>
-                  <span className="stat__label">{stat.label}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        <span className="hero__fade" aria-hidden="true" />
       </section>
+
+      {/* ------------------------------------------------ Success statistics */}
+      <div className="hero-stats">
+        <div className="container">
+          <h2 className="sr-only">Success stories</h2>
+          <ul className="hero-stats__grid">
+            {successStats.map((stat) => (
+              <li className="hero-stats__item" key={stat.label}>
+                <span className="stat__value">
+                  <CountUp value={stat.value} suffix={stat.suffix} />
+                </span>
+                <span className="stat__label">{stat.label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
 
       {/* ------------------------------------------------- Company introduction */}
       <section className="section">

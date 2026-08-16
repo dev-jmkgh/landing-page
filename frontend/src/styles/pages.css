@@ -5,56 +5,135 @@
 /* --- Home hero ----------------------------------------------------------- */
 
 /* ---------------------------------------------------------------------------
-   Home hero
+   Home hero — full-bleed photograph
    ---------------------------------------------------------------------------
-   Light and photograph-led. The previous hero was a navy field with a large
-   technical drawing as its subject; the drawing is now an overlay on a real
-   photograph instead, which is what management asked for — the engineering
-   language stays, but as the signature on the image rather than the image itself.
+   The photograph fills the section and the copy sits on it. Two decisions worth
+   recording:
 
-   The type sits on warm white, so it needs no scrim and stays legible at every
-   width without fighting the photograph for contrast.
+   The image is an <img> rather than a CSS background-image. A background cannot
+   carry a srcset, so every visitor would download one file — and this is the
+   largest contentful paint on the site, so a phone would be pulling the desktop
+   asset. The <img> is absolutely positioned and `object-fit: cover`, which gives
+   the same edge-to-edge result with responsive delivery.
+
+   The readability gradient runs left-to-right rather than being a panel behind
+   the text. A solid rectangle would guarantee contrast and look like a caption
+   box; a directional scrim keeps the right-hand side of the photograph — the
+   drawing and the component — genuinely visible, which is the point of using it.
    --------------------------------------------------------------------------- */
 
 .hero {
   position: relative;
-  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-blue) 100%);
-  color: var(--color-text);
-  overflow: hidden;
+  display: grid;
+  align-items: center;
   isolation: isolate;
+  overflow: hidden;
+  /* Fallback while the photograph loads, and the colour behind its edges. */
+  background-color: var(--navy-900);
+  color: #fff;
+  min-height: 600px;
+  padding-block: clamp(2.5rem, 5vw, 3.5rem);
 }
 
-.hero__backdrop {
+@media (min-width: 768px) {
+  .hero {
+    min-height: 600px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero {
+    min-height: 680px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .hero {
+    min-height: 700px;
+  }
+}
+
+.hero__media {
   position: absolute;
   inset: 0;
   z-index: -1;
-  /* A whisper of blueprint grid — present, never a pattern you notice. */
-  opacity: 0.16;
 }
 
-.hero__glow {
-  position: absolute;
-  z-index: -1;
-  width: 46rem;
-  height: 46rem;
-  right: -16rem;
-  top: -20rem;
-  background: radial-gradient(circle, rgba(192, 139, 46, 0.16) 0%, transparent 62%);
-  pointer-events: none;
+.hero__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* The drawing and the component sit centre-right in the frame; pulling the crop
+     that way keeps them clear of the copy instead of hidden behind it. */
+  object-position: 60% center;
 }
 
-.hero__inner {
-  display: grid;
-  gap: clamp(2.5rem, 5vw, 4rem);
-  padding-block: clamp(3rem, 7vw, 5.5rem);
-  grid-template-columns: 1fr;
-  align-items: center;
-}
-
-@media (min-width: 1100px) {
-  .hero__inner {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.02fr);
+/* On a narrow screen the copy covers most of the width, so the crop centres and the
+   scrim becomes a top-down wash — a left-to-right gradient does nothing when the
+   text spans the full width. */
+@media (max-width: 767px) {
+  .hero__image {
+    object-position: 62% center;
   }
+}
+
+.hero__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(7, 25, 43, 0.9) 0%,
+    rgba(7, 25, 43, 0.72) 34%,
+    rgba(7, 25, 43, 0.32) 64%,
+    rgba(7, 25, 43, 0.08) 100%
+  );
+}
+
+@media (max-width: 767px) {
+  .hero__scrim {
+    background: linear-gradient(
+      180deg,
+      rgba(7, 25, 43, 0.86) 0%,
+      rgba(7, 25, 43, 0.76) 55%,
+      rgba(7, 25, 43, 0.66) 100%
+    );
+  }
+}
+
+/* The drawing sits above the photograph and below the copy — and to the right of it.
+   Spanning the full width put the dimension figure straight through the paragraph,
+   which is exactly the "drawing covers the text" failure the brief warns about. The
+   overlay stretches (preserveAspectRatio="none"), so insetting the left edge simply
+   moves the whole figure onto the half of the frame the copy does not occupy. */
+/* Scoped to .hero deliberately: technical-visuals.css is imported after this file and
+   sets `inset: 0` on .tech-overlay, so a bare .hero__drawing rule would lose the
+   cascade at equal specificity. */
+.hero .hero__drawing {
+  position: absolute;
+  inset: 0 0 0 46%;
+  /* .tech-overlay declares width/height 100%, which combined with a left inset pushes
+     the box off the right edge and clipped the dimension figure. Letting the inset
+     define the box is what actually confines the drawing to the photograph's half. */
+  width: auto;
+  height: auto;
+  opacity: 0.7;
+}
+
+/* Below the split the copy spans the full width, so the drawing retreats to a faint
+   texture rather than competing with it. */
+@media (max-width: 1023px) {
+  .hero .hero__drawing {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.32;
+  }
+}
+
+.hero__content {
+  position: relative;
+  z-index: 1;
+  max-width: 42rem;
 }
 
 .hero__eyebrow {
@@ -63,14 +142,15 @@
   gap: 0.6rem;
   padding: 0.4rem 0.9rem 0.4rem 0.5rem;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--line-200);
-  background-color: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--ink-700);
-  box-shadow: var(--shadow-xs);
+  color: #fff;
 }
 
 .hero__eyebrow span {
@@ -84,37 +164,43 @@
 }
 
 .hero__title {
-  margin-top: var(--space-6);
-  color: var(--navy-900);
-  max-width: 16ch;
+  margin-top: var(--space-5);
+  color: #fff;
+  font-size: clamp(2.25rem, 4.6vw, 4.25rem);
+  line-height: 1.04;
+  letter-spacing: -0.025em;
+  /* Wide enough for three lines at desktop. At 15ch the headline broke to four,
+     which pushed the band past the height the design calls for. */
+  max-width: 20ch;
+  text-wrap: balance;
 }
 
 .hero__subtitle {
-  margin-top: var(--space-5);
+  margin-top: var(--space-4);
   font-family: var(--font-display);
   font-size: var(--text-xl);
   font-weight: 500;
-  color: var(--accent-700);
+  color: var(--accent-400);
   letter-spacing: -0.01em;
 }
 
 .hero__intro {
-  margin-top: var(--space-5);
-  max-width: 58ch;
+  margin-top: var(--space-4);
+  max-width: 62ch;
   font-size: var(--text-lg);
   line-height: var(--leading-relaxed);
-  color: var(--color-text-muted);
+  color: rgba(233, 240, 248, 0.92);
 }
 
 .hero__actions {
-  margin-top: clamp(1.75rem, 3vw, 2.5rem);
+  margin-top: clamp(1.5rem, 2.5vw, 2rem);
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
 }
 
 .hero__sectors {
-  margin-top: clamp(2rem, 4vw, 3rem);
+  margin-top: clamp(1.75rem, 3.5vw, 2.5rem);
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -125,98 +211,43 @@
   font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-500);
-  border: 1px solid var(--line-200);
-  background-color: var(--surface);
+  color: rgba(233, 240, 248, 0.86);
+  border: 1px solid rgba(168, 198, 221, 0.35);
+  background-color: rgba(255, 255, 255, 0.06);
   border-radius: var(--radius-xs);
   padding: 0.35rem 0.7rem;
 }
 
-/* --- Hero photograph ------------------------------------------------------ */
+/* On a phone the same copy runs to twice the lines, so the supporting paragraph
+   steps down a size and the rhythm tightens — otherwise the band grows past the
+   height the design calls for and pushes everything below the fold. */
+@media (max-width: 639px) {
+  .hero__intro {
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-top: var(--space-3);
+  }
 
-.hero__visual {
-  position: relative;
+  .hero__subtitle {
+    font-size: var(--text-lg);
+    margin-top: var(--space-3);
+  }
+
+  .hero__title {
+    margin-top: var(--space-4);
+  }
 }
 
-.hero__visual-caption {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--ink-500);
-}
-
-.hero-photo {
-  position: relative;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  border: 1px solid var(--line-200);
-  box-shadow: 0 24px 60px -30px rgba(10, 27, 46, 0.45);
-  isolation: isolate;
-}
-
-.hero-photo img {
-  display: block;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 11;
-  object-fit: cover;
-}
-
-/* The drawing overlay. Deliberately weak: the brief is that the photograph stays
-   clearly visible, so this reads as a drafting film laid over it, not as a filter. */
-.hero-photo__overlay {
+/* A soft hand-off into the light section below, rather than a hard horizon. */
+.hero__fade {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 96px;
+  z-index: 0;
   pointer-events: none;
-}
-
-/* Just enough tint for the white overlay strokes to read against the lighter parts
-   of the photograph. The brief is explicit that the image stays clearly visible, so
-   this stops well short of a filter. */
-.hero-photo__scrim {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    115deg,
-    rgba(10, 27, 46, 0.2) 0%,
-    rgba(10, 27, 46, 0.05) 45%,
-    rgba(10, 27, 46, 0) 72%
-  );
-}
-
-/* A small measurement caption riding on the image, in the site's drawing language. */
-.hero-photo__tag {
-  position: absolute;
-  left: clamp(0.85rem, 2vw, 1.25rem);
-  bottom: clamp(0.85rem, 2vw, 1.25rem);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.75rem;
-  border-radius: var(--radius-pill);
-  background-color: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--navy-900);
-  box-shadow: var(--shadow-sm);
-}
-
-.hero-photo__tag::before {
-  content: '';
-  width: 18px;
-  height: 2px;
-  background-color: var(--accent-500);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, var(--surface) 100%);
 }
 
 /* --- Stats band ----------------------------------------------------------- */
