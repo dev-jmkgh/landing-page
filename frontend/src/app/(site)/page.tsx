@@ -195,7 +195,7 @@ export default function HomePage() {
       </section>
 
       {/* ----------------------------------------- Government / national contribution */}
-      <section className="section section--dark">
+      <section className="section section--blue">
         <div className="container">
           <Reveal>
             <SectionHeading

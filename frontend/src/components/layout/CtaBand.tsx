@@ -31,7 +31,7 @@ export function CtaBand({ title, text, interest, secondary, patternId }: CtaBand
               Enquire Now
             </EnquiryTrigger>
             {secondary ? (
-              <Link className="btn btn--ghost-light btn--lg" href={secondary.href}>
+              <Link className="btn btn--outline btn--lg" href={secondary.href}>
                 {secondary.label}
                 <Icon name="arrowRight" size={16} />
               </Link>

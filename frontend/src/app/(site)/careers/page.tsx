@@ -83,7 +83,7 @@ export default function CareersPage() {
       </section>
 
       {/* ------------------------------------------------------------ Benefits */}
-      <section className="section section--dark">
+      <section className="section section--blue">
         <div className="container">
           <Reveal>
             <SectionHeading eyebrow="Benefits" title="What we offer our people" align="center" />

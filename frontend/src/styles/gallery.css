@@ -8,8 +8,9 @@
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  background-color: var(--navy-900);
-  color: #fff;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-blue) 100%);
+  color: var(--color-text);
+  border-bottom: 1px solid var(--blue-100);
 }
 
 .gallery-hero__inner {
@@ -28,7 +29,7 @@
 
 .gallery-hero__title {
   margin-top: var(--space-5);
-  color: #fff;
+  color: var(--navy-900);
   font-size: var(--text-4xl);
   max-width: 20ch;
 }
@@ -38,14 +39,14 @@
   max-width: 56ch;
   font-size: var(--text-lg);
   line-height: var(--leading-relaxed);
-  color: var(--color-on-dark-muted);
+  color: var(--color-text-muted);
 }
 
 .gallery-hero__note {
   margin-top: var(--space-6);
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
-  color: var(--color-on-dark-muted);
+  color: var(--color-text-muted);
   padding-left: var(--space-4);
   border-left: 2px solid var(--accent-500);
   max-width: 52ch;

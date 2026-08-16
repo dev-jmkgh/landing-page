@@ -23,17 +23,19 @@
   font-size: var(--text-xs);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
-  color: var(--color-on-dark-muted);
+  color: var(--ink-500);
 }
 
+/* A sheet of drafting paper rather than a dark screen. The page heroes are light
+   now, and a navy panel sitting in one read as a hole punched in the page. */
 .tv__frame {
   position: relative;
   border-radius: var(--radius-lg);
   overflow: hidden;
   background:
-    radial-gradient(120% 100% at 15% 0%, rgba(30, 69, 111, 0.5), transparent 62%),
-    linear-gradient(155deg, rgba(16, 41, 70, 0.9), rgba(5, 15, 28, 0.95));
-  border: 1px solid rgba(255, 255, 255, 0.12);
+    radial-gradient(120% 100% at 15% 0%, rgba(215, 232, 246, 0.85), transparent 64%),
+    linear-gradient(155deg, var(--surface) 0%, var(--blue-050) 100%);
+  border: 1px solid var(--blue-200);
   box-shadow: var(--glass-shadow);
 }
 
@@ -60,18 +62,20 @@
   fill: #ffffff;
 }
 
+/* The centre mark stays navy — one solid anchor holds the drawing together. */
+
 .tv-core__sub {
   font-family: var(--font-sans);
   font-size: 8px;
   font-weight: 600;
   letter-spacing: 0.2em;
-  fill: rgba(214, 226, 240, 0.75);
+  fill: rgba(214, 226, 240, 0.8);
 }
 
 .tv-dims__label {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  fill: rgba(217, 165, 74, 0.95);
+  fill: var(--accent-700);
 }
 
 /* --- Finished state ------------------------------------------------------- */

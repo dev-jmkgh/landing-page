@@ -117,7 +117,7 @@ export default function BusinessPage() {
       </section>
 
       {/* -------------------------------------------------------- Group sectors */}
-      <section className="section section--dark" id="sectors">
+      <section className="section section--blue" id="sectors">
         <div className="container">
           <Reveal>
             <SectionHeading

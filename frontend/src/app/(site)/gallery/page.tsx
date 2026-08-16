@@ -36,7 +36,7 @@ export default function GalleryPage() {
         <div className="container">
           <div className="gallery-hero__inner">
             <div>
-              <Breadcrumbs trail={trail} onDark />
+              <Breadcrumbs trail={trail} />
               <p className="eyebrow" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
                 Our Gallery
               </p>

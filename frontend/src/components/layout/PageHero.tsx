@@ -36,7 +36,7 @@ export function PageHero({
       <div className="container">
         <div className={visual ? 'page-hero__grid' : undefined}>
           <div className="page-hero__inner">
-            <Breadcrumbs trail={trail} onDark />
+            <Breadcrumbs trail={trail} />
             <p className="eyebrow" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
               {eyebrow}
             </p>
@@ -45,7 +45,7 @@ export function PageHero({
             {meta && meta.length > 0 ? (
               <ul className="page-hero__meta">
                 {meta.map((item) => (
-                  <li key={item} className="pill pill--on-dark">
+                  <li key={item} className="pill">
                     {item}
                   </li>
                 ))}

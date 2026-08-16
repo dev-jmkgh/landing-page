@@ -340,19 +340,30 @@
 
 /* --- Interior page hero -------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+   Interior page hero
+   ---------------------------------------------------------------------------
+   Light. This band appears on six pages at roughly 600px each, so as navy it was
+   the largest single reason the site measured darker than it looks like it should:
+   before this change the pages ran 33-65% light against a 65% target.
+
+   The blueprint backdrop stays, but on a light ground it can be stronger without
+   shouting — it now reads as drafting paper rather than as a texture in the dark.
+   --------------------------------------------------------------------------- */
 .page-hero {
   position: relative;
-  background-color: var(--navy-900);
-  color: #fff;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-blue) 100%);
+  color: var(--color-text);
   overflow: hidden;
   isolation: isolate;
+  border-bottom: 1px solid var(--blue-100);
 }
 
 .page-hero__backdrop {
   position: absolute;
   inset: 0;
   z-index: -1;
-  opacity: 0.4;
+  opacity: 0.22;
 }
 
 .page-hero__inner {
@@ -362,7 +373,7 @@
 
 .page-hero__title {
   margin-top: var(--space-5);
-  color: #fff;
+  color: var(--navy-900);
   font-size: var(--text-4xl);
 }
 
@@ -370,7 +381,7 @@
   margin-top: var(--space-5);
   font-size: var(--text-lg);
   line-height: var(--leading-relaxed);
-  color: var(--color-on-dark-muted);
+  color: var(--color-text-muted);
 }
 
 .page-hero__meta {
@@ -671,13 +682,18 @@
 }
 
 .contribution {
-  background-color: var(--navy-900);
+  background-color: var(--surface);
+  border: 1px solid var(--blue-200);
+  border-radius: var(--radius-md);
   padding: clamp(1.5rem, 3vw, 2.25rem);
-  transition: background-color var(--duration-base) var(--ease-out);
+  transition:
+    background-color var(--duration-base) var(--ease-out),
+    border-color var(--duration-base) var(--ease-out);
 }
 
 .contribution:hover {
-  background-color: var(--navy-800);
+  background-color: var(--blue-025);
+  border-color: var(--blue-300);
 }
 
 .contribution__icon {
@@ -686,21 +702,21 @@
   width: 44px;
   height: 44px;
   border-radius: var(--radius-sm);
-  background-color: rgba(192, 139, 46, 0.14);
-  color: var(--accent-400);
+  background-color: var(--blue-100);
+  color: var(--blue-600);
   margin-bottom: var(--space-5);
 }
 
 .contribution__title {
   font-size: var(--text-xl);
-  color: #fff;
+  color: var(--navy-900);
 }
 
 .contribution__text {
   margin-top: var(--space-3);
   font-size: 0.94rem;
   line-height: var(--leading-relaxed);
-  color: var(--color-on-dark-muted);
+  color: var(--color-text-muted);
 }
 
 /* --- Why choose ---------------------------------------------------------- */
@@ -1045,6 +1061,8 @@
   color: var(--color-text-muted);
 }
 
+/* The sector list keeps its default light-surface colours now that the band it sits
+   in is light; the dark overrides remain for any section still using --dark. */
 .section--dark .sector-item__name {
   color: #fff;
 }
@@ -1055,11 +1073,13 @@
 
 /* --- CTA band ------------------------------------------------------------ */
 
+/* Light too, with the gold button carrying the emphasis instead of a navy field. */
 .cta-band {
   position: relative;
   overflow: hidden;
-  background-color: var(--navy-800);
-  color: #fff;
+  background: linear-gradient(180deg, var(--surface-blue) 0%, var(--blue-100) 100%);
+  color: var(--color-text);
+  border-block: 1px solid var(--blue-200);
 }
 
 .cta-band__inner {
@@ -1078,14 +1098,14 @@
 }
 
 .cta-band__title {
-  color: #fff;
+  color: var(--navy-900);
   font-size: var(--text-3xl);
   max-width: 24ch;
 }
 
 .cta-band__text {
   margin-top: var(--space-4);
-  color: var(--color-on-dark-muted);
+  color: var(--color-text-muted);
   max-width: 56ch;
 }
 
@@ -1299,16 +1319,16 @@
   align-items: center;
   gap: 0.75rem;
   padding: var(--space-4) var(--space-5);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--blue-200);
   border-radius: var(--radius-md);
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: var(--surface);
   font-size: 0.95rem;
   font-weight: 500;
-  color: #fff;
+  color: var(--navy-900);
 }
 
 .benefit svg {
-  color: var(--accent-400);
+  color: var(--accent-600);
   flex-shrink: 0;
 }
 

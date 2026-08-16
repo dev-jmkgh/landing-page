@@ -132,7 +132,7 @@ export default function AboutPage() {
       </section>
 
       {/* ------------------------------------------- Government contribution */}
-      <section className="section section--dark">
+      <section className="section section--blue">
         <div className="container">
           <Reveal>
             <SectionHeading
