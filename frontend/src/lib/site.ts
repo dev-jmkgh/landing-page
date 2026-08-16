@@ -44,6 +44,14 @@ export const contactDetails = {
     { label: '+91 88707 73366', href: 'tel:+918870773366' },
     { label: '+91 73057 55370', href: 'tel:+917305755370' },
   ],
+  /**
+   * The number shown in the header and in single-number call actions.
+   *
+   * Named rather than indexed so it cannot be changed by accident: reordering
+   * `phones` would otherwise silently swap the number on every page. Both numbers
+   * stay listed in full on the contact page and in the footer.
+   */
+  primaryPhone: { label: '+91 73057 55370', href: 'tel:+917305755370' },
   email: 'info@jmkglobalholdings.com',
 } as const;
 
@@ -115,7 +123,7 @@ export const mainNavigation: NavItem[] = [
       {
         label: 'JMK Academy',
         href: '/business/jmk-academy',
-        description: 'CAD DESK, SAP and Zoho Book training',
+        description: 'CAD DESK and SAP training',
       },
       {
         label: 'JMK Design Studio',

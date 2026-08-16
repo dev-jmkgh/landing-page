@@ -4,9 +4,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { EnquiryTrigger } from '@/components/enquiry/EnquiryTrigger';
-import { Icon } from '@/components/ui/Icon';
+import { Icon, type IconName } from '@/components/ui/Icon';
 import { assetPath } from '@/lib/paths';
-import { contactDetails, mainNavigation, siteConfig } from '@/lib/site';
+import { contactDetails, mainNavigation, siteConfig, socialLinks } from '@/lib/site';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -54,6 +54,35 @@ function Brand({ variant = 'header' }: { variant?: 'header' | 'footer' }) {
 }
 
 export { Brand };
+
+/**
+ * Facebook / Instagram / LinkedIn.
+ *
+ * URLs come from `socialLinks` in `lib/site.ts`, which drops any entry whose URL is
+ * blank — so a channel the company has not given us simply does not render, rather
+ * than shipping a dead icon. Adding one later is an edit to that file alone.
+ */
+function SocialRow({ variant }: { variant: 'header' | 'drawer' }) {
+  if (socialLinks.length === 0) return null;
+
+  return (
+    <ul className={`social-row social-row--${variant}`}>
+      {socialLinks.map((link) => (
+        <li key={link.id}>
+          <a
+            className="social-row__link"
+            href={link.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${siteConfig.name} on ${link.label}`}
+          >
+            <Icon name={link.id as IconName} size={16} />
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function SiteHeader() {
   const pathname = usePathname() ?? '/';
@@ -117,6 +146,14 @@ export function SiteHeader() {
     };
   }, [drawerOpen]);
 
+  // A menu left open across a navigation is the "randomly stays open" bug; closing on
+  // pathname change is the only reliable cure, since the click that navigated may have
+  // happened inside the menu itself.
+  useEffect(() => {
+    setOpenMenu(null);
+    setDrawerOpen(false);
+  }, [pathname]);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
@@ -165,25 +202,60 @@ export function SiteHeader() {
                 <div
                   className={`nav-desktop__item${isOpen ? ' is-open' : ''}`}
                   key={item.href}
-                  onMouseEnter={() => setOpenMenu(item.href)}
-                  onMouseLeave={() => setOpenMenu((current) => (current === item.href ? null : current))}
                 >
-                  <Link
-                    href={item.href}
-                    className={`nav-link${active ? ' is-active' : ''}`}
-                    aria-current={active ? 'page' : undefined}
+                  {/*
+                    A button, not a link on hover. Hover-only menus open when the
+                    pointer merely crosses them and are unreachable by keyboard or
+                    touch; this opens on click, closes on a second click, on Escape,
+                    on an outside click and on navigation. The overview page is still
+                    reachable — it is the first entry inside the menu.
+                  */}
+                  <button
+                    type="button"
+                    className={`nav-link nav-link--trigger${active ? ' is-active' : ''}`}
                     aria-expanded={isOpen}
                     aria-controls={menuId}
-                    onFocus={() => setOpenMenu(item.href)}
-                    onClick={() => setOpenMenu(null)}
+                    aria-haspopup="true"
+                    onClick={() =>
+                      setOpenMenu((current) => (current === item.href ? null : item.href))
+                    }
                   >
                     {item.label}
                     <Icon className="nav-link__chevron" name="chevronDown" size={15} />
-                  </Link>
+                  </button>
 
-                  <div className="mega-menu" id={menuId} role="group" aria-label={item.label}>
+                  <div
+                    className="mega-menu"
+                    id={menuId}
+                    role="menu"
+                    aria-label={item.label}
+                    hidden={!isOpen}
+                  >
+                    <Link
+                      className="mega-menu__link mega-menu__link--overview"
+                      href={item.href}
+                      role="menuitem"
+                      onClick={() => setOpenMenu(null)}
+                    >
+                      <span className="mega-menu__icon" aria-hidden="true">
+                        <Icon name="briefcase" size={16} />
+                      </span>
+                      <span className="label-stack">
+                        <span className="label-stack__title">All of {item.label}</span>
+                        <span className="label-stack__description">
+                          The full group overview and how the verticals fit together
+                        </span>
+                      </span>
+                    </Link>
+
                     {item.children.map((child) => (
-                      <Link className="mega-menu__link" href={child.href} key={child.href}>
+                      <Link
+                        className="mega-menu__link"
+                        href={child.href}
+                        key={child.href}
+                        role="menuitem"
+                        onClick={() => setOpenMenu(null)}
+                      >
                         <span className="mega-menu__icon" aria-hidden="true">
                           <Icon name="arrowRight" size={16} />
                         </span>
@@ -200,9 +272,10 @@ export function SiteHeader() {
           </nav>
 
           <div className="header-actions">
-            <a className="header-actions__call" href={contactDetails.phones[0].href}>
+            <SocialRow variant="header" />
+            <a className="header-actions__call" href={contactDetails.primaryPhone.href}>
               <Icon name="phone" size={16} />
-              {contactDetails.phones[0].label}
+              {contactDetails.primaryPhone.label}
             </a>
             <EnquiryTrigger className="btn btn--accent btn--sm">Enquire Now</EnquiryTrigger>
             <button
@@ -279,10 +352,11 @@ export function SiteHeader() {
 
             <div className="drawer__foot">
               <EnquiryTrigger className="btn btn--accent btn--block">Enquire Now</EnquiryTrigger>
-              <a className="btn btn--outline btn--block" href={contactDetails.phones[0].href}>
+              <a className="btn btn--outline btn--block" href={contactDetails.primaryPhone.href}>
                 <Icon name="phone" size={16} />
-                {contactDetails.phones[0].label}
+                {contactDetails.primaryPhone.label}
               </a>
+              <SocialRow variant="drawer" />
             </div>
           </div>
         </>

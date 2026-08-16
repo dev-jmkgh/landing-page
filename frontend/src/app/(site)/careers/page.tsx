@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui/Icon';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
+import { pageKeywords, careersTerms } from '@/lib/content/keywords';
 import { benefits, careersIntro, openPositions, roleGroups } from '@/lib/content/careers';
 import { careersVisual } from '@/lib/content/visuals';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
@@ -15,6 +16,7 @@ export const metadata: Metadata = buildMetadata({
   description:
     'Current openings at JMK Global Holdings, Coimbatore: CAD and SAP trainers, developers, designers, engineers, sales, marketing, export and HR roles.',
   path: '/careers',
+  keywords: pageKeywords(careersTerms),
 });
 
 const trail = [

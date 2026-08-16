@@ -7,6 +7,7 @@ import { JsonLd } from '@/components/ui/JsonLd';
 import { MediaFigure } from '@/components/ui/MediaFigure';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
+import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { coreValues, founders, missionPoints, visionStatement, whoWeAre } from '@/lib/content/about';
 import { contributions, successStats } from '@/lib/content/home';
 import { aboutVisual } from '@/lib/content/visuals';
@@ -18,6 +19,7 @@ export const metadata: Metadata = buildMetadata({
   description:
     'Founded in 2023 by Jose AM and Muthu Krishnan Anantham, JMK Global Holdings is a diversified corporate group headquartered in Coimbatore, Tamil Nadu.',
   path: '/about',
+  keywords: pageKeywords(['about JMK Global Holdings', 'diversified business group Coimbatore'], groupTerms, groupSectorTerms),
 });
 
 const trail = [

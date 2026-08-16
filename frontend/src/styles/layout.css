@@ -389,7 +389,8 @@
   .nav-desktop {
     display: flex;
     align-items: center;
-    gap: var(--space-1);
+    gap: 0;
+    flex: none;
   }
 }
 
@@ -397,11 +398,15 @@
   position: relative;
 }
 
+/* A nav label that wraps ("About / Us") makes the whole bar look broken, and there is
+   no width at which two lines are preferable — the row must stay on one line and the
+   header must be sized so it fits. */
 .nav-link {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.55rem 0.85rem;
+  white-space: nowrap;
+  padding: 0.55rem 0.7rem;
   border-radius: var(--radius-sm);
   font-size: 0.94rem;
   font-weight: 500;
@@ -443,29 +448,60 @@
 
 /* --- Mega menu ----------------------------------------------------------- */
 
+/* The trigger is a <button>, so the browser's button styling has to be undone before
+   it can match the sibling nav links. */
+.nav-link--trigger {
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 0.94rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Closed menus are hidden outright rather than faded to transparent: an invisible
+   menu that still occupies the tab order is a keyboard trap, and screen readers
+   announce its contents even though nobody can see them. */
+.mega-menu[hidden] {
+  display: none;
+}
+
 .mega-menu {
   position: absolute;
   top: calc(100% + 0.5rem);
   left: 50%;
-  transform: translateX(-50%) translateY(-6px);
+  transform: translateX(-50%);
   width: min(34rem, 90vw);
+  /* Never let the panel run off the right edge of a narrow desktop window. */
+  max-width: calc(100vw - 2rem);
   padding: var(--space-3);
   background-color: #fff;
   border: 1px solid var(--line-200);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out),
-    visibility var(--duration-fast);
+  z-index: var(--z-dropdown);
 }
 
-.nav-desktop__item.is-open .mega-menu {
-  opacity: 1;
-  visibility: visible;
-  transform: translateX(-50%) translateY(0);
+@media (prefers-reduced-motion: no-preference) {
+  .nav-desktop__item.is-open .mega-menu {
+    animation: mega-menu-in var(--duration-fast) var(--ease-out);
+  }
+}
+
+@keyframes mega-menu-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
+  }
+}
+
+/* The overview entry sits above the verticals, separated so the list still reads as
+   three businesses rather than four. */
+.mega-menu__link--overview {
+  border-bottom: 1px solid var(--line-100);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  margin-bottom: 0.25rem;
+  padding-bottom: 0.9rem;
 }
 
 .mega-menu__link {
@@ -504,12 +540,81 @@
   color: var(--accent-700);
 }
 
+/* ---------------------------------------------------------------------------
+   Social links
+   ---------------------------------------------------------------------------
+   Quiet by default and only coloured on hover: three icons next to the phone
+   number and the primary CTA would otherwise compete with them for attention.
+   Hidden below 1280px, where the header has no room to spare — the drawer carries
+   them on smaller screens instead.
+   --------------------------------------------------------------------------- */
+
+.social-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.social-row__link {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--ink-500);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.social-row__link:hover {
+  color: var(--accent-700);
+  background-color: var(--accent-050);
+}
+
+/* The container is capped at --container-max, so the space available to the header
+   stops growing past that width — showing the icons is a question of what else is in
+   the row, not of viewport size. They appear only once the phone number is also
+   showing and there is room for both. */
+.social-row--header {
+  display: none;
+  margin-right: 0.15rem;
+  padding-right: 0.5rem;
+  border-right: 1px solid var(--line-200);
+}
+
+@media (min-width: 1360px) {
+  .social-row--header {
+    display: flex;
+  }
+}
+
+.social-row--header .social-row__link {
+  width: 30px;
+  height: 30px;
+}
+
+.social-row--drawer {
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.social-row--drawer .social-row__link {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line-200);
+}
+
 /* --- Header actions ------------------------------------------------------- */
 
+/* Every item here is already at its minimum useful size, so none of them may be
+   squeezed: shrinking is what pushed the labels onto second lines. */
 .header-actions {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex: none;
 }
 
 .header-actions__call {
@@ -521,6 +626,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+    white-space: nowrap;
     font-size: 0.9rem;
     font-weight: 600;
     color: var(--navy-800);

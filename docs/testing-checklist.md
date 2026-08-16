@@ -21,7 +21,7 @@ compiles and every route was exported.
 | `/` | Hero, animated counters (1000+/250+/100+), three vertical cards, contribution grid, why-choose list, vision/mission, values, group sectors, CTA |
 | `/about` | Who we are, founders, statistics, government contribution, vision, six mission points, eight core values |
 | `/business` | Three vertical cards with service lists, group sectors section (`#sectors` anchor from the footer) |
-| `/business/jmk-academy` | CAD group with the **Visit CAD DESK Coimbatore** external link, SAP modules (ABAP, BASIS, FICO, MM, SD, CSM), Zoho Book |
+| `/business/jmk-academy` | CAD group with the **Visit CAD DESK Coimbatore** external link, SAP modules (ABAP, BASIS, FICO, MM, SD, CSM) |
 | `/business/jmk-design-studio` | All seven design services |
 | `/business/jmk-software-solutions` | Build / Operate / Infrastructure groups, ERP examples listed |
 | `/gallery` | Category filters change the grid; placeholders render, no invented captions |

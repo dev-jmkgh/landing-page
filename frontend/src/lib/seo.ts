@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { groupTerms } from '@/lib/content/keywords';
 import { SITE_URL, contactDetails, formattedAddress, siteConfig, socialLinks } from '@/lib/site';
 
 /** Absolute URL for a route path such as `/about`. */
@@ -14,6 +15,12 @@ type PageMetaInput = {
   path: string;
   /** Page-specific social card. Defaults to the generated group card. */
   image?: string;
+  /**
+   * Search terms for this page, built with `pageKeywords`. Optional: a page with
+   * nothing distinctive to say (the legal pages) is better off omitting the tag than
+   * carrying a generic list.
+   */
+  keywords?: string[];
   /**
    * Skips the `%s | JMK Global Holdings` template. Used by the home page, whose title
    * already carries the company name.
@@ -37,6 +44,7 @@ export function buildMetadata({
   description,
   path,
   image,
+  keywords,
   absoluteTitle = false,
 }: PageMetaInput): Metadata {
   const url = absoluteUrl(path);
@@ -45,6 +53,7 @@ export function buildMetadata({
   return {
     title: absoluteTitle ? { absolute: title } : title,
     description,
+    ...(keywords && keywords.length > 0 ? { keywords } : {}),
     alternates: { canonical: url },
     openGraph: {
       type: 'website',
@@ -79,10 +88,13 @@ export function organizationJsonLd() {
     name: siteConfig.name,
     url: `${SITE_URL}/`,
     description: siteConfig.description,
+    // Unlike <meta name="keywords">, this one is actually consumed — it tells search
+    // engines what the organisation covers, in schema.org's own vocabulary.
+    knowsAbout: groupTerms,
     foundingDate: String(siteConfig.foundedYear),
     founders: siteConfig.founders.map((name) => ({ '@type': 'Person', name })),
     email: contactDetails.email,
-    telephone: contactDetails.phones[0].label,
+    telephone: contactDetails.primaryPhone.label,
     address: {
       '@type': 'PostalAddress',
       streetAddress: contactDetails.address.lines.join(', '),

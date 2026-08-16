@@ -124,6 +124,8 @@ End-to-End Business Solutions
 
 **Summary lines (verbatim):**
 - JMK Academy – CAD DESK, SAP, Zoho Book
+  - **Zoho Book removed from the website on management instruction (11 Aug 2026).**
+    It remains recorded here because this file documents the source document, not the site.
 - JMK Design Studio – All CAD Designing Works
 - JMK Software Solutions – Software development (ERP, Web Application, mobile
   application), website, Digital marketing support, email box server, domain and hosting
@@ -137,7 +139,7 @@ End-to-End Business Solutions
   - Corporate Training
   - Industry Workshops
   - Placement Assistance
-- Zoho Book (named in the vertical summary line)
+- ~~Zoho Book~~ — withdrawn from the site by management; no longer published anywhere
 
 ### 8.2 JMK Design Studio
 2D Drafting · 3D Modeling · Product Design · Architectural Visualization · Industrial

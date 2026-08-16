@@ -8,6 +8,7 @@ import { Icon } from '@/components/ui/Icon';
 import { PatternBackdrop } from '@/components/ui/PatternBackdrop';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
+import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { coreValues, missionPoints, visionStatement } from '@/lib/content/about';
 import { groupSectors, verticals } from '@/lib/content/business';
 import { contributions, heroContent, successStats, welcomeContent, whyChooseUs } from '@/lib/content/home';
@@ -19,6 +20,7 @@ export const metadata: Metadata = buildMetadata({
   description:
     'JMK Global Holdings is a diversified business group in Coimbatore spanning education, engineering design, software, exports, agriculture and renewable energy.',
   path: '/',
+  keywords: pageKeywords(groupTerms, groupSectorTerms),
   absoluteTitle: true,
 });
 

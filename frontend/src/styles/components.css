@@ -862,11 +862,26 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Floating enquiry button
+   ---------------------------------------------------------------------------
+   Management asked for the button to "blink". A literal blink — opacity flicking
+   on and off — reads as a broken element and is genuinely hostile to anyone with
+   vestibular or attention sensitivities, so this draws the eye the way a premium
+   product does instead: a soft accent halo expands and fades out of the pill while
+   the button itself swells by a couple of percent, then everything settles. One
+   cycle takes about 2.4s and the next is six seconds away, so it registers in
+   peripheral vision without ever demanding attention.
+
+   `z-index` sits one above the back-to-top button so the two can never trade
+   places, and both stay below the dropdown and any modal.
+   --------------------------------------------------------------------------- */
+
 .floating-enquiry {
   position: fixed;
   right: var(--float-edge);
   bottom: var(--float-edge);
-  z-index: var(--z-float);
+  z-index: calc(var(--z-float) + 1);
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
@@ -905,6 +920,73 @@
     height: 56px;
     padding: 0;
     justify-content: center;
+  }
+}
+
+/* The halo. A pseudo-element rather than a box-shadow on the button itself, so the
+   glow can scale past the pill's own bounds without moving it or affecting layout. */
+.floating-enquiry::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-color: var(--accent-500);
+  opacity: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .floating-enquiry {
+    animation: enquiry-nudge 8.4s var(--ease-out) 4s infinite;
+  }
+
+  .floating-enquiry::before {
+    animation: enquiry-halo 8.4s var(--ease-out) 4s infinite;
+  }
+
+  /* Hovering means the button already has the visitor's attention. */
+  .floating-enquiry:hover,
+  .floating-enquiry:hover::before,
+  .floating-enquiry:focus-visible,
+  .floating-enquiry:focus-visible::before {
+    animation-play-state: paused;
+  }
+}
+
+/*
+  One cycle is 8.4s, of which only the first ~28% moves: a swell, a settle, then six
+  seconds of stillness. Keeping the movement under 3% means the pill never shifts
+  enough to disturb the page or to read as flashing.
+*/
+@keyframes enquiry-nudge {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  8% {
+    transform: scale(1.028);
+  }
+  16% {
+    transform: scale(0.995);
+  }
+  24% {
+    transform: scale(1);
+  }
+}
+
+@keyframes enquiry-halo {
+  0% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  28% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
   }
 }
 

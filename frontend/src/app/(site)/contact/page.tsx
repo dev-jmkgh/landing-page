@@ -6,6 +6,7 @@ import { Icon, type IconName } from '@/components/ui/Icon';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
+import { pageKeywords } from '@/lib/content/keywords';
 import { contactVisual } from '@/lib/content/visuals';
 import { breadcrumbJsonLd, buildMetadata, localBusinessJsonLd } from '@/lib/seo';
 import { contactDetails, siteConfig, socialLinks } from '@/lib/site';
@@ -15,6 +16,13 @@ export const metadata: Metadata = buildMetadata({
   description:
     'Contact JMK Global Holdings at 22 NSR Road, Saibaba Kovil, Coimbatore 641011. Call +91 88707 73366 or email info@jmkglobalholdings.com.',
   path: '/contact',
+  keywords: pageKeywords([
+    'contact JMK Global Holdings',
+    'JMK Global Holdings address',
+    'JMK Global Holdings phone number',
+    'NSR Road Saibaba Kovil',
+    'business enquiry Coimbatore',
+  ]),
 });
 
 const trail = [

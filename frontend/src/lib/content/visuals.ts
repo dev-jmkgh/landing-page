@@ -103,7 +103,7 @@ export const academyVisual: VisualSpec = {
   id: 'tv-academy',
   width: W,
   height: H,
-  caption: ['Training Pathway', 'CAD · SAP · Zoho'],
+  caption: ['Training Pathway', 'CAD · SAP'],
   connect: false,
   geometry: [
     // A rising progression line: intake through to placement.

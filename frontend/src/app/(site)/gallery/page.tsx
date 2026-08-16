@@ -5,6 +5,7 @@ import { CtaBand } from '@/components/layout/CtaBand';
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
+import { pageKeywords, academyTerms, designTerms, softwareTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
 
 export const metadata: Metadata = buildMetadata({
@@ -12,6 +13,12 @@ export const metadata: Metadata = buildMetadata({
   description:
     'A visual view of the JMK Global Holdings verticals: CAD and engineering training, design and drafting, software and cloud, renewable energy, farming and exports.',
   path: '/gallery',
+  keywords: pageKeywords(
+    academyTerms.slice(0, 2),
+    designTerms.slice(0, 3),
+    softwareTerms.slice(0, 2),
+    groupSectorTerms.slice(0, 4),
+  ),
 });
 
 const trail = [

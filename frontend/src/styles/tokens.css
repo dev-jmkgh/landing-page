@@ -138,11 +138,24 @@
   --duration-base: 240ms;
   --duration-slow: 460ms;
 
-  /* --- Layers ------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------------
+     Layers
+     ---------------------------------------------------------------------------
+     One ordered scale, so no component has to guess. Reading upward:
+     content < carousel controls < floating buttons < dropdown < sticky header <
+     drawer < modal < skip link.
+
+     The dropdown sits below the header because it is anchored inside it, and the
+     floating buttons sit below the dropdown so an open menu is never obscured by
+     the Enquire Now pill.
+     --------------------------------------------------------------------------- */
+  --z-carousel: 10;
+  --z-float: 90;
+  --z-dropdown: 95;
   --z-header: 100;
   --z-drawer: 120;
-  --z-float: 90;
   --z-modal: 140;
+  --z-skip-link: 200;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -49,10 +49,10 @@ export const verticals: Vertical[] = [
     slug: 'jmk-academy',
     name: 'JMK Academy',
     mark: 'JA',
-    tagline: 'CAD DESK, SAP, Zoho Book',
+    tagline: 'CAD DESK and SAP training',
     icon: 'academy',
     cardSummary:
-      'Engineering CAD training delivered through CAD DESK Coimbatore, SAP module training and Zoho Book training — with corporate programmes, industry workshops and placement assistance.',
+      'Engineering CAD training delivered through CAD DESK Coimbatore and SAP module training — with corporate programmes, industry workshops and placement assistance.',
     cardServices: [
       'Engineering CAD Training',
       'SAP Training',
@@ -64,7 +64,7 @@ export const verticals: Vertical[] = [
       eyebrow: 'Business Vertical',
       heading: 'Training that turns learners into industry-ready professionals',
       intro:
-        'JMK Academy delivers CAD DESK, SAP and Zoho Book training. Our engineering training programs prepare skilled professionals for infrastructure, manufacturing, construction, defense, and industrial sectors by providing expertise in CAD, simulation, and engineering technologies.',
+        'JMK Academy delivers CAD DESK and SAP training. Our engineering training programs prepare skilled professionals for infrastructure, manufacturing, construction, defense, and industrial sectors by providing expertise in CAD, simulation, and engineering technologies.',
     },
     groups: [
       {
@@ -111,24 +111,11 @@ export const verticals: Vertical[] = [
           },
         ],
       },
-      {
-        id: 'zoho',
-        title: 'Zoho Book',
-        intro: 'Zoho Book training forms part of the JMK Academy portfolio alongside CAD and SAP.',
-        icon: 'ledger',
-        services: [
-          {
-            name: 'Zoho Book Training',
-            description:
-              'Get in touch with the Academy team for the current Zoho Book batch schedule and enrolment details.',
-          },
-        ],
-      },
     ],
     seo: {
       title: 'JMK Academy — CAD & SAP Training',
       description:
-        'CAD training through CAD DESK Coimbatore, SAP modules (ABAP, BASIS, FICO, MM, SD, CSM) and Zoho Book, with workshops and placement assistance.',
+        'CAD training through CAD DESK Coimbatore and SAP modules (ABAP, BASIS, FICO, MM, SD, CSM), with workshops and placement assistance.',
     },
   },
   {

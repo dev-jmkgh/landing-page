@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
+import { pageKeywords, academyTerms, designTerms, softwareTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { groupSectors, verticals } from '@/lib/content/business';
 import { businessVisual } from '@/lib/content/visuals';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
@@ -15,6 +16,13 @@ export const metadata: Metadata = buildMetadata({
   description:
     'Explore the JMK Global Holdings ecosystem: JMK Academy, JMK Design Studio and JMK Software Solutions, plus exports, agriculture and renewable energy.',
   path: '/business',
+  keywords: pageKeywords(
+    ['JMK Academy', 'JMK Design Studio', 'JMK Software Solutions'],
+    academyTerms.slice(0, 3),
+    designTerms.slice(0, 3),
+    softwareTerms.slice(0, 3),
+    groupSectorTerms,
+  ),
 });
 
 const trail = [
