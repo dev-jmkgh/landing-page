@@ -10,7 +10,7 @@ import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { coreValues, founders, missionPoints, visionStatement, whoWeAre } from '@/lib/content/about';
-import { contributions, successStats } from '@/lib/content/home';
+import { successStats } from '@/lib/content/home';
 import { aboutHero } from '@/lib/content/heroImages';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
 import { siteConfig } from '@/lib/site';
@@ -136,32 +136,6 @@ export default function AboutPage() {
                 </li>
               ))}
             </ul>
-          </Reveal>
-        </div>
-      </section>
-
-      {/* ------------------------------------------- Government contribution */}
-      <section className="section section--blue">
-        <div className="container">
-          <Reveal>
-            <SectionHeading
-              eyebrow="Government Contribution"
-              title="Supporting India's economic development"
-              description="JMK Global Holdings actively contributes to India's economic development through its diversified business ecosystem."
-            />
-          </Reveal>
-          <Reveal delay={60}>
-            <div className="contribution-grid">
-              {contributions.map((contribution) => (
-                <article className="contribution" key={contribution.id}>
-                  <span className="contribution__icon" aria-hidden="true">
-                    <Icon name={contribution.icon} size={22} />
-                  </span>
-                  <h3 className="contribution__title">{contribution.title}</h3>
-                  <p className="contribution__text">{contribution.description}</p>
-                </article>
-              ))}
-            </div>
           </Reveal>
         </div>
       </section>

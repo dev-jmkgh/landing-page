@@ -43,8 +43,16 @@ export const successStats: Stat[] = [
 export type Contribution = {
   id: string;
   title: string;
+  /**
+   * One line for the card face. Every one of these is a condensation of `description`
+   * below — same claims, fewer words. Nothing is asserted here that the content
+   * document does not already say.
+   */
+  summary: string;
+  /** The full statement, shown in the dialog rather than on the card. */
   description: string;
   icon: IconName;
+  image: { src: string; alt: string; width: number; height: number };
 };
 
 /**
@@ -54,45 +62,93 @@ export type Contribution = {
 export const contributions: Contribution[] = [
   {
     id: 'export',
+    summary:
+      'Trade, foreign exchange earnings and employment across the agricultural supply chain.',
     title: 'Export Business',
     description:
       'Our export division strengthens India’s economy by increasing international trade, generating foreign exchange earnings, boosting GDP, and creating employment opportunities throughout the agricultural supply chain.',
     icon: 'export',
+    image: {
+      src: '/images/gallery/contrib-export-produce.jpg',
+      alt: 'Workers unloading crates of harvested produce from a truck',
+      width: 1400,
+      height: 2100,
+    },
   },
   {
     id: 'farming',
+    summary:
+      'Food security, sustainable agriculture and rural employment.',
     title: 'Integrated Farming',
     description:
       'Our farming initiatives promote food security, sustainable agriculture, rural employment, efficient resource utilization, and environmentally responsible farming practices aligned with national development goals.',
     icon: 'agriculture',
+    image: {
+      src: '/images/gallery/sustainability-farmland.jpg',
+      alt: 'Cultivated farmland in even rows stretching to the horizon',
+      width: 1400,
+      height: 788,
+    },
   },
   {
     id: 'renewable',
+    summary:
+      'Solar, wind and biogas supporting decentralised clean power.',
     title: 'Renewable Energy',
     description:
       'Solar, wind, and biogas initiatives contribute to India’s renewable energy transition by supporting decentralized clean power generation, reducing carbon emissions, strengthening energy security, and promoting green employment.',
     icon: 'energy',
+    image: {
+      src: '/images/gallery/sustainability-solar-farm.jpg',
+      alt: 'Aerial view of long rows of solar photovoltaic panels across open ground',
+      width: 1400,
+      height: 788,
+    },
   },
   {
     id: 'software',
+    summary:
+      'Digital transformation that streamlines processes and supports secure infrastructure.',
     title: 'Software Solutions',
     description:
       'We accelerate digital transformation through intelligent software solutions that streamline administrative processes, improve operational efficiency, enhance data-driven decision-making, and support secure digital infrastructure.',
     icon: 'software',
+    image: {
+      src: '/images/gallery/software-development-team.jpg',
+      alt: 'Developers working together at a shared desk of monitors',
+      width: 1600,
+      height: 2397,
+    },
   },
   {
     id: 'training',
+    summary:
+      'Skilled professionals for infrastructure, manufacturing, construction, defence and industry.',
     title: 'CAD & Engineering Training',
     description:
       'Our engineering training programs prepare skilled professionals for infrastructure, manufacturing, construction, defense, and industrial sectors by providing expertise in CAD, simulation, and engineering technologies.',
     icon: 'academy',
+    image: {
+      src: '/images/gallery/academy-cad-classroom.jpg',
+      alt: 'Instructor presenting at a screen while participants follow on individual workstations',
+      width: 1800,
+      height: 2696,
+    },
   },
   {
     id: 'marketing',
+    summary:
+      'Brand reach, quality leads and measurable digital visibility.',
     title: 'Digital Marketing',
     description:
       'Build your brand, reach the right audience, generate quality leads, and turn digital visibility into measurable business growth.',
     icon: 'marketing',
+    image: {
+      src: '/images/gallery/svc-marketing-metrics.jpg',
+      alt: 'A campaign dashboard on screen showing click-through and conversion figures',
+      width: 1400,
+      height: 1008,
+    },
   },
 ];
 

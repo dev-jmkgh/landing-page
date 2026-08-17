@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { EnquiryTrigger } from '@/components/enquiry/EnquiryTrigger';
+import { ContributionGrid } from '@/components/home/ContributionGrid';
 import { CtaBand } from '@/components/layout/CtaBand';
 import { CountUp } from '@/components/ui/CountUp';
 import { Icon } from '@/components/ui/Icon';
@@ -9,9 +10,8 @@ import { HERO_VARIANTS, Photo } from '@/components/ui/Photo';
 import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
-import { coreValues, missionPoints, visionStatement } from '@/lib/content/about';
 import { groupSectors, verticals } from '@/lib/content/business';
-import { contributions, heroContent, successStats, welcomeContent, whyChooseUs } from '@/lib/content/home';
+import { heroContent, successStats, welcomeContent, whyChooseUs } from '@/lib/content/home';
 import { buildMetadata } from '@/lib/seo';
 import { siteConfig } from '@/lib/site';
 
@@ -205,19 +205,7 @@ export default function HomePage() {
             />
           </Reveal>
 
-          <Reveal delay={60}>
-            <div className="contribution-grid">
-              {contributions.map((contribution) => (
-                <article className="contribution" key={contribution.id}>
-                  <span className="contribution__icon" aria-hidden="true">
-                    <Icon name={contribution.icon} size={22} />
-                  </span>
-                  <h3 className="contribution__title">{contribution.title}</h3>
-                  <p className="contribution__text">{contribution.description}</p>
-                </article>
-              ))}
-            </div>
-          </Reveal>
+          <ContributionGrid />
         </div>
       </section>
 
@@ -253,63 +241,6 @@ export default function HomePage() {
                 ))}
               </div>
             </Reveal>
-          </div>
-        </div>
-      </section>
-
-      {/* --------------------------------------------------------- Vision & mission */}
-      <section className="section section--muted">
-        <div className="container">
-          <div className="split">
-            <Reveal>
-              <SectionHeading eyebrow="Vision" title="Where the group is heading" />
-              <div className="vision-panel">
-                <span className="vision-panel__mark" aria-hidden="true">
-                  “
-                </span>
-                <p className="vision-panel__quote">{visionStatement}</p>
-              </div>
-            </Reveal>
-
-            <Reveal delay={80}>
-              <SectionHeading eyebrow="Mission" title="What we do about it" as="h2" />
-              <ol className="mission-list">
-                {missionPoints.map((point) => (
-                  <li className="mission-list__item" key={point}>
-                    <p className="mission-list__text">{point}</p>
-                  </li>
-                ))}
-              </ol>
-            </Reveal>
-          </div>
-        </div>
-      </section>
-
-      {/* -------------------------------------------------------------- Core values */}
-      <section className="section">
-        <div className="container">
-          <Reveal>
-            <SectionHeading
-              eyebrow="Core Values"
-              title="The standards every JMK business works to"
-              align="center"
-            />
-          </Reveal>
-
-          <div className="values-grid">
-            {coreValues.map((value, index) => (
-              <Reveal key={value.name} delay={index * 50}>
-                <article className="value-card">
-                  <span className="value-card__index" aria-hidden="true">
-                    {String(index + 1).padStart(2, '0')}
-                  </span>
-                  <span className="value-card__icon" aria-hidden="true">
-                    <Icon name={value.icon} size={26} />
-                  </span>
-                  <h3 className="value-card__name">{value.name}</h3>
-                </article>
-              </Reveal>
-            ))}
           </div>
         </div>
       </section>
