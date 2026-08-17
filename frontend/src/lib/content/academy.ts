@@ -33,58 +33,48 @@ export type CourseTile = {
 /* CAD & engineering                                                           */
 /* -------------------------------------------------------------------------- */
 
-export const cadTiles: CourseTile[] = [
+/**
+ * One CAD tile, not four.
+ *
+ * This was a four-tile carousel, and the page then listed the same CAD services again
+ * further down from `business.ts` — so a visitor met "Engineering CAD Training" twice
+ * under two different presentations. There is now a single primary tile, and what the
+ * other three tiles said survives as `cadHighlights` beneath it: the same information,
+ * stated once, without a second set of photographs implying a second set of courses.
+ *
+ * The photograph is deliberately not the one behind this page's hero — the same frame
+ * twice on one screen reads as a template with nothing to put in it.
+ */
+export const primaryCadTile: CourseTile = {
+  id: 'engineering-cad',
+  category: 'CAD & Engineering',
+  title: 'Engineering CAD Training',
+  description:
+    'Engineering-focused CAD delivered through CAD DESK Coimbatore, working with the modelling and drafting tools used on real design work — from dimensioned 2D drawings through to 3D models and assemblies.',
+  image: {
+    src: '/images/gallery/academy-cad-workstation.jpg',
+    alt: 'A widescreen monitor displaying a 3D CAD model of a structural steel assembly',
+    width: 1400,
+    height: 933,
+  },
+};
+
+/** What the retired tiles carried, as supporting detail rather than as course cards. */
+export const cadHighlights: { title: string; text: string; icon: IconName }[] = [
   {
-    id: 'engineering-cad',
-    category: 'CAD & Engineering',
-    title: 'Engineering CAD Training',
-    description:
-      'Engineering-focused CAD delivered through CAD DESK Coimbatore, working with the modelling and drafting tools used on real design work.',
-    image: {
-      src: '/images/gallery/academy-cad-3d-workstation.jpg',
-      alt: 'Engineer working on a 3D plant model in CAD software at a dual-monitor workstation',
-      width: 1600,
-      height: 1067,
-    },
+    title: 'Instructor-led sessions',
+    text: 'Participants work through the exercises at their own workstation rather than watching them.',
+    icon: 'academy',
   },
   {
-    id: 'cad-lab',
-    category: 'Classroom & Lab',
-    title: 'CAD Training Sessions',
-    description:
-      'Instructor-led sessions at individual workstations, so every participant works through the exercises on screen rather than watching them.',
-    image: {
-      src: '/images/gallery/academy-cad-classroom.jpg',
-      alt: 'Instructor presenting at a screen while participants follow on individual workstations',
-      width: 1800,
-      height: 2696,
-    },
+    title: '2D drafting to 3D modelling',
+    text: 'Dimensioned drawings through to models and assemblies — the span the Design Studio works in daily.',
+    icon: 'compass',
   },
   {
-    id: 'drafting-modelling',
-    category: 'Drafting & Modelling',
-    title: '2D Drafting & 3D Modelling',
-    description:
-      'From dimensioned 2D drawings through to 3D models and assemblies — the drafting-to-modelling span the Design Studio works in daily.',
-    image: {
-      src: '/images/gallery/design-3d-model-workstation.jpg',
-      alt: 'Three-dimensional structural assembly model open on a CAD workstation display',
-      width: 1800,
-      height: 1201,
-    },
-  },
-  {
-    id: 'corporate-workshops',
-    category: 'For Organisations',
-    title: 'Corporate Training & Workshops',
-    description:
-      'Corporate programmes and industry workshops for teams, plus placement assistance for individual learners.',
-    image: {
-      src: '/images/gallery/academy-corporate-training.jpg',
-      alt: 'Presenter leading a seminar for a seated group in a corporate training room',
-      width: 1800,
-      height: 1202,
-    },
+    title: 'For organisations',
+    text: 'Corporate programmes and industry workshops for teams, plus placement assistance for individual learners.',
+    icon: 'users',
   },
 ];
 
@@ -92,11 +82,26 @@ export const cadTiles: CourseTile[] = [
 /* SAP                                                                         */
 /* -------------------------------------------------------------------------- */
 
-export const sapBanner = {
-  src: '/images/gallery/academy-sap-business-training.jpg',
-  alt: 'Trainer presenting business process and reporting charts during an enterprise software session',
-  width: 1800,
-  height: 1200,
+/**
+ * One SAP tile, matching the CAD one in shape so the two read as a pair.
+ *
+ * `why` was previously a caption floating over a wide banner image. It is the single
+ * most useful sentence in this section — it says what SAP is and why module training
+ * exists — so it belongs in the tile rather than as an overlay on a photograph.
+ */
+export const primarySapTile: CourseTile & { why: string } = {
+  id: 'sap-training',
+  category: 'Enterprise Software',
+  title: 'SAP Training',
+  description:
+    'Module-wise SAP training across functional and technical tracks, covering the six modules JMK Academy teaches.',
+  why: 'SAP runs the core processes — finance, materials, sales, service — of a great many organisations. Module training is how people learn to work inside those processes rather than around them.',
+  image: {
+    src: '/images/gallery/academy-sap-business-training.jpg',
+    alt: 'Trainer presenting business process and reporting charts during an enterprise software session',
+    width: 1800,
+    height: 1200,
+  },
 };
 
 export type SapModule = {

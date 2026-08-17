@@ -1,86 +1,98 @@
-import { CourseTile, SapModuleTile } from '@/components/academy/CourseTile';
+import { PrimaryCourseTile, SapModuleTile } from '@/components/academy/CourseTile';
 import { EnquiryTrigger } from '@/components/enquiry/EnquiryTrigger';
-import { Carousel } from '@/components/ui/Carousel';
 import { Icon } from '@/components/ui/Icon';
-import { Photo } from '@/components/ui/Photo';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
-import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
-import { academyPromises, cadTiles, sapBanner, sapModules } from '@/lib/content/academy';
+import {
+  academyPromises,
+  cadHighlights,
+  primaryCadTile,
+  primarySapTile,
+  sapModules,
+} from '@/lib/content/academy';
+import { EXTERNAL_LINKS } from '@/lib/site';
 
 /**
- * The Academy catalogue: CAD as image tiles, then SAP as a section of its own.
+ * The Academy catalogue: CAD once, then SAP once.
  *
- * Structured as a training catalogue rather than a services list — a prospective
- * learner is choosing between disciplines, so the page leads with what each one looks
- * like and what it covers, and only then lists the service detail underneath.
+ * Both disciplines used to be presented twice on this page — a four-tile CAD carousel
+ * and a SAP banner here, then "Engineering CAD Training" and "SAP Training" again
+ * lower down from the vertical's service groups, listing the same six module codes a
+ * second time. Each now appears exactly once: one primary tile, its explanation, and
+ * its supporting detail. `VerticalDetail` skips the service groups for this vertical
+ * because this component is that content.
  *
- * The SAP banner carries a `flow` overlay rather than the `measure` one used for CAD:
- * SAP is a chain of process steps, and the drawing should say something about its own
- * subject rather than repeating the same figure on every section.
+ * The CAD DESK link leads the CAD section rather than closing it. Course details,
+ * batches and enrolment genuinely live on caddeskindia.com, so a visitor who wants to
+ * enrol should meet that link before the explanation, not after scrolling past it.
+ *
+ * Each section's drawing sits inside the tile's own media box, absolutely positioned
+ * over the photograph, so the animation adds no height of its own.
  */
 export function AcademyCatalogue() {
   return (
     <>
-      {/* ------------------------------------------------------------ CAD tiles */}
+      {/* ------------------------------------------------------------------ CAD */}
       <section className="section">
         <div className="container">
+          {/* Before the explanation, deliberately — see the note above. The tile
+              below carries this section's heading; there is no separate one. */}
           <Reveal>
-            <SectionHeading
-              eyebrow="CAD & Engineering"
-              title="Engineering CAD training"
-              description="Delivered through CAD DESK Coimbatore, alongside corporate programmes, industry workshops and placement assistance."
-            />
+            <div className="partner-link">
+              <div className="partner-link__text">
+                <p className="partner-link__label">Training partner</p>
+                <p className="partner-link__name">CAD DESK Coimbatore</p>
+                <p className="partner-link__note">
+                  Course details, batches and enrolment are handled on the CAD DESK
+                  website.
+                </p>
+              </div>
+              <a
+                className="btn btn--primary"
+                href={EXTERNAL_LINKS.cadDeskCoimbatore}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Visit CAD DESK
+                <Icon name="arrowUpRight" size={16} />
+                <span className="sr-only">(opens in a new tab)</span>
+              </a>
+            </div>
           </Reveal>
 
-          {/* A carousel rather than a grid: four tiles do not fit three-up, so there
-              is always one more to reach, and on a phone a row of scrollable cards
-              beats a column four screens long. */}
-          <Carousel label="CAD and engineering training">
-            {cadTiles.map((tile, index) => (
-              <Reveal key={tile.id} delay={index * 70}>
-                <CourseTile tile={tile} />
-              </Reveal>
-            ))}
-          </Carousel>
+          <Reveal delay={70}>
+            <PrimaryCourseTile
+              tile={primaryCadTile}
+              overlay="measure"
+              overlayId="cad-tile"
+              action={{
+                label: 'Explore CAD courses',
+                href: EXTERNAL_LINKS.cadDeskCoimbatore,
+                external: true,
+              }}
+              highlights={cadHighlights}
+            />
+          </Reveal>
         </div>
       </section>
 
-      {/* ----------------------------------------------------------------- SAP */}
+      {/* ------------------------------------------------------------------ SAP */}
       <section className="section section--blue">
         <div className="container">
           <Reveal>
-            <SectionHeading
-              eyebrow="SAP Training"
-              title="Module-wise SAP training"
-              description="Functional and technical tracks across the six modules JMK Academy teaches."
+            <PrimaryCourseTile
+              tile={primarySapTile}
+              overlay="flow"
+              overlayId="sap-tile"
+              why={{ label: 'Why SAP?', text: primarySapTile.why }}
+              action={{ label: 'Explore the modules', href: '#sap-modules' }}
             />
           </Reveal>
 
-          <Reveal delay={60}>
-            <figure className="sap-banner">
-              <Photo
-                src={sapBanner.src}
-                alt={sapBanner.alt}
-                width={sapBanner.width}
-                height={sapBanner.height}
-                sizes="(max-width: 1023px) 92vw, 1200px"
-              />
-              <span className="sap-banner__wash" aria-hidden="true" />
-              <TechnicalOverlay variant="flow" id="sap" className="sap-banner__drawing" />
-              <figcaption className="sap-banner__caption">
-                <span className="sap-banner__caption-title">Why SAP?</span>
-                <span className="sap-banner__caption-text">
-                  SAP runs the core processes — finance, materials, sales, service — of a
-                  great many organisations. Module training is how people learn to work
-                  inside those processes rather than around them.
-                </span>
-              </figcaption>
-            </figure>
-          </Reveal>
-
           <Reveal delay={90}>
-            <h3 className="sap-grid__heading">SAP training areas</h3>
+            <h3 className="sap-grid__heading" id="sap-modules">
+              SAP training areas
+            </h3>
           </Reveal>
 
           <div className="sap-grid">

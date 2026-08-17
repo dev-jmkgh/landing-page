@@ -891,17 +891,27 @@
   color: var(--navy-950);
   font-weight: 700;
   font-size: 0.94rem;
-  box-shadow: 0 10px 28px -8px rgba(10, 27, 46, 0.55);
+  /* Depth from the navy shadow, and a gold cast beneath it so the pill reads as lit
+     rather than as a flat chip sitting on the page. */
+  box-shadow:
+    0 10px 28px -8px rgba(10, 27, 46, 0.55),
+    0 4px 14px -6px rgba(191, 143, 46, 0.5);
   transition:
     background-color var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-out);
 }
 
-.floating-enquiry:hover {
+.floating-enquiry:hover,
+.floating-enquiry:focus-visible {
   background-color: var(--accent-400);
-  transform: translateY(-2px);
-  box-shadow: 0 14px 32px -8px rgba(10, 27, 46, 0.6);
+  /* Lift and a small scale, so the pointer target grows rather than shrinks. */
+  transform: translateY(-2px) scale(1.04);
+  /* A gold cast under the navy shadow: the glow belongs to the brand colour, and a
+     purely neutral shadow made the button read as grey furniture at rest. */
+  box-shadow:
+    0 16px 34px -8px rgba(10, 27, 46, 0.6),
+    0 6px 20px -6px rgba(191, 143, 46, 0.65);
 }
 
 .floating-enquiry__label {
@@ -937,20 +947,32 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  /* `cubic-bezier` rather than --ease-out: the rise wants to decelerate into the top
+     and the fall wants to accelerate out of it, which a single ease-out cannot do. */
   .floating-enquiry {
-    animation: enquiry-nudge 8.4s var(--ease-out) 4s infinite;
+    animation: enquiry-jump 6.5s cubic-bezier(0.34, 0.6, 0.36, 1) 3s infinite;
   }
 
   .floating-enquiry::before {
-    animation: enquiry-halo 8.4s var(--ease-out) 4s infinite;
+    animation: enquiry-halo 6.5s var(--ease-out) 3s infinite;
   }
 
-  /* Hovering means the button already has the visitor's attention. */
+  /*
+    Hovering means the button already has the visitor's attention, so the jump stops.
+    `animation: none`, not `animation-play-state: paused` — pausing freezes the
+    animated transform in place and, because an animation outranks a normal
+    declaration, that frozen value would beat the hover transform below and strand the
+    button mid-hop. Removing the animation hands control back, and the existing
+    transform transition carries it down smoothly.
+  */
   .floating-enquiry:hover,
+  .floating-enquiry:focus-visible {
+    animation: none;
+  }
+
   .floating-enquiry:hover::before,
-  .floating-enquiry:focus-visible,
   .floating-enquiry:focus-visible::before {
-    animation-play-state: paused;
+    animation: none;
   }
 }
 
@@ -959,19 +981,30 @@
   seconds of stillness. Keeping the movement under 3% means the pill never shifts
   enough to disturb the page or to read as flashing.
 */
-@keyframes enquiry-nudge {
+/*
+  The jump. A double hop — a full one, then a smaller settle — because a single rise
+  and fall reads as a glitch, while the second smaller hop reads as deliberate. It is
+  the same shape as a ball losing energy, which is why it looks intentional rather than
+  mechanical.
+
+  Only the first ~22% of the cycle moves. At 6.5s that is about 1.4 seconds of movement
+  followed by five of stillness, which is what keeps it an occasional invitation rather
+  than a flashing advert.
+*/
+@keyframes enquiry-jump {
   0%,
+  22%,
   100% {
-    transform: scale(1);
+    transform: translateY(0);
   }
-  8% {
-    transform: scale(1.028);
+  6% {
+    transform: translateY(-9px);
+  }
+  12% {
+    transform: translateY(0);
   }
   16% {
-    transform: scale(0.995);
-  }
-  24% {
-    transform: scale(1);
+    transform: translateY(-4px);
   }
 }
 

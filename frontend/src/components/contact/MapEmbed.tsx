@@ -8,7 +8,13 @@ import { formattedAddress, mapsDirectionsUrl, mapsEmbedUrl, siteConfig } from '@
  */
 export function MapEmbed() {
   return (
-    <div className="map-frame">
+    /*
+      The modifier matters for spacing. A real map wants a 16:9 frame, but the
+      placeholder is a pin, an address and a button — perhaps 200px of content. Sharing
+      the 16:9 rule gave it a 675px box at desktop width, most of it empty, and that
+      single element was the largest blank area anywhere on the site.
+    */
+    <div className={mapsEmbedUrl ? 'map-frame' : 'map-frame map-frame--placeholder'}>
       {mapsEmbedUrl ? (
         <iframe
           src={mapsEmbedUrl}

@@ -1208,7 +1208,7 @@
   display: grid;
   gap: var(--space-6);
   align-items: center;
-  padding-block: clamp(3rem, 6vw, 4.5rem);
+  padding-block: clamp(2.5rem, 2rem + 2.2vw, 3.75rem);
 }
 
 @media (min-width: 900px) {
@@ -1537,6 +1537,18 @@
   border: 0;
 }
 
+/* No embed configured: size to the placeholder's own content instead of holding a
+   16:9 frame open for a map that is not there. */
+.map-frame--placeholder {
+  aspect-ratio: auto;
+  min-height: 0;
+}
+
+.map-frame--placeholder .map-placeholder {
+  position: static;
+  padding-block: clamp(2rem, 4vw, 3rem);
+}
+
 .map-placeholder {
   position: absolute;
   inset: 0;
@@ -1738,178 +1750,235 @@
   width: 100%;
 }
 
-.course-tile {
+/* --- Training partner link ------------------------------------------------
+   Leads the CAD section, before the explanation rather than after it: course
+   details and enrolment genuinely happen on the partner's site, so someone who
+   came to enrol should not have to read past the whole section to find it.
+   -------------------------------------------------------------------------- */
+
+.partner-link {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: clamp(1.5rem, 2.5vw, 2.25rem);
+  padding: clamp(1.1rem, 2vw, 1.5rem) clamp(1.25rem, 2.5vw, 1.75rem);
+  background: linear-gradient(135deg, var(--blue-050) 0%, var(--surface) 70%);
+  border: 1px solid var(--blue-200);
+  /* The gold edge marks it as the one outbound route in the section without
+     resorting to a louder background. */
+  border-left: 3px solid var(--accent-500);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+}
+
+.partner-link__text {
+  min-width: 16rem;
+  flex: 1 1 22rem;
+}
+
+.partner-link__label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-700);
+}
+
+.partner-link__name {
+  margin-top: 0.15rem;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--navy-900);
+  letter-spacing: -0.01em;
+}
+
+.partner-link__note {
+  margin-top: 0.35rem;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--ink-700);
+  max-width: 46ch;
+}
+
+/* --- Primary discipline tile ----------------------------------------------
+   One per discipline. Photograph beside the copy on a wide screen, stacked
+   below it on a narrow one.
+
+   The media column is a fixed 16:9 with `object-fit: cover`, so CAD and SAP
+   present at the same depth whatever their source proportions — 1400x933 and
+   1800x1200 would otherwise sit at visibly different heights. The body is a
+   flex column so its action is pushed to the bottom edge and the two tiles'
+   links line up rather than floating wherever the text happens to end.
+   -------------------------------------------------------------------------- */
+
+.primary-tile {
+  display: grid;
+  grid-template-columns: 1fr;
   overflow: hidden;
   background-color: var(--surface);
   border: 1px solid var(--blue-200);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--shadow-sm);
   transition:
     border-color var(--duration-base) var(--ease-out),
-    box-shadow var(--duration-base) var(--ease-out),
-    transform var(--duration-base) var(--ease-out);
+    box-shadow var(--duration-base) var(--ease-out);
 }
 
-.course-tile:hover {
+.primary-tile:hover {
   border-color: var(--blue-300);
   box-shadow: var(--glass-shadow-hover);
-  transform: translateY(-3px);
 }
 
-.course-tile__media {
+@media (min-width: 900px) {
+  .primary-tile {
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1fr);
+    align-items: stretch;
+    /* A floor, so the two tiles' photographs come out the same depth. Beside the copy
+       the media stretches to the body's height, and the CAD body is the longer of the
+       two — without this the SAP photograph sat ~60px shallower and the pair read as
+       two designs rather than one. */
+    min-height: 27rem;
+  }
+}
+
+.primary-tile__media {
   position: relative;
   overflow: hidden;
   background-color: var(--blue-050);
-}
-
-/* One ratio for every tile, whatever the source proportions — this is what keeps a
-   row of them level. */
-.course-tile__media img {
-  display: block;
-  width: 100%;
+  /* 16:9 gives roughly 250px at the widths this tile occupies, inside the
+     220-280px the brief asks for, and it scales instead of being pinned. */
   aspect-ratio: 16 / 9;
-  object-fit: cover;
-  transition: transform var(--duration-slow) var(--ease-out);
 }
 
-.course-tile:hover .course-tile__media img {
-  transform: scale(1.04);
-}
-
-/* A whisper of navy at the foot of the image so the card edge does not float. */
-.course-tile__wash {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(11, 31, 51, 0) 62%, rgba(11, 31, 51, 0.22) 100%);
-}
-
-.course-tile__body {
-  display: flex;
-  flex-direction: column;
-  padding: clamp(1.1rem, 2.2vw, 1.5rem);
-}
-
-.course-tile__category {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--blue-600);
-}
-
-.course-tile__title {
-  margin-top: 0.4rem;
-  font-size: 1.08rem;
-  font-weight: 600;
-  color: var(--navy-900);
-  line-height: var(--leading-snug);
-}
-
-.course-tile__text {
-  margin-top: var(--space-3);
-  font-size: 0.94rem;
-  line-height: var(--leading-relaxed);
-  color: var(--color-text-muted);
-}
-
-/* --- SAP banner ----------------------------------------------------------- */
-
-.sap-banner {
-  position: relative;
-  margin: 0 0 clamp(2rem, 4vw, 3rem);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  border: 1px solid var(--blue-200);
-  box-shadow: var(--glass-shadow);
-  isolation: isolate;
-}
-
-.sap-banner img {
-  display: block;
-  width: 100%;
-  aspect-ratio: 21 / 9;
-  object-fit: cover;
-}
-
-@media (max-width: 767px) {
-  .sap-banner img {
-    aspect-ratio: 4 / 3;
+@media (min-width: 900px) {
+  .primary-tile__media {
+    /* Beside the copy the media must match the body's height rather than keep
+       its own ratio, or a short column leaves a gap under the photograph. */
+    aspect-ratio: auto;
+    min-height: 280px;
+    height: 100%;
   }
 }
 
-.sap-banner__wash {
+.primary-tile__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* A light wash so the drawing over the photograph stays legible and the tile
+   sits in the same light-blue family as everything around it. */
+.primary-tile__wash {
   position: absolute;
   inset: 0;
   background: linear-gradient(
-    90deg,
-    rgba(247, 250, 252, 0.95) 0%,
-    rgba(247, 250, 252, 0.82) 40%,
-    rgba(240, 246, 251, 0.35) 72%,
-    rgba(240, 246, 251, 0.1) 100%
+    160deg,
+    rgba(240, 246, 251, 0.34) 0%,
+    rgba(240, 246, 251, 0.08) 46%,
+    rgba(10, 27, 46, 0.16) 100%
   );
 }
 
-@media (max-width: 767px) {
-  .sap-banner__wash {
-    background: linear-gradient(
-      180deg,
-      rgba(247, 250, 252, 0.92) 0%,
-      rgba(247, 250, 252, 0.86) 60%,
-      rgba(240, 246, 251, 0.78) 100%
-    );
-  }
-}
-
-/* Confined to the right, away from the caption — the same reason as the home hero. */
-.sap-banner .sap-banner__drawing {
-  position: absolute;
-  inset: 0 0 0 50%;
-  width: auto;
-  height: auto;
-  opacity: 0.55;
-}
-
-@media (max-width: 1023px) {
-  .sap-banner .sap-banner__drawing {
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0.25;
-  }
-}
-
-.sap-banner__caption {
+/* Absolutely positioned inside the media box: the drawing is a film over the
+   photograph, never a block that adds height of its own. */
+.primary-tile .primary-tile__drawing {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.primary-tile__body {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 0.6rem;
-  padding: clamp(1.25rem, 4vw, 3rem);
-  max-width: 40rem;
+  padding: clamp(1.35rem, 2.6vw, 2rem);
 }
 
-.sap-banner__caption-title {
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
+.primary-tile__category {
+  font-size: var(--text-xs);
   font-weight: 700;
-  color: var(--navy-900);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-700);
 }
 
-.sap-banner__caption-text {
+.primary-tile__title {
+  margin-top: 0.4rem;
+  font-size: var(--text-2xl);
+  color: var(--navy-900);
+  letter-spacing: -0.015em;
+}
+
+.primary-tile__text {
+  margin-top: var(--space-3);
   font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   color: var(--ink-700);
-  max-width: 34rem;
 }
 
-@media (max-width: 559px) {
-  .sap-banner__caption-text {
-    font-size: 0.9rem;
-  }
+.primary-tile__why {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background-color: var(--blue-025);
+  border: 1px solid var(--blue-100);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--ink-700);
+}
+
+.primary-tile__why-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--navy-900);
+}
+
+.primary-tile__points {
+  margin-top: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.primary-tile__point {
+  display: flex;
+  gap: 0.7rem;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--ink-700);
+}
+
+.primary-tile__point strong {
+  color: var(--navy-900);
+  font-weight: 600;
+}
+
+.primary-tile__point-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-xs);
+  background-color: var(--blue-050);
+  border: 1px solid var(--blue-200);
+  color: var(--accent-700);
+}
+
+/* `margin-top: auto` is what aligns the two tiles' actions: the body is a flex
+   column, so the footer is pushed to the bottom whichever explanation is longer. */
+.primary-tile__footer {
+  margin-top: auto;
+  padding-top: var(--space-5);
 }
 
 /* --- SAP modules ---------------------------------------------------------- */
@@ -2105,10 +2174,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .course-tile,
-  .course-tile:hover,
-  .course-tile__media img,
-  .course-tile:hover .course-tile__media img {
+  .primary-tile,
+  .primary-tile:hover,
+  .primary-tile__media img {
     transform: none;
     transition: none;
   }

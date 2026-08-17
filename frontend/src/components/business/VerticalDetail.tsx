@@ -28,6 +28,7 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
   ];
 
   const others = verticals.filter((item) => item.slug !== vertical.slug);
+  const isAcademy = vertical.slug === 'jmk-academy';
 
   return (
     <>
@@ -45,12 +46,18 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
       />
 
       {/*
-        The Academy gets a catalogue ahead of its service list: image-led CAD tiles,
-        then SAP as its own section with a banner and a "why" on every module. The
-        other two verticals go straight to their services, which is what they are.
-      */}
-      {vertical.slug === 'jmk-academy' ? <AcademyCatalogue /> : null}
+        The Academy gets a catalogue instead of a service list, not as well as one.
 
+        It used to get both, and the two said the same thing: the catalogue presented
+        CAD and SAP as tiles, then the service groups below presented "Engineering CAD
+        Training" and "SAP Training" again, down to repeating the same six module
+        codes. The catalogue is the fuller of the two and carries the CAD DESK link
+        that used to live on the CAD group, so the groups are skipped here rather than
+        rendered twice over.
+      */}
+      {isAcademy ? <AcademyCatalogue /> : null}
+
+      {!isAcademy ? (
       <section className="section">
         <div className="container">
           {vertical.groups.map((group) => (
@@ -110,6 +117,7 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
           ))}
         </div>
       </section>
+      ) : null}
 
       {/* -------------------------------------------------- Other group verticals */}
       <section className="section section--muted">

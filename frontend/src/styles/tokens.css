@@ -128,7 +128,17 @@
   --space-12: 3rem;
   --space-16: 4rem;
   --space-20: 5rem;
-  --section-y: clamp(3.5rem, 7vw, 6.5rem);
+  /* Vertical padding on a standard section, applied to both edges — so the space
+     between two adjacent sections is twice this. That doubling is what made the site
+     feel loose: at 7vw a 1440px viewport got 101px a side, and every section boundary
+     opened a 202px gap. Measured across nine pages, those boundaries were almost the
+     whole of the empty space.
+
+     The curve is `rem + vw` rather than plain `vw` so the middle of the range is not
+     starved: a plain vw large enough for a desktop leaves a tablet cramped, and one
+     comfortable on a tablet leaves a desktop loose. This lands at 48px on a phone,
+     ~57px on a tablet, and 72px from about 1400px up. */
+  --section-y: clamp(3rem, 2rem + 3.2vw, 4.5rem);
   --gutter: clamp(1.25rem, 4vw, 2.5rem);
 
   /* --- Structure --------------------------------------------------------- */
