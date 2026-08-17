@@ -1,6 +1,15 @@
 /**
  * JMK Academy course catalogue.
  *
+ * IMAGERY. Service and module photographs are licensed stock (Unsplash —
+ * https://unsplash.com/license, free for commercial use, no attribution required)
+ * showing the *domain the service works in*: source code for ABAP, a warehouse aisle
+ * for Materials Management, a server hall for licensing and hosting. None is presented
+ * as a JMK site, a JMK employee or a JMK project, none is reused across tiles, and the
+ * alt text describes only what the frame literally shows. Frames carrying a visible
+ * third-party brand were rejected during selection — the same rule that removed the
+ * shipping-line photographs from the gallery.
+ *
  * Two rules govern everything here.
  *
  * The offerings are exactly those in the supplied content document: engineering CAD
@@ -111,6 +120,12 @@ export type SapModule = {
   /** Why the module matters — about the module itself, never a promise to a learner. */
   why: string;
   icon: IconName;
+  /**
+   * Photograph of the *domain the module works in* — code for ABAP, a server hall for
+   * BASIS, a warehouse for MM. Not a photograph of SAP, which has none, and not of a
+   * JMK classroom. Each module gets its own frame; none is used twice.
+   */
+  image: { src: string; alt: string; width: number; height: number };
 };
 
 /**
@@ -127,6 +142,12 @@ export const sapModules: SapModule[] = [
       'SAP’s own programming language — reports, data dictionary objects, forms and the enhancements that tailor a standard system.',
     why: 'ABAP is how an SAP system is extended, so it sits behind almost every customisation an organisation asks for.',
     icon: 'code',
+    image: {
+      src: '/images/gallery/sap-abap-code.jpg',
+      alt: 'Program source code on a dark editor screen',
+      width: 1400,
+      height: 935,
+    },
   },
   {
     code: 'BASIS',
@@ -135,6 +156,12 @@ export const sapModules: SapModule[] = [
       'The administration layer: installation, users and authorisations, transports, monitoring and system health.',
     why: 'Every other module runs on top of BASIS — it is the platform the functional teams depend on.',
     icon: 'server',
+    image: {
+      src: '/images/gallery/sap-basis-servers.jpg',
+      alt: 'Server racks and structured cabling in an equipment room',
+      width: 1400,
+      height: 934,
+    },
   },
   {
     code: 'FICO',
@@ -143,6 +170,12 @@ export const sapModules: SapModule[] = [
       'General ledger, accounts payable and receivable, asset accounting, and the cost and profitability side of controlling.',
     why: 'Finance is where an ERP is ultimately reconciled, which makes FICO one of the most widely used modules.',
     icon: 'ledger',
+    image: {
+      src: '/images/gallery/sap-fico-finance.jpg',
+      alt: 'A desk with printed financial charts, a calculator and a notebook',
+      width: 1400,
+      height: 934,
+    },
   },
   {
     code: 'MM',
@@ -151,6 +184,12 @@ export const sapModules: SapModule[] = [
       'Purchasing, master data, inventory movements, valuation and the procure-to-pay flow.',
     why: 'Materials management connects purchasing to stock and to finance, so it touches most day-to-day operations.',
     icon: 'export',
+    image: {
+      src: '/images/gallery/sap-mm-warehouse.jpg',
+      alt: 'A warehouse aisle lined with racked and palletised stock',
+      width: 1400,
+      height: 934,
+    },
   },
   {
     code: 'SD',
@@ -159,6 +198,12 @@ export const sapModules: SapModule[] = [
       'Enquiries and quotations through orders, deliveries, billing and the order-to-cash flow.',
     why: 'Sales and distribution is the revenue side of the same chain that materials management supplies.',
     icon: 'chart',
+    image: {
+      src: '/images/gallery/sap-sd-dispatch.jpg',
+      alt: 'Workers handling packed cartons at a distribution bay',
+      width: 1400,
+      height: 1050,
+    },
   },
   {
     code: 'CSM',
@@ -166,6 +211,12 @@ export const sapModules: SapModule[] = [
     description: 'Service processes, notifications and the handling of customer requests.',
     why: 'Service keeps the relationship going after the sale, which is where much of the recurring work sits.',
     icon: 'users',
+    image: {
+      src: '/images/gallery/sap-csm-support.jpg',
+      alt: 'Service agents wearing headsets at workstations in a support centre',
+      width: 1400,
+      height: 934,
+    },
   },
 ];
 

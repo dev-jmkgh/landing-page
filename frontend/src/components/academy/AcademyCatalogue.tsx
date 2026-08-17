@@ -104,6 +104,7 @@ export function AcademyCatalogue() {
                   description={module.description}
                   why={module.why}
                   icon={module.icon}
+                  image={module.image}
                 />
               </Reveal>
             ))}

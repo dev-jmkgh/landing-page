@@ -113,12 +113,13 @@ export function PrimaryCourseTile({
 }
 
 /**
- * A SAP module: no photograph, by design.
+ * A SAP module tile.
  *
- * There is one honest photograph of enterprise-software training available, and using
- * it six times — or padding with unrelated stock — would be exactly the filler imagery
- * the brief rules out. The modules carry the drawing language instead: a code plate, a
- * technical rule, and the module's own icon.
+ * The photograph shows the *domain the module works in* — source code for ABAP, a
+ * server hall for BASIS, a warehouse aisle for MM — because there is no photograph of
+ * SAP itself. Each module gets its own frame and none is reused, so the six read as six
+ * subjects rather than one stock library. The alt text describes what the frame shows
+ * and never implies it is a JMK site or a JMK class.
  */
 export function SapModuleTile({
   code,
@@ -126,15 +127,27 @@ export function SapModuleTile({
   description,
   why,
   icon,
+  image,
 }: {
   code: string;
   name: string;
   description: string;
   why: string;
   icon: Parameters<typeof Icon>[0]['name'];
+  image: { src: string; alt: string; width: number; height: number };
 }) {
   return (
     <article className="sap-tile">
+      <div className="sap-tile__media">
+        <Photo
+          src={image.src}
+          alt={image.alt}
+          width={image.width}
+          height={image.height}
+          sizes="(max-width: 639px) 92vw, (max-width: 1023px) 46vw, 30vw"
+        />
+      </div>
+
       <div className="sap-tile__head">
         <span className="sap-tile__code">
           <span className="sr-only">SAP module </span>

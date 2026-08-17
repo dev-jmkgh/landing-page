@@ -3,6 +3,15 @@ import type { IconName } from '@/components/ui/Icon';
 /**
  * Business verticals and group sectors.
  *
+ * IMAGERY. Service and module photographs are licensed stock (Unsplash —
+ * https://unsplash.com/license, free for commercial use, no attribution required)
+ * showing the *domain the service works in*: source code for ABAP, a warehouse aisle
+ * for Materials Management, a server hall for licensing and hosting. None is presented
+ * as a JMK site, a JMK employee or a JMK project, none is reused across tiles, and the
+ * alt text describes only what the frame literally shows. Frames carrying a visible
+ * third-party brand were rejected during selection — the same rule that removed the
+ * shipping-line photographs from the gallery.
+ *
  * Vertical names, taglines and service lists are exactly those supplied in the content
  * document. Service descriptions explain the *discipline* in neutral terms — they never
  * name software, clients, industries served, project values or capacity, none of which
@@ -14,6 +23,16 @@ export type ServiceItem = {
   description?: string;
   /** Sub-items, e.g. the SAP module list. */
   items?: string[];
+  /**
+   * Photograph for the tile, where an honest one exists.
+   *
+   * Only set this where the frame genuinely shows the discipline. Several services here
+   * have no picture worth taking — a domain service, an email box, a licence — and the
+   * nearest stock image says nothing specific. Those are left without one and the tile
+   * draws a generated plate instead; see `components/visuals/TileGraphic.tsx`. Never
+   * fill this with a laptop-on-a-desk to even the grid up.
+   */
+  image?: { src: string; alt: string; width: number; height: number };
 };
 
 export type ServiceGroup = {
@@ -167,33 +186,75 @@ export const verticals: Vertical[] = [
         services: [
           {
             name: '2D Drafting',
+            image: {
+              src: '/images/gallery/design-cad-drafting-screen.jpg',
+              alt: 'A monitor showing a detailed 2D CAD plan drawing with coloured linework and dimensions',
+              width: 1400,
+              height: 934,
+            },
             description:
               'Dimensioned production drawings, layouts and detail sheets prepared to your drawing standards.',
           },
           {
             name: '3D Modeling',
+            image: {
+              src: '/images/gallery/design-3d-model-workstation.jpg',
+              alt: 'Three-dimensional structural assembly model open on a CAD workstation display',
+              width: 1800,
+              height: 1201,
+            },
             description:
               'Parametric part and assembly models built for downstream design, review and manufacturing use.',
           },
           {
             name: 'Product Design',
+            image: {
+              src: '/images/gallery/design-product-design-bench.jpg',
+              alt: 'Technical drawings of a product with drafting instruments and a metal prototype on a desk',
+              width: 1400,
+              height: 933,
+            },
             description: 'Concept development through to detailed design of manufacturable products.',
           },
           {
             name: 'Architectural Visualization',
+            image: {
+              src: '/images/gallery/svc-architectural-model.jpg',
+              alt: 'A scale architectural model displayed in front of mounted building drawings',
+              width: 1400,
+              height: 890,
+            },
             description:
               'Visual representation of architectural and interior spaces for review and presentation.',
           },
           {
             name: 'Industrial Design',
+            image: {
+              src: '/images/gallery/academy-engineering-workstation.jpg',
+              alt: 'A dual-monitor engineering workstation showing a circuit schematic and a 3D board layout',
+              width: 1400,
+              height: 788,
+            },
             description: 'Form, ergonomics and aesthetics developed alongside engineering requirements.',
           },
           {
             name: 'Rendering Services',
+            image: {
+              src: '/images/gallery/svc-render-house.jpg',
+              alt: 'A photorealistic render of a house exterior with its driveway and garden',
+              width: 1400,
+              height: 788,
+            },
             description: 'High-quality renders produced from CAD geometry for presentation and approvals.',
           },
           {
             name: 'Reverse Engineering',
+            image: {
+              src: '/images/gallery/design-technical-drawing-parts.jpg',
+              alt: 'Machined aluminium flange components resting on dimensioned engineering drawings',
+              width: 1400,
+              height: 788,
+            },
             description: 'Existing parts and assemblies translated back into accurate CAD models and drawings.',
           },
         ],
@@ -243,19 +304,43 @@ export const verticals: Vertical[] = [
         services: [
           {
             name: 'Custom Software Development',
+            image: {
+              src: '/images/gallery/software-source-code.jpg',
+              alt: 'Source code with syntax highlighting displayed on a monitor at a developer workstation',
+              width: 1400,
+              height: 911,
+            },
             description: 'Applications built to fit an organisation’s own workflows rather than the reverse.',
           },
           {
             name: 'ERP Solutions',
+            image: {
+              src: '/images/gallery/svc-erp-team.jpg',
+              alt: 'Colleagues reviewing a business system together on laptops in an office',
+              width: 1400,
+              height: 934,
+            },
             description: 'Process-driven ERP platforms, including the following in-house products.',
             items: ['Advocate Case Management Software', 'Student Management Software'],
           },
           {
             name: 'Website Development',
+            image: {
+              src: '/images/gallery/svc-web-wireframes.jpg',
+              alt: 'Hand-drawn website layout wireframes sketched and coloured on paper',
+              width: 1400,
+              height: 934,
+            },
             description: 'Corporate and business websites built for performance, SEO and maintainability.',
           },
           {
             name: 'Mobile Applications',
+            image: {
+              src: '/images/gallery/svc-mobile-app.jpg',
+              alt: 'A person using an application on a smartphone held in both hands',
+              width: 1400,
+              height: 934,
+            },
             description: 'Mobile applications that extend your systems to field teams and customers.',
           },
         ],
@@ -268,14 +353,32 @@ export const verticals: Vertical[] = [
         services: [
           {
             name: 'Analytics Dashboard',
+            image: {
+              src: '/images/gallery/software-analytics-dashboard.jpg',
+              alt: 'An analytics dashboard on screen showing charts and key performance figures',
+              width: 1400,
+              height: 1008,
+            },
             description: 'Operational dashboards that turn transactional data into decisions.',
           },
           {
             name: 'Cloud Applications',
+            image: {
+              src: '/images/gallery/software-server-infrastructure.jpg',
+              alt: 'Rows of networking and server equipment in a data centre aisle',
+              width: 1400,
+              height: 2100,
+            },
             description: 'Cloud-hosted applications with centralised access and managed deployment.',
           },
           {
             name: 'SAP License & Server Solutions',
+            image: {
+              src: '/images/gallery/svc-server-aisle.jpg',
+              alt: 'An equipment aisle of racked servers in a data hall',
+              width: 1400,
+              height: 805,
+            },
             description: 'SAP licensing and server provisioning support for organisations running SAP.',
           },
         ],
@@ -289,19 +392,43 @@ export const verticals: Vertical[] = [
         services: [
           {
             name: 'Digital Marketing Support',
+            image: {
+              src: '/images/gallery/svc-marketing-metrics.jpg',
+              alt: 'A campaign dashboard on screen showing click-through and conversion figures',
+              width: 1400,
+              height: 1008,
+            },
             description:
               'Build your brand, reach the right audience, generate quality leads, and turn digital visibility into measurable business growth.',
           },
           {
             name: 'Email Box Server',
+            image: {
+              src: '/images/gallery/svc-email.jpg',
+              alt: 'An envelope symbol representing electronic mail',
+              width: 1400,
+              height: 788,
+            },
             description: 'Business mailbox provisioning on your own domain.',
           },
           {
             name: 'Domain Services',
+            image: {
+              src: '/images/gallery/svc-network-cabling.jpg',
+              alt: 'Patch cabling running between network equipment',
+              width: 1400,
+              height: 786,
+            },
             description: 'Domain registration and management handled for you.',
           },
           {
             name: 'Hosting Services',
+            image: {
+              src: '/images/gallery/software-development-team.jpg',
+              alt: 'Developers working together at a shared desk of monitors',
+              width: 1600,
+              height: 2397,
+            },
             description: 'Website and application hosting with ongoing support.',
           },
         ],

@@ -3,6 +3,7 @@ import { AcademyCatalogue } from '@/components/academy/AcademyCatalogue';
 import { CtaBand } from '@/components/layout/CtaBand';
 import { PageHero } from '@/components/layout/PageHero';
 import { Icon } from '@/components/ui/Icon';
+import { Photo } from '@/components/ui/Photo';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
@@ -78,6 +79,17 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
                 {group.services.map((service, index) => (
                   <Reveal key={service.name} delay={index * 60}>
                     <article className="service-item">
+                      {service.image ? (
+                        <div className="service-item__media">
+                          <Photo
+                            src={service.image.src}
+                            alt={service.image.alt}
+                            width={service.image.width}
+                            height={service.image.height}
+                            sizes="(max-width: 639px) 92vw, (max-width: 1023px) 46vw, 30vw"
+                          />
+                        </div>
+                      ) : null}
                       <h3 className="service-item__name">{service.name}</h3>
                       {service.description ? (
                         <p className="service-item__text">{service.description}</p>
