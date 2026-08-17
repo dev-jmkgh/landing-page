@@ -1121,3 +1121,107 @@
   padding: 0.3rem 0.6rem;
   border-radius: var(--radius-xs);
 }
+
+/* ===========================================================================
+   Carousel
+   ---------------------------------------------------------------------------
+   Native scrolling with snap points. The card widths are percentages of the
+   track, so the number visible steps down with the viewport: three at desktop,
+   two at tablet, and about 1.1 on a phone — the fractional card is deliberate,
+   it is what tells someone there is more to the right.
+   =========================================================================== */
+
+.carousel {
+  position: relative;
+}
+
+.carousel__track {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 0;
+  /* Room for the cards' hover lift and shadow, which would otherwise be clipped. */
+  padding-block: 0.5rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--blue-300) transparent;
+}
+
+.carousel__track:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 4px;
+  border-radius: var(--radius-md);
+}
+
+.carousel__track::-webkit-scrollbar {
+  height: 6px;
+}
+
+.carousel__track::-webkit-scrollbar-thumb {
+  background-color: var(--blue-200);
+  border-radius: 999px;
+}
+
+.carousel__track > * {
+  flex: 0 0 86%;
+  scroll-snap-align: start;
+  min-width: 0;
+  display: flex;
+}
+
+.carousel__track > * > * {
+  width: 100%;
+}
+
+@media (min-width: 560px) {
+  .carousel__track > * {
+    flex-basis: calc((100% - 1rem) / 2);
+  }
+}
+
+@media (min-width: 1024px) {
+  .carousel__track > * {
+    flex-basis: calc((100% - 2rem) / 3);
+  }
+}
+
+.carousel__controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: var(--space-4);
+}
+
+.carousel__btn {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--blue-200);
+  background-color: var(--surface);
+  color: var(--navy-800);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.carousel__btn:hover:not(:disabled) {
+  background-color: var(--blue-050);
+  border-color: var(--blue-300);
+  color: var(--accent-700);
+}
+
+.carousel__btn:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+/* Disabled rather than hidden: a control that disappears at the end of the run
+   makes the row jump, and the remaining button then moves under the cursor. */
+.carousel__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

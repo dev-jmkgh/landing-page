@@ -371,7 +371,7 @@
   display: grid;
   place-items: center;
   padding: clamp(0.75rem, 3vw, 2rem);
-  background-color: rgba(5, 15, 28, 0.82);
+  background-color: rgba(11, 31, 51, 0.62);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   animation: fade-in var(--duration-base) var(--ease-out) both;
@@ -385,14 +385,14 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: var(--radius-lg);
-  background-color: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow: var(--glass-shadow-hover);
+  background-color: var(--surface);
+  border: 1px solid var(--blue-200);
+  box-shadow: 0 30px 80px -30px rgba(11, 31, 51, 0.6);
 }
 
 .lightbox__figure {
   margin: 0;
-  background-color: rgba(5, 15, 28, 0.6);
+  background-color: var(--blue-100);
   min-height: 0;
   display: flex;
 }
@@ -406,11 +406,9 @@
 
 .lightbox__caption {
   padding: clamp(0.9rem, 2vw, 1.35rem) clamp(1rem, 2.5vw, 1.75rem);
-  background-color: rgba(10, 27, 46, 0.72);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--blue-050) 100%);
+  border-top: 1px solid var(--blue-200);
+  color: var(--color-text);
 }
 
 .lightbox__category {
@@ -418,7 +416,7 @@
   font-weight: 700;
   letter-spacing: var(--tracking-widest);
   text-transform: uppercase;
-  color: var(--accent-400);
+  color: var(--accent-700);
 }
 
 .lightbox__title {
@@ -426,21 +424,21 @@
   font-family: var(--font-display);
   font-size: var(--text-xl);
   font-weight: 600;
-  color: #fff;
+  color: var(--navy-900);
 }
 
 .lightbox__description {
   margin-top: 0.35rem;
   font-size: 0.94rem;
   line-height: var(--leading-relaxed);
-  color: var(--color-on-dark-muted);
+  color: var(--color-text-muted);
   max-width: 68ch;
 }
 
 .lightbox__credit {
   margin-top: 0.6rem;
   font-size: var(--text-xs);
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--ink-400);
 }
 
 .lightbox__credit a {
@@ -462,10 +460,10 @@
   border-radius: 50%;
   pointer-events: auto;
   color: #fff;
-  background-color: rgba(10, 27, 46, 0.6);
+  background-color: rgba(11, 31, 51, 0.72);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.32);
   transition:
     background-color var(--duration-fast) var(--ease-out),
     border-color var(--duration-fast) var(--ease-out);

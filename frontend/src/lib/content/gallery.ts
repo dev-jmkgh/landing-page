@@ -19,7 +19,12 @@
 
 import { assetPath } from '@/lib/paths';
 
-export type GalleryCategoryId = 'academy' | 'design-studio' | 'software' | 'sustainability';
+export type GalleryCategoryId =
+  | 'academy'
+  | 'design-studio'
+  | 'software'
+  | 'corporate'
+  | 'sustainability';
 
 export type GalleryCategory = {
   id: GalleryCategoryId | 'all';
@@ -33,6 +38,7 @@ export const galleryCategories: GalleryCategory[] = [
   { id: 'academy', label: 'JMK Academy', short: 'Academy' },
   { id: 'design-studio', label: 'Design Studio', short: 'Design Studio' },
   { id: 'software', label: 'Software Solutions', short: 'Software' },
+  { id: 'corporate', label: 'Corporate', short: 'Corporate' },
   { id: 'sustainability', label: 'Sustainability', short: 'Sustainability' },
 ];
 
@@ -192,6 +198,101 @@ export const galleryItems: GalleryItem[] = [
       photographer: 'Alin Gavriliuc',
       url: 'https://unsplash.com/photos/64-zcsRkJZo',
     },
+  },
+
+  /* -------------------------------------------------------------- corporate */
+  {
+    id: 'design-review',
+    category: 'corporate',
+    title: 'Engineering Design Review',
+    description:
+      'A cross-section drawing checked against the physical assembly — the review step between drawing and build.',
+    src: `${BASE}/hero-engineering-design-review.jpg`,
+    alt: 'Two engineers reviewing a detailed technical cross-section drawing alongside the physical assembly',
+    width: 2400,
+    height: 1601,
+    credit: { photographer: 'ThisIsEngineering', url: 'https://www.pexels.com/photo/3861938/' },
+  },
+  {
+    id: 'team-collaboration',
+    category: 'corporate',
+    title: 'Working Together',
+    description: 'Collaborative review — how work moves between disciplines inside the group.',
+    src: `${BASE}/about-team-collaboration.jpg`,
+    alt: 'Colleagues reviewing work together around a laptop in a bright meeting room',
+    width: 1800,
+    height: 1202,
+    credit: { photographer: 'Mikhail Nilov', url: 'https://www.pexels.com/photo/7988218/' },
+  },
+  {
+    id: 'corporate-training',
+    category: 'corporate',
+    title: 'Corporate Training',
+    description: 'Programmes delivered for an organisation’s own team, alongside industry workshops.',
+    src: `${BASE}/academy-corporate-training.jpg`,
+    alt: 'Presenter leading a seminar for a seated group in a corporate training room',
+    width: 1800,
+    height: 1202,
+    credit: { photographer: 'Kampus Production', url: 'https://www.pexels.com/photo/8761327/' },
+  },
+
+  /* --------------------------------------------------------- more academy */
+  {
+    id: 'cad-3d-workstation',
+    category: 'academy',
+    title: 'CAD & 3D Modelling',
+    description: 'Three-dimensional plant modelling in CAD — the engineering end of the Academy syllabus.',
+    src: `${BASE}/academy-cad-3d-workstation.jpg`,
+    alt: 'Engineer working on a 3D plant model in CAD software at a dual-monitor workstation',
+    width: 1600,
+    height: 1067,
+    credit: { photographer: 'Vika Glitter', url: 'https://www.pexels.com/photo/19895882/' },
+  },
+  {
+    id: 'cad-classroom',
+    category: 'academy',
+    title: 'Instructor-Led Sessions',
+    description: 'Participants working the exercises at individual workstations rather than watching them.',
+    src: `${BASE}/academy-cad-classroom.jpg`,
+    alt: 'Instructor presenting at a screen while participants follow on individual workstations',
+    width: 1800,
+    height: 2696,
+    credit: { photographer: 'Mikhail Nilov', url: 'https://www.pexels.com/photo/7988241/' },
+  },
+  {
+    id: 'sap-training',
+    category: 'academy',
+    title: 'Enterprise Software Training',
+    description: 'Business process and reporting work — the ground SAP module training covers.',
+    src: `${BASE}/academy-sap-business-training.jpg`,
+    alt: 'Trainer presenting business process and reporting charts during an enterprise software session',
+    width: 1800,
+    height: 1200,
+    credit: { photographer: 'Yan Krukau', url: 'https://www.pexels.com/photo/7876984/' },
+  },
+
+  /* ---------------------------------------------------- more design/software */
+  {
+    id: 'model-workstation',
+    category: 'design-studio',
+    title: '3D Assembly Modelling',
+    description: 'A structural assembly built up on screen, from component through to full model.',
+    src: `${BASE}/design-3d-model-workstation.jpg`,
+    alt: 'Three-dimensional structural assembly model open on a CAD workstation display',
+    width: 1800,
+    height: 1201,
+    credit: { photographer: 'ThisIsEngineering', url: 'https://www.pexels.com/photo/3912948/' },
+  },
+  {
+    id: 'development-team',
+    category: 'software',
+    title: 'Application Development',
+    description: 'Building and reviewing application code — the delivery side of JMK Software Solutions.',
+    src: `${BASE}/software-development-team.jpg`,
+    alt: 'Two developers writing application code at workstations in a modern software office',
+    width: 1600,
+    height: 2397,
+    credit: { photographer: 'Mikhail Nilov', url: 'https://www.pexels.com/photo/7988116/' },
   },
 
   /* ------------------------------------------------------------------ group */

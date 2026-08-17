@@ -1,5 +1,6 @@
 import { CourseTile, SapModuleTile } from '@/components/academy/CourseTile';
 import { EnquiryTrigger } from '@/components/enquiry/EnquiryTrigger';
+import { Carousel } from '@/components/ui/Carousel';
 import { Icon } from '@/components/ui/Icon';
 import { Photo } from '@/components/ui/Photo';
 import { Reveal } from '@/components/ui/Reveal';
@@ -32,13 +33,16 @@ export function AcademyCatalogue() {
             />
           </Reveal>
 
-          <div className="course-grid">
+          {/* A carousel rather than a grid: four tiles do not fit three-up, so there
+              is always one more to reach, and on a phone a row of scrollable cards
+              beats a column four screens long. */}
+          <Carousel label="CAD and engineering training">
             {cadTiles.map((tile, index) => (
               <Reveal key={tile.id} delay={index * 70}>
                 <CourseTile tile={tile} />
               </Reveal>
             ))}
-          </div>
+          </Carousel>
         </div>
       </section>
 
