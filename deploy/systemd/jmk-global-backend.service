@@ -1,0 +1,65 @@
+# =============================================================================
+# JMK Global Holdings — API service
+#
+# Install:
+#   sudo cp jmk-global-backend.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now jmk-global-backend
+#   sudo systemctl status jmk-global-backend
+#   journalctl -u jmk-global-backend -f
+# =============================================================================
+
+[Unit]
+Description=JMK Global Holdings API
+Documentation=https://github.com/dev-jmkgh/landing-page
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jmk
+Group=jmk
+
+WorkingDirectory=/var/www/jmkglobalholdings/backend
+
+# The entry point is the compiled output, not src — `npm run build` emits
+# dist/server.js and package.json declares it as `main`.
+ExecStart=/usr/bin/node dist/server.js
+
+# NOTE: there is deliberately no EnvironmentFile= here.
+#
+# The application calls dotenv.config() at startup, which reads .env relative to the
+# working directory set above. systemd's EnvironmentFile parser is not dotenv: it does
+# not understand quoting the same way, and a value containing a '#' or spaces — a Gmail
+# App Password, a bcrypt hash, a comma-separated ADMIN_EMAILS list — can be silently
+# truncated or mangled. Letting the application read its own file keeps one parser in
+# play instead of two that disagree.
+Environment=NODE_ENV=production
+
+Restart=always
+RestartSec=5
+# Give up restarting only if it fails repeatedly in a short window, so a bad deploy
+# surfaces as a failed unit rather than an endless crash loop.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jmk-api
+
+# --- Hardening -------------------------------------------------------------
+# The service needs to read its own code and write uploaded resumes; nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+# ProtectSystem=strict makes the whole filesystem read-only, so every path the service
+# writes to has to be listed. UPLOAD_DIR must match the backend .env value.
+ReadWritePaths=/var/www/jmkglobalholdings/storage
+
+[Install]
+WantedBy=multi-user.target
