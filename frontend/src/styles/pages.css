@@ -504,6 +504,19 @@
   color: var(--ink-700);
 }
 
+/* A qualifying line, set off by a gold rule rather than by being made smaller and
+   greyer — this is the notice that the gallery's photographs are representative
+   rather than JMK's own, so it has to be readable, not tucked away. */
+.page-hero__note {
+  margin-top: var(--space-5);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--accent-500);
+  max-width: 52ch;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--ink-700);
+}
+
 .page-hero__meta {
   margin-top: var(--space-6);
   display: flex;

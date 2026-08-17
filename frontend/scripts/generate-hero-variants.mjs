@@ -31,6 +31,7 @@ const SOURCES = [
   'academy-cad-3d-workstation.jpg',
   'design-technical-drawing-parts.jpg',
   'software-analytics-dashboard.jpg',
+  'design-product-design-bench.jpg',
 ];
 
 const TARGET_WIDTHS = [640, 1024, 1440, 1920];

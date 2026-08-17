@@ -72,6 +72,16 @@ export const contactHero: HeroImage = {
   overlay: 'measure',
 };
 
+export const galleryHero: HeroImage = {
+  src: '/images/gallery/design-product-design-bench.jpg',
+  alt: 'Technical drawings of a product with drafting instruments and a metal prototype on a desk',
+  width: 1400,
+  height: 933,
+  variants: [640, 1024, 1400],
+  objectPosition: '60% center',
+  overlay: 'network',
+};
+
 /** Keyed by `vertical.slug` — see `lib/content/business.ts`. */
 export const verticalHeroes: Record<string, HeroImage> = {
   'jmk-academy': {

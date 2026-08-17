@@ -19,6 +19,13 @@ type PageHeroProps = {
    * pattern alone, which is what the legal pages use.
    */
   image?: HeroImage;
+  /**
+   * Small qualifying line under the intro, set off by a gold rule. The gallery uses it
+   * for the notice that its photographs represent each discipline rather than showing
+   * JMK's own facilities — a statement that has to travel with the images, so it lives
+   * in the hero rather than further down the page.
+   */
+  note?: string;
 };
 
 /** Shared hero for every interior page: breadcrumbs, eyebrow, H1 and intro. */
@@ -31,6 +38,7 @@ export function PageHero({
   patternId,
   variant = 'grid',
   image,
+  note,
 }: PageHeroProps) {
   return (
     <section className={image ? 'page-hero page-hero--photo' : 'page-hero'}>
@@ -72,6 +80,7 @@ export function PageHero({
           </p>
           <h1 className="page-hero__title">{title}</h1>
           {intro ? <p className="page-hero__intro">{intro}</p> : null}
+          {note ? <p className="page-hero__note">{note}</p> : null}
           {meta && meta.length > 0 ? (
             <ul className="page-hero__meta">
               {meta.map((item) => (

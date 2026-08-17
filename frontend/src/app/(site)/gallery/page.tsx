@@ -1,11 +1,11 @@
 import type { Metadata } from 'next';
-import { BlueprintAnimation } from '@/components/gallery/BlueprintAnimation';
 import { GalleryGrid } from '@/components/gallery/GalleryGrid';
+import { PageHero } from '@/components/layout/PageHero';
 import { CtaBand } from '@/components/layout/CtaBand';
-import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { pageKeywords, academyTerms, designTerms, softwareTerms, groupSectorTerms } from '@/lib/content/keywords';
+import { galleryHero } from '@/lib/content/heroImages';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
 
 export const metadata: Metadata = buildMetadata({
@@ -31,34 +31,22 @@ export default function GalleryPage() {
     <>
       <JsonLd data={breadcrumbJsonLd(trail)} />
 
-      {/* ------------------------------------------------------------- Hero */}
-      <section className="gallery-hero">
-        <div className="container">
-          <div className="gallery-hero__inner">
-            <div>
-              <Breadcrumbs trail={trail} />
-              <p className="eyebrow" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
-                Our Gallery
-              </p>
-              <h1 className="gallery-hero__title">
-                Where skills, engineering and technology come together
-              </h1>
-              <p className="gallery-hero__intro">
-                A visual view of what the group actually does — CAD and engineering training,
-                design and drafting, software and cloud, and the renewable energy, farming and
-                export activity behind it.
-              </p>
-              <p className="gallery-hero__note">
-                These are representative images of each discipline, not photographs of JMK
-                facilities, people or projects. Our own photography replaces them as each
-                business releases it.
-              </p>
-            </div>
-
-            <BlueprintAnimation />
-          </div>
-        </div>
-      </section>
+      {/*
+        The shared hero, not a bespoke one. This page used to build its own two-column
+        band with a blueprint animation beside the copy — which is exactly the
+        arrangement every other page moved away from, so the gallery was the one hero
+        left without a photograph.
+      */}
+      <PageHero
+        patternId="gallery-hero"
+        variant="blueprint"
+        trail={trail}
+        eyebrow="Our Gallery"
+        title="Where skills, engineering and technology come together"
+        intro="A visual view of what the group actually does — CAD and engineering training, design and drafting, software and cloud, and the renewable energy, farming and export activity behind it."
+        note="These are representative images of each discipline, not photographs of JMK facilities, people or projects. Our own photography replaces them as each business releases it."
+        image={galleryHero}
+      />
 
       {/* ---------------------------------------------------------- Gallery */}
       <section className="section section--canvas">
