@@ -102,6 +102,161 @@ delete an uploaded resume.
 
 ---
 
+## 3a. MySQL on the same instance
+
+The database runs on this box, reachable only over loopback. Nothing in the
+security group opens 3306, and nothing should: the API is the only client and it
+connects to `127.0.0.1`.
+
+```bash
+sudo apt install -y mysql-server
+sudo systemctl enable --now mysql
+systemctl status mysql
+```
+
+### Confirm it is not listening on a public interface
+
+Ubuntu's package defaults to `bind-address = 127.0.0.1`. Verify rather than assume —
+a MySQL open to the internet is found by scanners within hours:
+
+```bash
+ss -lntp | grep 3306          # expect 127.0.0.1:3306, never 0.0.0.0:3306
+```
+
+If it shows `0.0.0.0`, set `bind-address = 127.0.0.1` in
+`/etc/mysql/mysql.conf.d/mysqld.cnf` and `sudo systemctl restart mysql`.
+
+### Harden
+
+```bash
+sudo mysql_secure_installation
+```
+
+Answer: yes to removing anonymous users, yes to disallowing remote root, yes to
+dropping the test database, yes to reloading privileges. The validate-password
+plugin is optional — the application user's password is generated below and will
+pass any policy.
+
+### Create the database and the application user
+
+The schema is `utf8mb4` / `utf8mb4_unicode_ci` — the migrations declare it per table,
+and the database default should match so anything added later inherits it. This
+matters for real content: rupee signs, em-dashes and names outside Latin-1 all need
+four-byte UTF-8.
+
+Generate a password first and keep it in your password manager — it goes into
+`backend/.env` and nowhere else:
+
+```bash
+openssl rand -base64 24
+```
+
+Then, as root:
+
+```bash
+sudo mysql
+```
+
+```sql
+CREATE DATABASE jmk_global
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
+-- 'localhost' deliberately: this account cannot be used from another host even if
+-- the port were ever exposed.
+CREATE USER 'jmk_app'@'localhost' IDENTIFIED BY 'PASTE_THE_GENERATED_PASSWORD';
+
+-- Only what the application does. No DROP, no GRANT OPTION, and no access to any
+-- other schema. The migration runner needs CREATE, ALTER and INDEX; it never drops
+-- a table, and this account could not do so if a migration tried.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES
+  ON jmk_global.* TO 'jmk_app'@'localhost';
+
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+Check the account works before pointing the application at it:
+
+```bash
+mysql -u jmk_app -p -e "SELECT 1;" jmk_global
+```
+
+### Matching `backend/.env`
+
+```
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=jmk_app
+DB_PASSWORD=<the generated password>
+DB_NAME=jmk_global
+DB_CONNECTION_LIMIT=10
+```
+
+Use `127.0.0.1` rather than `localhost`: with `localhost`, the MySQL client library
+may prefer a Unix socket, and the socket path differs between distributions. An
+explicit address takes TCP every time.
+
+Leave `DATABASE_URL` unset — the configuration prefers it when present, and having
+both invites the two of them to drift apart.
+
+### Migrations
+
+```bash
+cd /var/www/jmkglobalholdings
+sudo -u jmk npm --prefix backend run db:migrate:prod
+```
+
+Forward-only, and each file's checksum is recorded: an applied migration that is later
+edited is reported rather than silently re-run. There is no reset command in this
+runner, by design.
+
+Confirm the four tables exist:
+
+```bash
+mysql -u jmk_app -p -e "SHOW TABLES;" jmk_global
+# enquiries, job_applications, admin_users, schema_migrations
+```
+
+### Seed the admin account
+
+```bash
+npm --prefix backend run hash:password -- 'a-strong-password'
+```
+
+Put the hash in `ADMIN_PASSWORD_HASH` and the address in `ADMIN_LOGIN_EMAIL`, then:
+
+```bash
+sudo -u jmk npm --prefix backend run db:seed
+```
+
+`ADMIN_LOGIN_EMAIL` is the sign-in identity. It is *not* where notifications go —
+that is `ADMIN_EMAILS`, and the two are independent.
+
+### Backups
+
+Nothing here is backed up yet. Enquiries and job applications are the only
+irreplaceable data on this instance, and resumes on local disk are not covered by an
+RDS snapshot because there is no RDS.
+
+```bash
+sudo mkdir -p /var/backups/jmk && sudo chown jmk:jmk /var/backups/jmk
+```
+
+`sudo -u jmk crontab -e`:
+
+```
+15 2 * * * mysqldump --single-transaction --quick -u jmk_app -p'PASSWORD' jmk_global | gzip > /var/backups/jmk/jmk_global-$(date +\%F).sql.gz && find /var/backups/jmk -name '*.sql.gz' -mtime +14 -delete
+30 2 * * * tar czf /var/backups/jmk/resumes-$(date +\%F).tar.gz -C /var/www/jmkglobalholdings/storage resumes && find /var/backups/jmk -name 'resumes-*.tar.gz' -mtime +14 -delete
+```
+
+A password on a cron line is visible to anyone who can read that crontab. Better is a
+`~/.my.cnf` with mode `600` holding the credentials, and no `-p` on the command. Copy
+the archives off the instance periodically — a backup that only exists on the machine
+it protects is not a backup.
+
+---
+
 ## 4. Clone
 
 ```bash
@@ -202,25 +357,48 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ## 7. DNS — Route 53
 
-**Inspect the hosted zone before changing anything.** The root domain is already live;
-do not delete records you did not create.
+**State as verified on 11 Aug 2026**, resolving against 8.8.8.8 rather than reading
+the console — what the zone contains and what the internet answers are not always the
+same thing:
 
-```bash
-aws route53 list-hosted-zones-by-name --dns-name jmkglobalholdings.com
-aws route53 list-resource-record-sets --hosted-zone-id <ZONE_ID>
-```
+| Name | Type | Value | Status |
+| --- | --- | --- | --- |
+| `jmkglobalholdings.com` | NS | four `awsdns` nameservers | delegated correctly |
+| `jmkglobalholdings.com` | SOA | — | present |
+| `api.jmkglobalholdings.com` | A | `3.110.84.46` | **resolves** |
+| `jmkglobalholdings.com` | A | — | **missing** |
+| `www.jmkglobalholdings.com` | — | — | **missing (NXDOMAIN)** |
 
-Add one record:
+The registrar delegates to Route 53 correctly and the API record already exists, so
+nothing needs creating for the API. The apex and `www` have no address record at all,
+so the website cannot be reached at either name until they are added.
+
+Add two records — leave the NS and SOA alone:
 
 | Name | Type | Value | TTL |
 | --- | --- | --- | --- |
-| `api.jmkglobalholdings.com` | A | *the Elastic IP* | 300 |
+| `jmkglobalholdings.com` | A | `3.110.84.46` | 300 |
+| `www.jmkglobalholdings.com` | A | `3.110.84.46` | 300 |
 
-Leave the apex and `www` records alone unless they need to move to this instance.
+An EC2 instance is not an ALIAS target, so these are plain A records pointing at the
+Elastic IP.
+
+**Confirm `3.110.84.46` is an Elastic IP and not the instance's ephemeral public
+address.** An ephemeral address changes the next time the instance is stopped and
+started, and these records would then point at somebody else's machine.
+
+```bash
+aws ec2 describe-addresses --region ap-south-1 --public-ips 3.110.84.46
+```
+
+If that returns nothing, the address is ephemeral: allocate an Elastic IP, associate
+it, and update both records to the new address.
 
 Verify before continuing — DNS is not done until it resolves:
 
 ```bash
+dig +short jmkglobalholdings.com
+dig +short www.jmkglobalholdings.com
 dig +short api.jmkglobalholdings.com
 ```
 
