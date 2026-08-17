@@ -1,7 +1,8 @@
 import { Breadcrumbs, type Crumb } from '@/components/ui/Breadcrumbs';
 import { PatternBackdrop } from '@/components/ui/PatternBackdrop';
-import { TechnicalVisual } from '@/components/visuals/TechnicalVisual';
-import type { VisualSpec } from '@/lib/content/visuals';
+import { Photo } from '@/components/ui/Photo';
+import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
+import type { HeroImage } from '@/lib/content/heroImages';
 
 type PageHeroProps = {
   eyebrow: string;
@@ -13,10 +14,11 @@ type PageHeroProps = {
   patternId: string;
   variant?: 'grid' | 'blueprint';
   /**
-   * Optional technical drawing shown beside the copy. Each page passes its own spec so
-   * no two heroes render the same picture — see `lib/content/visuals.ts`.
+   * Photograph filling the band, as on the home hero. Each page passes its own — see
+   * `lib/content/heroImages.ts`. Without it the band falls back to the drafting
+   * pattern alone, which is what the legal pages use.
    */
-  visual?: VisualSpec;
+  image?: HeroImage;
 };
 
 /** Shared hero for every interior page: breadcrumbs, eyebrow, H1 and intro. */
@@ -28,33 +30,61 @@ export function PageHero({
   meta,
   patternId,
   variant = 'grid',
-  visual,
+  image,
 }: PageHeroProps) {
   return (
-    <section className="page-hero">
-      <PatternBackdrop className="page-hero__backdrop" id={patternId} variant={variant} />
+    <section className={image ? 'page-hero page-hero--photo' : 'page-hero'}>
+      {image ? (
+        <div className="page-hero__media">
+          {/*
+            An <img> rather than a CSS background so it can carry a srcSet. A
+            background-image would hand every visitor the same file, and on these pages
+            this is the largest contentful paint. `priority` for the same reason: it is
+            above the fold, where lazy loading delays the paint instead of helping it.
+          */}
+          <Photo
+            className="page-hero__image"
+            src={image.src}
+            alt={image.alt}
+            width={image.width}
+            height={image.height}
+            sizes="100vw"
+            variants={image.variants}
+            priority
+            style={image.objectPosition ? { objectPosition: image.objectPosition } : undefined}
+          />
+          <span className="page-hero__scrim" aria-hidden="true" />
+          <TechnicalOverlay
+            variant={image.overlay}
+            id={patternId}
+            className="page-hero__drawing"
+          />
+        </div>
+      ) : (
+        <PatternBackdrop className="page-hero__backdrop" id={patternId} variant={variant} />
+      )}
+
       <div className="container">
-        <div className={visual ? 'page-hero__grid' : undefined}>
-          <div className="page-hero__inner">
-            <Breadcrumbs trail={trail} />
-            <p className="eyebrow" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
-              {eyebrow}
-            </p>
-            <h1 className="page-hero__title">{title}</h1>
-            {intro ? <p className="page-hero__intro">{intro}</p> : null}
-            {meta && meta.length > 0 ? (
-              <ul className="page-hero__meta">
-                {meta.map((item) => (
-                  <li key={item} className="pill">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-          {visual ? <TechnicalVisual spec={visual} className="page-hero__visual" /> : null}
+        <div className="page-hero__inner">
+          <Breadcrumbs trail={trail} />
+          <p className="eyebrow" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
+            {eyebrow}
+          </p>
+          <h1 className="page-hero__title">{title}</h1>
+          {intro ? <p className="page-hero__intro">{intro}</p> : null}
+          {meta && meta.length > 0 ? (
+            <ul className="page-hero__meta">
+              {meta.map((item) => (
+                <li key={item} className="pill">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
+
+      <span className="page-hero__fade" aria-hidden="true" />
     </section>
   );
 }

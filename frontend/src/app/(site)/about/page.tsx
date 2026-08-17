@@ -11,7 +11,7 @@ import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { coreValues, founders, missionPoints, visionStatement, whoWeAre } from '@/lib/content/about';
 import { contributions, successStats } from '@/lib/content/home';
-import { aboutVisual } from '@/lib/content/visuals';
+import { aboutHero } from '@/lib/content/heroImages';
 import { breadcrumbJsonLd, buildMetadata } from '@/lib/seo';
 import { siteConfig } from '@/lib/site';
 
@@ -49,7 +49,7 @@ export default function AboutPage() {
         title="One group, seven sectors, a single standard of quality"
         intro="JMK Global Holdings brings together training, engineering design, software, exports, agriculture, renewable energy and real estate under one brand — with a commitment to creating opportunity alongside profit."
         meta={siteConfig.sectors}
-        visual={aboutVisual}
+        image={aboutHero}
       />
 
       {/* ----------------------------------------------------------- Who we are */}

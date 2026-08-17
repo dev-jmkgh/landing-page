@@ -7,7 +7,7 @@ import { JsonLd } from '@/components/ui/JsonLd';
 import { Reveal } from '@/components/ui/Reveal';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords } from '@/lib/content/keywords';
-import { contactVisual } from '@/lib/content/visuals';
+import { contactHero } from '@/lib/content/heroImages';
 import { breadcrumbJsonLd, buildMetadata, localBusinessJsonLd } from '@/lib/seo';
 import { contactDetails, siteConfig, socialLinks } from '@/lib/site';
 
@@ -42,7 +42,7 @@ export default function ContactPage() {
         title="Talk to JMK Global Holdings"
         intro="Reach the group directly by phone or email, or send an enquiry and we will route it to the right business vertical."
         meta={['Coimbatore, Tamil Nadu']}
-        visual={contactVisual}
+        image={contactHero}
       />
 
       <section className="section">

@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { assetPath } from '@/lib/paths';
 
 /**
@@ -43,6 +44,12 @@ type PhotoProps = {
   priority?: boolean;
   /** Override the generated widths, e.g. `HERO_VARIANTS` for a full-bleed image. */
   variants?: number[];
+  /**
+   * Inline style on the `<img>`. Used for per-image `object-position`, which is a
+   * property of the photograph — where its subject sits in the frame — rather than of
+   * the layout, so it belongs with the image data and not in a stylesheet class.
+   */
+  style?: CSSProperties;
 };
 
 export function Photo({
@@ -54,6 +61,7 @@ export function Photo({
   className,
   priority = false,
   variants = CARD_VARIANTS,
+  style,
 }: PhotoProps) {
   const base = src.replace(/\.(jpe?g|png)$/i, '');
   const srcSet = variants.map((w) => `${assetPath(`${base}-${w}.webp`)} ${w}w`).join(', ');
@@ -65,6 +73,7 @@ export function Photo({
         className={className}
         src={assetPath(src)}
         alt={alt}
+        style={style}
         width={width}
         height={height}
         sizes={sizes}

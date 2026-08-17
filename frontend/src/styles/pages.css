@@ -86,20 +86,26 @@
   inset: 0;
   background: linear-gradient(
     90deg,
-    rgba(247, 250, 252, 0.96) 0%,
-    rgba(247, 250, 252, 0.88) 34%,
-    rgba(240, 246, 251, 0.5) 64%,
+    rgba(250, 252, 253, 0.97) 0%,
+    rgba(250, 252, 253, 0.95) 42%,
+    rgba(247, 250, 252, 0.86) 58%,
+    rgba(240, 246, 251, 0.42) 80%,
     rgba(240, 246, 251, 0.12) 100%
   );
 }
 
-@media (max-width: 767px) {
+/* This wash was previously switched on only below 768px, but the copy stays a fixed
+   42rem while the viewport shrinks, so between 768 and 1023 it reached roughly 78% of
+   the width — well past where the horizontal gradient has given up. The intro measured
+   1.8:1 against the photograph at 900px. The single-column layout starts at 1024, so
+   that is where the wash has to start too. */
+@media (max-width: 1023px) {
   .hero__scrim {
     background: linear-gradient(
       180deg,
-      rgba(247, 250, 252, 0.95) 0%,
-      rgba(247, 250, 252, 0.9) 55%,
-      rgba(240, 246, 251, 0.82) 100%
+      rgba(250, 252, 253, 0.96) 0%,
+      rgba(250, 252, 253, 0.93) 55%,
+      rgba(240, 246, 251, 0.86) 100%
     );
   }
 }
@@ -372,9 +378,113 @@
   opacity: 0.22;
 }
 
+/* --- Photographic variant ------------------------------------------------
+   The same construction as the home hero, at band height rather than full
+   screen: the photograph fills the section and the copy sits on it. The scrim
+   is a light wash, not a dark one — this keeps the interior pages as bright as
+   the rest of the site and lets the heading stay near-black, instead of
+   reintroducing the dark bands that were deliberately removed.
+
+   Text contrast is therefore a property of the scrim, not of the photograph.
+   The left end is almost opaque so the headline never depends on which
+   photograph a page happens to use, and only the right end — where no copy
+   sits — lets the image through at full strength.
+   ------------------------------------------------------------------------ */
+.page-hero--photo {
+  border-bottom: 1px solid var(--blue-100);
+}
+
+.page-hero__media {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+
+.page-hero__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Per-image `object-position` comes from the hero data; this is the fallback. */
+  object-position: 50% center;
+}
+
+/* The copy column is `62ch`, which lands near 55% of a wide viewport, so the wash
+   holds close to opaque out to 58% and only then opens up. Measured rather than
+   guessed: at the previous 38%/0.93 the intro sat at 3.1:1 over the photographs. */
+.page-hero__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(252, 253, 254, 0.985) 0%,
+    rgba(252, 253, 254, 0.975) 46%,
+    rgba(247, 250, 252, 0.94) 58%,
+    rgba(240, 246, 251, 0.55) 78%,
+    rgba(240, 246, 251, 0.2) 100%
+  );
+}
+
+/* Below the two-column breakpoint the copy spans the full width, so a
+   left-to-right wash would leave the end of every line sitting on open
+   photograph. Switch to a vertical wash that covers the whole text block. */
+@media (max-width: 900px) {
+  .page-hero__scrim {
+    background: linear-gradient(
+      180deg,
+      rgba(252, 253, 254, 0.975) 0%,
+      rgba(252, 253, 254, 0.965) 70%,
+      rgba(240, 246, 251, 0.9) 100%
+    );
+  }
+}
+
+/* The band meets an ordinary light section below it; without this the
+   photograph would stop at a hard horizontal line. */
+.page-hero__fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 64px;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, var(--surface) 100%);
+}
+
 .page-hero__inner {
+  position: relative;
   padding-block: clamp(2.5rem, 6vw, 4.5rem);
   max-width: 62ch;
+}
+
+/* A photograph needs more room than a flat panel or the crop reads as a sliver. */
+.page-hero--photo .page-hero__inner {
+  padding-block: clamp(3.25rem, 7vw, 5.5rem);
+}
+
+/* Confined to the right of the band, over the part of the photograph the scrim
+   leaves visible. Same trap as the home hero: technical-visuals.css is imported
+   after this file and sets `inset: 0` plus `width: 100%` on .tech-overlay, so a
+   bare class rule would lose the inset, and keeping the width alongside a left
+   inset would push the box off the right edge and clip the drawing. Letting the
+   inset alone define the box is what confines it. */
+.page-hero .page-hero__drawing {
+  position: absolute;
+  inset: 0 0 0 52%;
+  width: auto;
+  height: auto;
+  opacity: 0.6;
+}
+
+/* Below the split the copy spans the full width, so the drawing retreats to a
+   faint texture rather than competing with it. */
+@media (max-width: 900px) {
+  .page-hero .page-hero__drawing {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.24;
+  }
 }
 
 .page-hero__title {
@@ -387,7 +497,11 @@
   margin-top: var(--space-5);
   font-size: var(--text-lg);
   line-height: var(--leading-relaxed);
-  color: var(--color-text-muted);
+  /* Not --color-text-muted. At 17px this is body text and needs 4.5:1, but ink-500
+     against the blue end of the band's own gradient measures 4.37:1 — under AA before
+     any photograph was involved. ink-700 is 8.3:1 there and still reads as secondary
+     next to the near-black heading. */
+  color: var(--ink-700);
 }
 
 .page-hero__meta {
