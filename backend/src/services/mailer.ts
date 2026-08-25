@@ -1,22 +1,47 @@
+import { SESClient, SendRawEmailCommand } from '@aws-sdk/client-ses';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config/env';
 import { describeError, logger } from '../utils/logger';
 import { sanitiseHeaderValue } from '../utils/text';
 
 /**
- * Gmail SMTP transport.
+ * The mail transport — Amazon SES or SMTP, chosen by MAIL_PROVIDER.
  *
- * Credentials come from the environment only — SMTP_USER must be a Gmail account and
- * SMTP_PASSWORD a Gmail **App Password**, never the account password. If either is
- * missing, email is disabled and the API continues to validate and store submissions;
- * a failed notification never fails the user's request.
+ * Both are built as nodemailer transports on purpose. Everything above this line —
+ * templates, attachments, reply-to, the accepted/rejected reporting, the retry-free
+ * "store first, notify after" contract — is written against nodemailer's interface, so
+ * switching provider changes the transport and nothing else.
+ *
+ * Credentials never appear here. SMTP takes a username and an App Password from the
+ * environment; SES takes nothing, because the AWS SDK resolves credentials through its
+ * own provider chain (environment, shared config, then the EC2 instance role). That is
+ * what lets the same build run on an instance profile with no key anywhere on disk.
+ *
+ * If the transport is not configured, email is disabled and the API continues to
+ * validate and store submissions — a failed notification never fails a user's request.
  */
 
 let transporter: Transporter | null = null;
 
+function createSesTransport(): Transporter {
+  // No `credentials` argument: omitting it is what engages the default provider chain.
+  const ses = new SESClient({ region: config.smtp.region });
+  return nodemailer.createTransport({
+    SES: { ses, aws: { SendRawEmailCommand } },
+    // SES accounts have a per-second send quota; this keeps a burst of submissions
+    // from tripping it.
+    sendingRate: 10,
+  });
+}
+
 function getTransporter(): Transporter | null {
   if (!config.smtp.enabled) return null;
   if (transporter) return transporter;
+
+  if (config.smtp.provider === 'ses') {
+    transporter = createSesTransport();
+    return transporter;
+  }
 
   // Port 465 is implicit TLS; 587 is STARTTLS on a plain connection. Getting the
   // pairing wrong makes Gmail hang until the connection times out, which looks like
@@ -57,16 +82,28 @@ function getTransporter(): Transporter | null {
  * the credentials", which are the two failures that look identical from the outside.
  */
 export function mailConfigReport() {
+  const common = {
+    provider: config.smtp.provider,
+    from: config.smtp.fromEmail ? maskEmail(config.smtp.fromEmail) : '(empty)',
+    enabled: config.smtp.enabled,
+    adminRecipientCount: config.mail.adminRecipients.length,
+    adminRecipients: config.mail.adminRecipients.map(maskEmail),
+  };
+
+  if (config.smtp.provider === 'ses') {
+    // Region only. Nothing about the credentials — not whether they came from the
+    // environment or an instance role, not whether they are present, and certainly not
+    // their value. This report is reachable from a diagnostics endpoint.
+    return { ...common, region: config.smtp.region };
+  }
+
   return {
+    ...common,
     host: config.smtp.host,
     port: config.smtp.port,
     secure: config.smtp.secure,
     user: config.smtp.user ? maskEmail(config.smtp.user) : '(empty)',
     passwordConfigured: config.smtp.password.length > 0,
-    from: config.smtp.fromEmail ? maskEmail(config.smtp.fromEmail) : '(empty)',
-    enabled: config.smtp.enabled,
-    adminRecipientCount: config.mail.adminRecipients.length,
-    adminRecipients: config.mail.adminRecipients.map(maskEmail),
   };
 }
 
@@ -81,6 +118,16 @@ export async function verifyMailer(): Promise<boolean> {
       mailConfigReport(),
     );
     return false;
+  }
+
+  // A From value with no local part is not an address, and SES rejects the send with
+  // an error naming the parameter rather than the mistake. Caught at startup instead.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.smtp.fromEmail)) {
+    logger.error(
+      'SMTP_FROM_EMAIL is not a valid email address. A host name is not an address — ' +
+        'it needs a local part, e.g. no-reply@example.com.',
+      { from: config.smtp.fromEmail },
+    );
   }
 
   if (config.mail.adminRecipients.length === 0) {
@@ -209,10 +256,20 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
         : {}),
     });
 
-    // A message id alone proves nothing — nodemailer returns one even when the server
-    // refused every recipient. The accepted/rejected lists are the actual outcome.
-    const accepted = (info.accepted ?? []).map(String);
+    // A message id alone proves nothing over SMTP — nodemailer returns one even when
+    // the server refused every recipient, so the accepted/rejected lists are the real
+    // outcome there.
+    //
+    // SES reports neither list. Its transport resolves with a message id on success and
+    // throws on failure, so on SES an empty pair means "accepted", not "refused". Left
+    // unhandled this read as a total rejection and every SES send would have been
+    // logged as failed and reported to the user as an email that did not go out.
+    const reportedAccepted = (info.accepted ?? []).map(String);
     const rejected = (info.rejected ?? []).map(String);
+    const accepted =
+      reportedAccepted.length === 0 && rejected.length === 0 && info.messageId
+        ? recipients
+        : reportedAccepted;
 
     const detail = {
       type,

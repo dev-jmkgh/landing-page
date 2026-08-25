@@ -31,13 +31,34 @@ const schema = z.object({
   DB_NAME: z.string().default('jmk_global'),
   DB_CONNECTION_LIMIT: z.coerce.number().int().positive().max(50).default(10),
 
+  /**
+   * Which transport actually sends. 'smtp' is Gmail (or any SMTP server);
+   * 'ses' is Amazon SES through the same nodemailer interface, so the templates,
+   * attachments and delivery reporting are identical either way.
+   */
+  MAIL_PROVIDER: z.enum(['smtp', 'ses']).default('smtp'),
+
+  /**
+   * Region for SES. Not a secret.
+   *
+   * There are deliberately no AWS credential variables here. The AWS SDK resolves
+   * credentials through its own provider chain — environment, shared config file,
+   * then the EC2 instance role — so an instance profile works with no code change
+   * and no key ever passes through this file, gets logged, or reaches a diagnostic.
+   */
+  AWS_REGION: z.string().default('ap-south-1'),
+
   SMTP_HOST: z.string().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().int().positive().default(465),
   SMTP_SECURE: booleanish.default('true'),
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
   SMTP_FROM_NAME: z.string().default('JMK Global Holdings Website'),
-  /** Falls back to SMTP_USER, which is the address Gmail sends as anyway. */
+  /**
+   * The From address. Falls back per provider — see the resolved config below.
+   * On SES this must be an identity verified in the sending region, or SES refuses
+   * the message outright.
+   */
   SMTP_FROM_EMAIL: z.string().default(''),
 
   /**
@@ -137,6 +158,19 @@ function parseAdminEmails(value: string): string[] {
   return valid;
 }
 
+/**
+ * Default From address when SES is the provider and SMTP_FROM_EMAIL is unset.
+ *
+ * NOTE ON THE VALUE: this was given as "no-reply.jmkglobalholdings.com", which is a
+ * host name rather than an address — it has no local part. It is read here as the
+ * conventional `no-reply@jmkglobalholdings.com`. If what was actually verified in SES
+ * is the *subdomain* `no-reply.jmkglobalholdings.com`, then the address wanted is
+ * something like `mail@no-reply.jmkglobalholdings.com` — set SMTP_FROM_EMAIL to it
+ * rather than editing this constant, since the environment is where deployment-
+ * specific addresses belong.
+ */
+const DEFAULT_SES_FROM_EMAIL = 'no-reply@jmkglobalholdings.com';
+
 const adminEmails = parseAdminEmails(raw.ADMIN_EMAILS);
 
 if (adminEmails.length === 0) {
@@ -201,17 +235,43 @@ export const config = {
   },
 
   smtp: {
+    provider: raw.MAIL_PROVIDER,
+    region: raw.AWS_REGION,
     host: raw.SMTP_HOST,
     port: raw.SMTP_PORT,
     secure: raw.SMTP_SECURE,
     user: raw.SMTP_USER,
     password: raw.SMTP_PASSWORD,
     fromName: raw.SMTP_FROM_NAME,
-    // Gmail rewrites the envelope sender to the authenticated account unless the
-    // address is a verified alias, so defaulting to SMTP_USER matches reality.
-    fromEmail: raw.SMTP_FROM_EMAIL.trim() || raw.SMTP_USER || (adminEmails[0] ?? ''),
-    /** Email is optional in development; the API stays fully functional without it. */
-    enabled: Boolean(raw.SMTP_USER && raw.SMTP_PASSWORD),
+    /**
+     * The two providers need opposite defaults here.
+     *
+     * Gmail rewrites the envelope sender to the authenticated account unless the
+     * address is a verified alias, so anything other than SMTP_USER fails DMARC at the
+     * recipient and lands in spam while still reporting 250 OK. SMTP therefore falls
+     * back to the authenticated account.
+     *
+     * SES authenticates the *identity*, not an account, so a dedicated no-reply
+     * address is both possible and the better default: replies to these messages are
+     * never read, and every template already sets a Reply-To that goes somewhere real
+     * — the submitter on admin notifications, the admin inbox on confirmations.
+     */
+    fromEmail:
+      raw.SMTP_FROM_EMAIL.trim() ||
+      (raw.MAIL_PROVIDER === 'ses'
+        ? DEFAULT_SES_FROM_EMAIL
+        : raw.SMTP_USER || (adminEmails[0] ?? '')),
+    /**
+     * Email is optional in development; the API stays fully functional without it.
+     *
+     * The two transports need different things to be usable: SMTP needs a username
+     * and password, SES needs only a verified From address, because its credentials
+     * come from the AWS provider chain rather than from this configuration.
+     */
+    enabled:
+      raw.MAIL_PROVIDER === 'ses'
+        ? Boolean(raw.SMTP_FROM_EMAIL.trim() || raw.SMTP_USER || adminEmails[0])
+        : Boolean(raw.SMTP_USER && raw.SMTP_PASSWORD),
   },
 
   mail: {
