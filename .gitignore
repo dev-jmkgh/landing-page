@@ -41,6 +41,21 @@ next-env.d.ts
 /backend/storage/
 /uploads/
 /storage/
+# ---------------------------------------------------------------------------
+# Tool caches that end up inside the repo when a command runs without a HOME
+# ---------------------------------------------------------------------------
+# `sudo -u jmk npm ci` with no -H leaves HOME pointing at the invoking user's
+# home, which npm cannot write to, so it falls back to the working directory and
+# writes its cache into the checkout. A later `git add -A` then commits thousands
+# of _cacache blobs. deploy.sh uses `sudo -u "$APP_USER" -H`, which is the actual
+# fix; these rules are the backstop.
+.npm/
+.npm-cache/
+_cacache/
+.cache/
+.config/configstore/
+.node_repl_history
+
 logs/
 *.log
 npm-debug.log*
