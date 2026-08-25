@@ -6,7 +6,6 @@ import { Icon } from '@/components/ui/Icon';
 import { JsonLd } from '@/components/ui/JsonLd';
 import { Photo } from '@/components/ui/Photo';
 import { Reveal } from '@/components/ui/Reveal';
-import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { coreValues, founders, missionPoints, visionStatement, whoWeAre } from '@/lib/content/about';
@@ -112,7 +111,6 @@ export default function AboutPage() {
                   sizes="(max-width: 900px) 92vw, 45vw"
                 />
                 <span className="about-figure__wash" aria-hidden="true" />
-                <TechnicalOverlay variant="grid" id="about" className="about-figure__drawing" />
               </figure>
               <div className="highlight-row" style={{ marginTop: '1.5rem' }}>
                 <div>

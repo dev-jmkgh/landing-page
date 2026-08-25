@@ -1,4 +1,4 @@
-import { SESClient, SendRawEmailCommand } from '@aws-sdk/client-ses';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config/env';
 import { describeError, logger } from '../utils/logger';
@@ -25,13 +25,24 @@ let transporter: Transporter | null = null;
 
 function createSesTransport(): Transporter {
   // No `credentials` argument: omitting it is what engages the default provider chain.
-  const ses = new SESClient({ region: config.smtp.region });
-  return nodemailer.createTransport({
-    SES: { ses, aws: { SendRawEmailCommand } },
+  const sesClient = new SESv2Client({ region: config.smtp.region });
+
+  // Nodemailer 9 wants the v2 client and `SendEmailCommand` under `sesClient` /
+  // `SendEmailCommand`. The older `{ ses, aws: { SendRawEmailCommand } }` shape from
+  // @aws-sdk/client-ses is rejected outright at createTransport with ECONFIG — it is
+  // still what most examples show, and it fails at startup rather than at send time.
+  const options = {
+    SES: { sesClient, SendEmailCommand },
     // SES accounts have a per-second send quota; this keeps a burst of submissions
     // from tripping it.
     sendingRate: 10,
-  });
+  };
+
+  // @types/nodemailer is still on 6.x and has no SES member on TransportOptions, so
+  // the object is cast rather than the types being fought. Nodemailer itself validates
+  // this shape at createTransport and throws ECONFIG if it is wrong, which is a
+  // stricter check than the type would have been.
+  return nodemailer.createTransport(options as unknown as Parameters<typeof nodemailer.createTransport>[0]);
 }
 
 function getTransporter(): Transporter | null {
@@ -157,20 +168,26 @@ export async function verifyMailer(): Promise<boolean> {
     );
   }
 
+  const label = config.smtp.provider === 'ses' ? 'SES' : 'SMTP';
+
   try {
     await transport.verify();
     // The full effective config goes in the success line too, so a working startup
     // still shows which account and how many recipients are actually in play.
-    logger.info('SMTP connection verified', mailConfigReport());
+    logger.info(`${label} transport verified`, mailConfigReport());
     return true;
   } catch (error) {
     // Log the failure category and the configuration, never the credentials.
-    logger.error('SMTP verification failed', {
+    logger.error(`${label} verification failed`, {
       ...mailConfigReport(),
-      ...describeError(error),
+      ...describeSendFailure(error),
       hint:
-        'For Gmail, SMTP_PASSWORD must be a 16-character App Password (Google Account > ' +
-        'Security > 2-Step Verification > App passwords), not the account password.',
+        config.smtp.provider === 'ses'
+          ? 'Check that SMTP_FROM_EMAIL is a verified identity in AWS_REGION, that the ' +
+            'account has left the SES sandbox, and that the resolved AWS identity has ' +
+            'ses:SendRawEmail.'
+          : 'For Gmail, SMTP_PASSWORD must be a 16-character App Password (Google Account > ' +
+            'Security > 2-Step Verification > App passwords), not the account password.',
     });
     return false;
   }
@@ -219,6 +236,53 @@ export type MailResult = 'sent' | 'partial' | 'skipped' | 'failed';
  * Sends a message. Returns the outcome rather than throwing, so callers can record
  * whether a notification succeeded without failing the user's submission.
  */
+
+/**
+ * Pulls the parts of a send failure that actually identify the cause.
+ *
+ * `describeError` gives name and message, which is enough for SMTP. AWS SDK errors
+ * carry more and it is the part that matters: the HTTP status separates "your
+ * credentials are wrong" from "this address is not verified", and the request id is
+ * what AWS support asks for first. None of these fields ever contains a credential.
+ *
+ * The common SES failures are worth naming outright, because the raw messages are
+ * indirect and cost an hour each the first time you meet them.
+ */
+function describeSendFailure(error: unknown): Record<string, unknown> {
+  const base = describeError(error);
+  const aws = error as {
+    name?: string;
+    $metadata?: { httpStatusCode?: number; requestId?: string; attempts?: number };
+    Code?: string;
+  };
+
+  const detail: Record<string, unknown> = { ...base };
+  if (aws?.$metadata) {
+    detail.httpStatusCode = aws.$metadata.httpStatusCode;
+    detail.awsRequestId = aws.$metadata.requestId;
+    detail.attempts = aws.$metadata.attempts;
+  }
+  if (aws?.Code) detail.awsCode = aws.Code;
+
+  const name = aws?.name ?? '';
+  const message = base.message as string | undefined;
+
+  if (name === 'MessageRejected' && /not verified/i.test(message ?? '')) {
+    detail.likelyCause =
+      'The From address is not a verified identity in this SES region, or the account ' +
+      'is still in the SES sandbox and the recipient is not verified either. Verify ' +
+      'the identity in SES, or request production access.';
+  } else if (name === 'CredentialsProviderError' || name === 'UnrecognizedClientException') {
+    detail.likelyCause =
+      'SES could not resolve AWS credentials. On EC2 attach an instance role; ' +
+      'locally set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or configure a profile.';
+  } else if (name === 'AccessDenied' || name === 'AccessDeniedException') {
+    detail.likelyCause = 'The resolved AWS identity lacks ses:SendRawEmail in this region.';
+  }
+
+  return detail;
+}
+
 export async function sendMail(input: MailInput): Promise<MailResult> {
   const transport = getTransporter();
   if (!transport) return 'skipped';
@@ -305,9 +369,11 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
   } catch (error) {
     logger.error('Email failed', {
       type,
+      provider: config.smtp.provider,
+      from: maskEmail(config.smtp.fromEmail),
       to: recipients.map(maskEmail),
       subject: input.subject,
-      ...describeError(error),
+      ...describeSendFailure(error),
     });
     return 'failed';
   }

@@ -1010,3 +1010,75 @@
 .drawer__subsublink:hover {
   color: var(--accent-700);
 }
+
+/* --- Disclosure for the services inside a vertical --------------------------
+   The vertical's name stays a link; the chevron beside it is what expands. Two
+   separate targets in one row, so neither steals the other's click.
+   -------------------------------------------------------------------------- */
+
+.mega-menu__row,
+.drawer__subrow {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.mega-menu__row .mega-menu__link,
+.drawer__subrow .drawer__sublink {
+  flex: 1;
+  min-width: 0;
+}
+
+.mega-menu__toggle,
+.drawer__toggle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-200);
+  background-color: var(--surface);
+  color: var(--ink-500);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.mega-menu__toggle:hover,
+.drawer__toggle:hover {
+  background-color: var(--blue-050);
+  border-color: var(--blue-300);
+  color: var(--navy-900);
+}
+
+.mega-menu__toggle:focus-visible,
+.drawer__toggle:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+.mega-menu__toggle svg,
+.drawer__toggle svg {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.mega-menu__toggle[aria-expanded='true'] svg,
+.drawer__toggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+/* Expanded state is now conditional markup rather than always-present, so the list
+   needs a little separation from the row that revealed it. */
+.mega-menu__sublist {
+  padding-top: 0.15rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mega-menu__toggle svg,
+  .drawer__toggle svg {
+    transition: none;
+  }
+}

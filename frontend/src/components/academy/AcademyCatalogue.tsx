@@ -25,9 +25,6 @@ import { EXTERNAL_LINKS } from '@/lib/site';
  * The CAD DESK link leads the CAD section rather than closing it. Course details,
  * batches and enrolment genuinely live on caddeskindia.com, so a visitor who wants to
  * enrol should meet that link before the explanation, not after scrolling past it.
- *
- * Each section's drawing sits inside the tile's own media box, absolutely positioned
- * over the photograph, so the animation adds no height of its own.
  */
 export function AcademyCatalogue() {
   return (
@@ -65,8 +62,6 @@ export function AcademyCatalogue() {
           <Reveal delay={70}>
             <PrimaryCourseTile
               tile={primaryCadTile}
-              overlay="measure"
-              overlayId="cad-tile"
               action={{
                 label: 'Explore CAD courses',
                 href: EXTERNAL_LINKS.cadDeskCoimbatore,
@@ -84,8 +79,6 @@ export function AcademyCatalogue() {
           <Reveal>
             <PrimaryCourseTile
               tile={primarySapTile}
-              overlay="flow"
-              overlayId="sap-tile"
               why={{ label: 'Why SAP?', text: primarySapTile.why }}
               action={{ label: 'Explore the modules', href: '#sap-modules' }}
             />

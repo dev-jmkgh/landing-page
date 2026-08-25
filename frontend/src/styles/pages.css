@@ -1948,17 +1948,6 @@
   );
 }
 
-/* Absolutely positioned inside the media box: the drawing is a film over the
-   photograph, never a block that adds height of its own. */
-.primary-tile .primary-tile__drawing {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0.55;
-  pointer-events: none;
-}
-
 .primary-tile__body {
   display: flex;
   flex-direction: column;
@@ -2323,12 +2312,6 @@
   position: absolute;
   inset: 0;
   background: linear-gradient(200deg, rgba(240, 246, 251, 0.55) 0%, rgba(240, 246, 251, 0.05) 60%);
-}
-
-.about-figure .about-figure__drawing {
-  position: absolute;
-  inset: 0;
-  opacity: 0.5;
 }
 
 

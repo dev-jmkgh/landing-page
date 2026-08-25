@@ -87,6 +87,13 @@ function SocialRow({ variant }: { variant: 'header' | 'drawer' }) {
 export function SiteHeader() {
   const pathname = usePathname() ?? '/';
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  /** Which vertical has its services expanded. One at a time; closed by default. */
+  const [expandedChild, setExpandedChild] = useState<string | null>(null);
+
+  // Reopening the menu should show it as it was first designed to be seen: collapsed.
+  useEffect(() => {
+    if (openMenu === null) setExpandedChild(null);
+  }, [openMenu]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const navRef = useRef<HTMLElement | null>(null);
@@ -250,26 +257,51 @@ export function SiteHeader() {
 
                     {item.children.map((child) => (
                       <div className="mega-menu__group" key={child.href}>
-                        <Link
-                          className="mega-menu__link"
-                          href={child.href}
-                          role="menuitem"
-                          onClick={() => setOpenMenu(null)}
-                        >
-                          <span className="mega-menu__icon" aria-hidden="true">
-                            <Icon name="arrowRight" size={16} />
-                          </span>
-                          <span className="label-stack">
-                            <span className="label-stack__title">{child.label}</span>
-                            <span className="label-stack__description">{child.description}</span>
-                          </span>
-                        </Link>
+                        <div className="mega-menu__row">
+                          <Link
+                            className="mega-menu__link"
+                            href={child.href}
+                            role="menuitem"
+                            onClick={() => setOpenMenu(null)}
+                          >
+                            <span className="mega-menu__icon" aria-hidden="true">
+                              <Icon name="arrowRight" size={16} />
+                            </span>
+                            <span className="label-stack">
+                              <span className="label-stack__title">{child.label}</span>
+                              <span className="label-stack__description">{child.description}</span>
+                            </span>
+                          </Link>
 
-                        {/* The service groups inside the vertical, so someone who
-                            knows they want SAP training can go straight there rather
-                            than landing at the top of the page and scrolling. */}
-                        {child.items ? (
-                          <div className="mega-menu__sublist">
+                          {/*
+                            A separate control, not the link itself. Clicking the name of
+                            a business should go to that business — that is what a name in
+                            a menu means — so expanding what is inside it gets its own
+                            button rather than stealing the click.
+                          */}
+                          {child.items ? (
+                            <button
+                              type="button"
+                              className="mega-menu__toggle"
+                              aria-expanded={expandedChild === child.href}
+                              aria-controls={`submenu-${child.href}`}
+                              onClick={() =>
+                                setExpandedChild((current) =>
+                                  current === child.href ? null : child.href,
+                                )
+                              }
+                            >
+                              <Icon name="chevronDown" size={16} />
+                              <span className="sr-only">
+                                {expandedChild === child.href ? 'Hide' : 'Show'} services inside{' '}
+                                {child.label}
+                              </span>
+                            </button>
+                          ) : null}
+                        </div>
+
+                        {child.items && expandedChild === child.href ? (
+                          <div className="mega-menu__sublist" id={`submenu-${child.href}`}>
                             {child.items.map((sub) => (
                               <Link
                                 className="mega-menu__sublink"
@@ -355,15 +387,39 @@ export function SiteHeader() {
                       <div className="drawer__sublist">
                         {item.children.map((child) => (
                           <div key={child.href}>
-                            <Link
-                              href={child.href}
-                              className="drawer__sublink"
-                              aria-current={pathname === child.href ? 'page' : undefined}
-                            >
-                              {child.label}
-                            </Link>
-                            {child.items ? (
-                              <div className="drawer__subsublist">
+                            <div className="drawer__subrow">
+                              <Link
+                                href={child.href}
+                                className="drawer__sublink"
+                                aria-current={pathname === child.href ? 'page' : undefined}
+                              >
+                                {child.label}
+                              </Link>
+                              {child.items ? (
+                                <button
+                                  type="button"
+                                  className="drawer__toggle"
+                                  aria-expanded={expandedChild === child.href}
+                                  aria-controls={`drawer-submenu-${child.href}`}
+                                  onClick={() =>
+                                    setExpandedChild((current) =>
+                                      current === child.href ? null : child.href,
+                                    )
+                                  }
+                                >
+                                  <Icon name="chevronDown" size={16} />
+                                  <span className="sr-only">
+                                    {expandedChild === child.href ? 'Hide' : 'Show'} services
+                                    inside {child.label}
+                                  </span>
+                                </button>
+                              ) : null}
+                            </div>
+                            {child.items && expandedChild === child.href ? (
+                              <div
+                                className="drawer__subsublist"
+                                id={`drawer-submenu-${child.href}`}
+                              >
                                 {child.items.map((sub) => (
                                   <Link
                                     key={sub.href}

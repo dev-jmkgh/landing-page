@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { Photo } from '@/components/ui/Photo';
-import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import type { CourseTile as CourseTileData } from '@/lib/content/academy';
 
 type Action = { label: string; href: string; external?: boolean };
@@ -14,21 +13,14 @@ type Action = { label: string; href: string; external?: boolean };
  * 16:9 by the media box and `object-fit: cover`, so CAD and SAP present at identical
  * heights whatever their source proportions — a 1400x933 and an 1800x1200 would
  * otherwise sit at different depths side by side.
- *
- * The drawing is absolutely positioned inside the media box, which is what keeps it
- * from adding any height: it is a film over the photograph, not a block above it.
  */
 export function PrimaryCourseTile({
   tile,
-  overlay,
-  overlayId,
   action,
   why,
   highlights,
 }: {
   tile: CourseTileData;
-  overlay: 'measure' | 'grid' | 'flow' | 'network';
-  overlayId: string;
   action?: Action;
   why?: { label: string; text: string };
   highlights?: { title: string; text: string; icon: IconName }[];
@@ -44,11 +36,6 @@ export function PrimaryCourseTile({
           sizes="(max-width: 1023px) 92vw, 560px"
         />
         <span className="primary-tile__wash" aria-hidden="true" />
-        <TechnicalOverlay
-          variant={overlay}
-          id={overlayId}
-          className="primary-tile__drawing"
-        />
       </div>
 
       <div className="primary-tile__body">
