@@ -33,7 +33,9 @@ export function AcademyCatalogue() {
   return (
     <>
       {/* ------------------------------------------------------------------ CAD */}
-      <section className="section">
+      {/* `id`s match the header sub-menu targets. The Academy skips the shared
+          service groups, so these sections carry the anchors instead. */}
+      <section className="section" id="cad">
         <div className="container">
           {/* Before the explanation, deliberately — see the note above. The tile
               below carries this section's heading; there is no separate one. */}
@@ -77,7 +79,7 @@ export function AcademyCatalogue() {
       </section>
 
       {/* ------------------------------------------------------------------ SAP */}
-      <section className="section section--blue">
+      <section className="section section--blue" id="sap">
         <div className="container">
           <Reveal>
             <PrimaryCourseTile

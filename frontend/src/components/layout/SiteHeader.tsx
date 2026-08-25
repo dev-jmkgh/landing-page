@@ -249,21 +249,41 @@ export function SiteHeader() {
                     </Link>
 
                     {item.children.map((child) => (
-                      <Link
-                        className="mega-menu__link"
-                        href={child.href}
-                        key={child.href}
-                        role="menuitem"
-                        onClick={() => setOpenMenu(null)}
-                      >
-                        <span className="mega-menu__icon" aria-hidden="true">
-                          <Icon name="arrowRight" size={16} />
-                        </span>
-                        <span className="label-stack">
-                          <span className="label-stack__title">{child.label}</span>
-                          <span className="label-stack__description">{child.description}</span>
-                        </span>
-                      </Link>
+                      <div className="mega-menu__group" key={child.href}>
+                        <Link
+                          className="mega-menu__link"
+                          href={child.href}
+                          role="menuitem"
+                          onClick={() => setOpenMenu(null)}
+                        >
+                          <span className="mega-menu__icon" aria-hidden="true">
+                            <Icon name="arrowRight" size={16} />
+                          </span>
+                          <span className="label-stack">
+                            <span className="label-stack__title">{child.label}</span>
+                            <span className="label-stack__description">{child.description}</span>
+                          </span>
+                        </Link>
+
+                        {/* The service groups inside the vertical, so someone who
+                            knows they want SAP training can go straight there rather
+                            than landing at the top of the page and scrolling. */}
+                        {child.items ? (
+                          <div className="mega-menu__sublist">
+                            {child.items.map((sub) => (
+                              <Link
+                                className="mega-menu__sublink"
+                                href={sub.href}
+                                key={sub.href}
+                                role="menuitem"
+                                onClick={() => setOpenMenu(null)}
+                              >
+                                {sub.label}
+                              </Link>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -334,14 +354,28 @@ export function SiteHeader() {
                     {item.children ? (
                       <div className="drawer__sublist">
                         {item.children.map((child) => (
-                          <Link
-                            key={child.href}
-                            href={child.href}
-                            className="drawer__sublink"
-                            aria-current={pathname === child.href ? 'page' : undefined}
-                          >
-                            {child.label}
-                          </Link>
+                          <div key={child.href}>
+                            <Link
+                              href={child.href}
+                              className="drawer__sublink"
+                              aria-current={pathname === child.href ? 'page' : undefined}
+                            >
+                              {child.label}
+                            </Link>
+                            {child.items ? (
+                              <div className="drawer__subsublist">
+                                {child.items.map((sub) => (
+                                  <Link
+                                    key={sub.href}
+                                    href={sub.href}
+                                    className="drawer__subsublink"
+                                  >
+                                    {sub.label}
+                                  </Link>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
                         ))}
                       </div>
                     ) : null}

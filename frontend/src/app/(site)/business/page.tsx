@@ -43,7 +43,7 @@ export default function BusinessPage() {
         eyebrow="Our Business"
         title="One group. Multiple industries. Unlimited possibilities."
         intro="Three service verticals form the core of JMK Global Holdings, supported by group activity in exports, agriculture, renewable energy and real estate."
-        meta={verticals.map((vertical) => vertical.name)}
+        meta={verticals.map((v) => ({ label: v.name, href: `/business/${v.slug}` }))}
         image={businessHero}
       />
 

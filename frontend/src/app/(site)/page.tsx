@@ -7,7 +7,6 @@ import { CountUp } from '@/components/ui/CountUp';
 import { Icon } from '@/components/ui/Icon';
 import { Reveal } from '@/components/ui/Reveal';
 import { HERO_VARIANTS, Photo } from '@/components/ui/Photo';
-import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import { SectionHeading } from '@/components/ui/SectionHeading';
 import { pageKeywords, groupTerms, groupSectorTerms } from '@/lib/content/keywords';
 import { groupSectors, verticals } from '@/lib/content/business';
@@ -48,7 +47,6 @@ export default function HomePage() {
             priority
           />
           <span className="hero__scrim" aria-hidden="true" />
-          <TechnicalOverlay variant="measure" id="hero" className="hero__drawing" />
         </div>
 
         <div className="container">

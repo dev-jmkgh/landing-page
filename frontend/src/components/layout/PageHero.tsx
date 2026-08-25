@@ -1,7 +1,7 @@
+import Link from 'next/link';
 import { Breadcrumbs, type Crumb } from '@/components/ui/Breadcrumbs';
 import { PatternBackdrop } from '@/components/ui/PatternBackdrop';
 import { Photo } from '@/components/ui/Photo';
-import { TechnicalOverlay } from '@/components/visuals/TechnicalOverlay';
 import type { HeroImage } from '@/lib/content/heroImages';
 
 type PageHeroProps = {
@@ -9,8 +9,13 @@ type PageHeroProps = {
   title: string;
   intro?: string;
   trail: Crumb[];
-  /** Small pills under the intro, e.g. service categories. */
-  meta?: readonly string[];
+  /**
+   * Small pills under the intro. A plain string is a label; give it an `href` and it
+   * becomes a link. Most of these name something that has a page — "Education" is JMK
+   * Academy, "Exports" is a group sector — and a visitor who reads a badge for the
+   * thing they came for should be able to click it rather than hunt for it in the nav.
+   */
+  meta?: readonly (string | { label: string; href: string })[];
   patternId: string;
   variant?: 'grid' | 'blueprint';
   /**
@@ -62,11 +67,6 @@ export function PageHero({
             style={image.objectPosition ? { objectPosition: image.objectPosition } : undefined}
           />
           <span className="page-hero__scrim" aria-hidden="true" />
-          <TechnicalOverlay
-            variant={image.overlay}
-            id={patternId}
-            className="page-hero__drawing"
-          />
         </div>
       ) : (
         <PatternBackdrop className="page-hero__backdrop" id={patternId} variant={variant} />
@@ -83,11 +83,20 @@ export function PageHero({
           {note ? <p className="page-hero__note">{note}</p> : null}
           {meta && meta.length > 0 ? (
             <ul className="page-hero__meta">
-              {meta.map((item) => (
-                <li key={item} className="pill">
-                  {item}
-                </li>
-              ))}
+              {meta.map((item) => {
+                const entry = typeof item === 'string' ? { label: item, href: null } : item;
+                return (
+                  <li key={entry.label}>
+                    {entry.href ? (
+                      <Link className="pill pill--link" href={entry.href}>
+                        {entry.label}
+                      </Link>
+                    ) : (
+                      <span className="pill">{entry.label}</span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           ) : null}
         </div>

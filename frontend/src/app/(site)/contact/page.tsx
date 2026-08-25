@@ -41,7 +41,7 @@ export default function ContactPage() {
         eyebrow="Contact Us"
         title="Talk to JMK Global Holdings"
         intro="Reach the group directly by phone or email, or send an enquiry and we will route it to the right business vertical."
-        meta={['Coimbatore, Tamil Nadu']}
+        meta={[{ label: 'Coimbatore, Tamil Nadu', href: '#office' }]}
         image={contactHero}
       />
 
@@ -142,7 +142,7 @@ export default function ContactPage() {
         </div>
       </section>
 
-      <section className="section section--muted section--tight">
+      <section className="section section--muted section--tight" id="office">
         <div className="container">
           <Reveal>
             <SectionHeading eyebrow="Find Us" title="Our Coimbatore office" />

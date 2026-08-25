@@ -9,7 +9,9 @@ import {
   isApiConfigured,
 } from '@/lib/api';
 import { EXPERIENCE_LEVELS, FIELD_LIMITS, RESUME_UPLOAD } from '@/lib/constants';
+import { DEFAULT_DIAL_CODE } from '@/lib/content/dialCodes';
 import { openPositions } from '@/lib/content/careers';
+import { PhoneField } from '@/components/forms/PhoneField';
 import {
   validateEmail,
   validateName,
@@ -38,6 +40,7 @@ type FormState = {
   fullName: string;
   email: string;
   phone: string;
+  dialCode: string;
   position: string;
   message: string;
   experience: string;
@@ -51,6 +54,7 @@ const EMPTY: FormState = {
   fullName: '',
   email: '',
   phone: '',
+  dialCode: DEFAULT_DIAL_CODE,
   position: '',
   message: '',
   experience: '',
@@ -68,7 +72,7 @@ function validateAll(values: FormState, resume: File | null): Errors {
   const checks: [keyof FormState | 'resume', string | null][] = [
     ['fullName', validateName(values.fullName)],
     ['email', validateEmail(values.email)],
-    ['phone', validatePhone(values.phone)],
+    ['phone', validatePhone(`${values.dialCode} ${values.phone}`)],
     ['position', validateSelection(values.position, 'the position you are applying for')],
     ['resume', validateResume(resume, true)],
     ['linkedinUrl', validateOptionalUrl(values.linkedinUrl, 'LinkedIn')],
@@ -148,7 +152,7 @@ export function ApplicationForm() {
     const formData = new FormData();
     formData.append('fullName', values.fullName.trim());
     formData.append('email', values.email.trim());
-    formData.append('phone', values.phone.trim());
+    formData.append('phone', `${values.dialCode} ${values.phone.trim()}`.trim());
     formData.append('position', values.position);
     formData.append('message', values.message.trim());
     formData.append('experience', values.experience);
@@ -275,17 +279,16 @@ export function ApplicationForm() {
       </div>
 
       <div className="form-row form-row--2">
-        <TextField
+        <PhoneField
           label="Phone"
           name="phone"
-          type="tel"
-          value={values.phone}
-          onChange={setField('phone')}
+          dial={values.dialCode}
+          number={values.phone}
+          onDialChange={setField('dialCode')}
+          onNumberChange={setField('phone')}
           error={errors.phone}
           required
-          autoComplete="tel"
           maxLength={FIELD_LIMITS.phone.max}
-          placeholder="+91 00000 00000"
         />
         <SelectField
           label="Position Applied For"

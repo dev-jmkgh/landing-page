@@ -21,6 +21,27 @@ type VerticalDetailProps = {
  * Shared layout for the three business vertical pages. Content differs entirely by
  * data, so the presentation lives in one place.
  */
+/** Stable, readable anchor for a service name: "2D Drafting" -> "2d-drafting". */
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/**
+ * The Academy renders a catalogue instead of the service groups, so its badges point at
+ * the catalogue's two sections. The rest are matched by name against the services the
+ * page actually renders — a badge only becomes a link when its target exists, so
+ * "Placement Assistance" on a page with no such heading stays plain text rather than
+ * scrolling nowhere.
+ */
+const ACADEMY_BADGE_HREFS: Record<string, string> = {
+  'Engineering CAD Training': '#cad',
+  'SAP Training': '#sap',
+};
+
 export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
   const trail = [
     { name: 'Home', path: '/' },
@@ -30,6 +51,19 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
 
   const others = verticals.filter((item) => item.slug !== vertical.slug);
   const isAcademy = vertical.slug === 'jmk-academy';
+
+  const renderedServices = new Set(
+    vertical.groups.flatMap((group) => group.services.map((service) => service.name)),
+  );
+
+  const badges = vertical.cardServices.slice(0, 5).map((label) => {
+    const href = isAcademy
+      ? ACADEMY_BADGE_HREFS[label]
+      : renderedServices.has(label)
+        ? `#${slugify(label)}`
+        : undefined;
+    return href ? { label, href } : label;
+  });
 
   return (
     <>
@@ -42,7 +76,7 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
         eyebrow={`${vertical.hero.eyebrow} · ${vertical.name}`}
         title={vertical.hero.heading}
         intro={vertical.hero.intro}
-        meta={vertical.cardServices.slice(0, 5)}
+        meta={badges}
         image={verticalHeroes[vertical.slug]}
       />
 
@@ -62,7 +96,7 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
       <section className="section">
         <div className="container">
           {vertical.groups.map((group) => (
-            <div className="service-group" key={group.id}>
+            <div className="service-group" id={group.id} key={group.id}>
               <Reveal>
                 <div className="service-group__head">
                   <span className="service-group__icon" aria-hidden="true">
@@ -78,7 +112,7 @@ export function VerticalDetail({ vertical, interest }: VerticalDetailProps) {
               <div className="service-list">
                 {group.services.map((service, index) => (
                   <Reveal key={service.name} delay={index * 60}>
-                    <article className="service-item">
+                    <article className="service-item" id={slugify(service.name)}>
                       {service.image ? (
                         <div className="service-item__media">
                           <Photo

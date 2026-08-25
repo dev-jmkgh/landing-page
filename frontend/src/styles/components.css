@@ -703,7 +703,10 @@
 .modal {
   position: relative;
   width: 100%;
-  max-width: 34rem;
+  /* 34rem left each column of a two-up form row at about 230px, which was not
+     enough for the phone field once it carried a country-code select beside the
+     number — the number input collapsed to a stub. */
+  max-width: 46rem;
   max-height: 92vh;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1257,4 +1260,58 @@
 .carousel__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* --- Phone with country code ------------------------------------------------
+   Two controls, one field. The select is sized to its content rather than given
+   a share of the row: dial codes are two to four characters, and a 50/50 split
+   would leave "+91" swimming while the number it belongs to ran out of room.
+
+   `minmax(0, 1fr)` on the number, not `1fr` — a grid item's default `min-width:
+   auto` refuses to shrink below its content, which pushes the pair wider than
+   the column and breaks the two-up form row.
+   -------------------------------------------------------------------------- */
+
+.phone-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+/* A select sizes itself to its widest option, and "+971 · United Arab Emirates"
+   is wide, so this is pinned rather than left to `auto`. The dropdown list still
+   renders at its own width, so the full country names stay readable where it
+   matters — only the closed box is constrained. */
+.phone-field__dial {
+  width: 8.5rem;
+  padding-inline: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 400px) {
+  .phone-field__dial {
+    width: 6rem;
+  }
+}
+
+/* A pill that navigates. Same shape as the static badge, plus the affordances a
+   link needs: a hover state, a focus ring, and a cursor. */
+.pill--link {
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.pill--link:hover {
+  background-color: var(--blue-050);
+  border-color: var(--blue-300);
+  color: var(--navy-900);
+}
+
+.pill--link:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
 }

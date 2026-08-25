@@ -485,7 +485,7 @@
   top: calc(100% + 0.5rem);
   left: 50%;
   transform: translateX(-50%);
-  width: min(34rem, 90vw);
+  width: min(38rem, 90vw);
   /* Never let the panel run off the right edge of a narrow desktop window. */
   max-width: calc(100vw - 2rem);
   padding: var(--space-3);
@@ -945,4 +945,68 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-5);
+}
+
+
+/* --- Mega menu: sub-modules ------------------------------------------------
+   The service groups inside each vertical. Indented to the depth of the parent
+   link's label column, so the hierarchy is legible without a second icon
+   column repeating down the panel.
+   -------------------------------------------------------------------------- */
+
+.mega-menu__group + .mega-menu__group {
+  margin-top: 0.15rem;
+}
+
+.mega-menu__sublist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  /* 0.9rem of link padding + a 16px icon + the 0.85rem gap between them. */
+  padding: 0 0.9rem 0.55rem calc(0.9rem + 16px + 0.85rem);
+}
+
+.mega-menu__sublink {
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-200);
+  background-color: var(--surface-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-700);
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.mega-menu__sublink:hover,
+.mega-menu__sublink:focus-visible {
+  background-color: var(--blue-050);
+  border-color: var(--blue-300);
+  color: var(--navy-900);
+}
+
+/* --- Drawer: sub-modules --------------------------------------------------- */
+
+.drawer__subsublist {
+  display: flex;
+  flex-direction: column;
+  padding-left: var(--space-4);
+  /* A rule rather than a bullet: it reads as "inside the item above" at a glance
+     and costs no horizontal room on a phone. */
+  border-left: 1px solid var(--line-200);
+  margin-left: 0.15rem;
+}
+
+.drawer__subsublink {
+  display: block;
+  padding: 0.4rem 0;
+  font-size: 0.875rem;
+  color: var(--ink-500);
+}
+
+.drawer__subsublink:hover {
+  color: var(--accent-700);
 }

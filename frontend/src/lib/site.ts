@@ -110,7 +110,18 @@ export const EXTERNAL_LINKS = {
 export type NavItem = {
   label: string;
   href: string;
-  children?: { label: string; href: string; description: string }[];
+  children?: {
+    label: string;
+    href: string;
+    description: string;
+    /**
+     * The service groups inside that vertical, linked by anchor. These are the same
+     * groups the vertical page renders — `business.ts` owns the copy, this owns only
+     * the label and the target — so a visitor can jump straight to SAP training or to
+     * Digital Infrastructure rather than landing at the top and scrolling for it.
+     */
+    items?: { label: string; href: string }[];
+  }[];
 };
 
 export const mainNavigation: NavItem[] = [
@@ -124,16 +135,34 @@ export const mainNavigation: NavItem[] = [
         label: 'JMK Academy',
         href: '/business/jmk-academy',
         description: 'CAD DESK and SAP training',
+        items: [
+          { label: 'Engineering CAD Training', href: '/business/jmk-academy#cad' },
+          { label: 'SAP Training', href: '/business/jmk-academy#sap' },
+        ],
       },
       {
         label: 'JMK Design Studio',
         href: '/business/jmk-design-studio',
         description: 'All CAD designing works',
+        items: [
+          {
+            label: 'Design & Drafting Services',
+            href: '/business/jmk-design-studio#design-services',
+          },
+        ],
       },
       {
         label: 'JMK Software Solutions',
         href: '/business/jmk-software-solutions',
         description: 'Software, web, mobile and cloud services',
+        items: [
+          { label: 'Build', href: '/business/jmk-software-solutions#build' },
+          { label: 'Operate & Analyse', href: '/business/jmk-software-solutions#operate' },
+          {
+            label: 'Digital Infrastructure & Marketing',
+            href: '/business/jmk-software-solutions#infrastructure',
+          },
+        ],
       },
     ],
   },

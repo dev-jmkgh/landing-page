@@ -23,6 +23,26 @@ export const metadata: Metadata = buildMetadata({
   keywords: pageKeywords(['about JMK Global Holdings', 'diversified business group Coimbatore'], groupTerms, groupSectorTerms),
 });
 
+/**
+ * Where each sector actually lives. The three service verticals have their own pages;
+ * the remaining four are described in the group-sectors section of the Business page,
+ * so they share that anchor rather than pointing at pages that do not exist.
+ */
+const SECTOR_HREFS: Record<string, string> = {
+  Education: '/business/jmk-academy',
+  'Engineering Design': '/business/jmk-design-studio',
+  'Software Development': '/business/jmk-software-solutions',
+  Exports: '/business#sectors',
+  Agriculture: '/business#sectors',
+  'Renewable Energy': '/business#sectors',
+  'Real Estate': '/business#sectors',
+};
+
+const sectorLinks = siteConfig.sectors.map((label) => {
+  const href = SECTOR_HREFS[label];
+  return href ? { label, href } : label;
+});
+
 const trail = [
   { name: 'Home', path: '/' },
   { name: 'About Us', path: '/about' },
@@ -48,7 +68,7 @@ export default function AboutPage() {
         eyebrow="About Us"
         title="One group, seven sectors, a single standard of quality"
         intro="JMK Global Holdings brings together training, engineering design, software, exports, agriculture, renewable energy and real estate under one brand — with a commitment to creating opportunity alongside profit."
-        meta={siteConfig.sectors}
+        meta={sectorLinks}
         image={aboutHero}
       />
 
@@ -105,7 +125,21 @@ export default function AboutPage() {
                 </div>
                 <div>
                   <p className="highlight-row__label">Co-Founders</p>
-                  <p className="highlight-row__value">Jose AM · Muthu Krishnan Anantham</p>
+                  {/*
+                    One name per line, and each name unbreakable. Joined into a single
+                    string with a separator, "Muthu Krishnan Anantham" wrapped wherever
+                    the column happened to run out — "Jose AM · Muthu / Krishnan /
+                    Anantham" — which reads as three people rather than two. The names
+                    also come from `founders` now instead of being written out a second
+                    time here.
+                  */}
+                  <p className="highlight-row__value">
+                    {founders.map((founder) => (
+                      <span className="highlight-row__name" key={founder.name}>
+                        {founder.name}
+                      </span>
+                    ))}
+                  </p>
                 </div>
               </div>
             </Reveal>

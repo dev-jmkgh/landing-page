@@ -18,6 +18,8 @@ import {
   validatePhone,
   validateSelection,
 } from '@/lib/validation';
+import { PhoneField } from '@/components/forms/PhoneField';
+import { DEFAULT_DIAL_CODE } from '@/lib/content/dialCodes';
 import {
   FormAlert,
   HoneypotField,
@@ -44,6 +46,7 @@ type FormState = {
   name: string;
   email: string;
   phone: string;
+  dialCode: string;
   company: string;
   interestedIn: string;
   message: string;
@@ -54,6 +57,7 @@ const EMPTY: FormState = {
   name: '',
   email: '',
   phone: '',
+  dialCode: DEFAULT_DIAL_CODE,
   company: '',
   interestedIn: '',
   message: '',
@@ -66,7 +70,8 @@ function validateAll(values: FormState): Errors {
   const errors: Errors = {};
   const name = validateName(values.name);
   const email = validateEmail(values.email);
-  const phone = validatePhone(values.phone);
+  // Validated as it will be sent and stored: code and number together.
+  const phone = validatePhone(`${values.dialCode} ${values.phone}`);
   const company = validateCompany(values.company);
   const interest = validateSelection(values.interestedIn, 'what you are interested in');
   const message = validateMessage(values.message);
@@ -169,7 +174,7 @@ export function EnquiryForm({
         {
           name: values.name.trim(),
           email: values.email.trim(),
-          phone: values.phone.trim(),
+          phone: `${values.dialCode} ${values.phone.trim()}`.trim(),
           company: values.company.trim() || undefined,
           interestedIn: values.interestedIn,
           message: values.message.trim(),
@@ -263,18 +268,17 @@ export function EnquiryForm({
       </div>
 
       <div className="form-row form-row--2">
-        <TextField
+        <PhoneField
           label="Phone"
           name="phone"
-          type="tel"
-          value={values.phone}
-          onChange={setField('phone')}
+          dial={values.dialCode}
+          number={values.phone}
+          onDialChange={setField('dialCode')}
+          onNumberChange={setField('phone')}
           onBlur={blurField('phone')}
           error={errors.phone}
           required
-          autoComplete="tel"
           maxLength={FIELD_LIMITS.phone.max}
-          placeholder="+91 00000 00000"
         />
         <TextField
           label="Company / Organization"

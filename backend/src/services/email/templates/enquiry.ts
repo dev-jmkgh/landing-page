@@ -73,7 +73,12 @@ export function enquiryConfirmationEmail(data: EnquiryEmailData): EmailDocument 
   ];
 
   return {
-    subject: `We have received your enquiry (${data.reference}) — JMK Global Holdings`,
+    // The reference moves to the preheader and the body rather than riding in the
+    // subject: a subject line is what the recipient scans in a crowded inbox, and
+    // "Thank You for Contacting JMK Global Holdings" is recognisable where a
+    // parenthesised reference code is not. Nothing is lost — the reference is the
+    // first thing the email itself shows.
+    subject: 'Thank You for Contacting JMK Global Holdings',
     html: renderEmail({
       title: 'We have received your enquiry',
       preheader: `Your reference number is ${data.reference}.`,

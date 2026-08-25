@@ -35,7 +35,10 @@ export default function CareersPage() {
         eyebrow="Careers"
         title={careersIntro.heading}
         intro={careersIntro.intro}
-        meta={[`${openPositions.length} open role types`, 'Coimbatore, Tamil Nadu']}
+        meta={[
+          `${openPositions.length} open role types`,
+          { label: 'Coimbatore, Tamil Nadu', href: '/contact' },
+        ]}
         image={careersHero}
       />
 

@@ -18,6 +18,12 @@
  * On `objectPosition`: the copy occupies the left of the band and the scrim is heaviest
  * there, so each crop is nudged so its subject sits right of centre, clear of the text
  * rather than behind it.
+ *
+ * The heroes used to carry a drafting film over the photograph, and each image named
+ * which variant it wanted. That was removed — a hero is now the photograph and the
+ * scrim, nothing over it — so the field is gone rather than left declared and unread.
+ * The drafting language still runs on the CAD and SAP tiles, where it sits over a
+ * single small frame instead of a full-bleed band.
  */
 
 export type HeroImage = {
@@ -28,8 +34,6 @@ export type HeroImage = {
   variants: number[];
   /** `object-position` for the crop. Defaults to `50% center` when omitted. */
   objectPosition?: string;
-  /** Which drafting film lies over the photograph — keeps the pages distinct. */
-  overlay: 'measure' | 'grid' | 'flow' | 'network';
 };
 
 export const aboutHero: HeroImage = {
@@ -39,7 +43,6 @@ export const aboutHero: HeroImage = {
   height: 1202,
   variants: [640, 1024, 1440, 1800],
   objectPosition: '62% center',
-  overlay: 'grid',
 };
 
 export const businessHero: HeroImage = {
@@ -49,7 +52,6 @@ export const businessHero: HeroImage = {
   height: 1201,
   variants: [640, 1024, 1440, 1800],
   objectPosition: '65% center',
-  overlay: 'network',
 };
 
 export const careersHero: HeroImage = {
@@ -59,7 +61,6 @@ export const careersHero: HeroImage = {
   height: 1202,
   variants: [640, 1024, 1440, 1800],
   objectPosition: '68% center',
-  overlay: 'flow',
 };
 
 export const contactHero: HeroImage = {
@@ -69,7 +70,6 @@ export const contactHero: HeroImage = {
   height: 1200,
   variants: [640, 1024, 1440, 1800],
   objectPosition: '66% center',
-  overlay: 'measure',
 };
 
 export const galleryHero: HeroImage = {
@@ -79,7 +79,6 @@ export const galleryHero: HeroImage = {
   height: 933,
   variants: [640, 1024, 1400],
   objectPosition: '60% center',
-  overlay: 'network',
 };
 
 /** Keyed by `vertical.slug` — see `lib/content/business.ts`. */
@@ -91,7 +90,6 @@ export const verticalHeroes: Record<string, HeroImage> = {
     height: 1067,
     variants: [640, 1024, 1440, 1600],
     objectPosition: '70% center',
-    overlay: 'measure',
   },
   'jmk-design-studio': {
     src: '/images/gallery/design-technical-drawing-parts.jpg',
@@ -100,7 +98,6 @@ export const verticalHeroes: Record<string, HeroImage> = {
     height: 788,
     variants: [640, 1024, 1400],
     objectPosition: '64% center',
-    overlay: 'grid',
   },
   'jmk-software-solutions': {
     src: '/images/gallery/software-analytics-dashboard.jpg',
@@ -109,6 +106,5 @@ export const verticalHeroes: Record<string, HeroImage> = {
     height: 1008,
     variants: [640, 1024, 1400],
     objectPosition: '68% center',
-    overlay: 'flow',
   },
 };
