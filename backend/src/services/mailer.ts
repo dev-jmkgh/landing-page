@@ -1,4 +1,4 @@
-import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { GetAccountCommand, SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config/env';
 import { describeError, logger } from '../utils/logger';
@@ -119,6 +119,40 @@ export function mailConfigReport() {
 }
 
 /** Verifies SMTP credentials at startup. Logs the outcome; never throws. */
+
+/**
+ * Warns when the SES account is still in the sandbox.
+ *
+ * In the sandbox SES will only deliver to addresses that are themselves verified
+ * identities, which is exactly wrong for this application: enquiry and application
+ * confirmations go to members of the public whose addresses cannot be verified in
+ * advance. Every one of them is rejected with "Email address is not verified", naming
+ * the *recipient* — which reads like a configuration mistake and is not one.
+ *
+ * Checked once at startup so the condition is stated plainly in the boot log, instead
+ * of being rediscovered from a rejected send weeks later. Failure to check is not
+ * fatal: the permission may simply not be granted, and that says nothing about whether
+ * sending works.
+ */
+async function warnIfSesSandbox(): Promise<void> {
+  try {
+    const account = await new SESv2Client({ region: config.smtp.region }).send(
+      new GetAccountCommand({}),
+    );
+
+    if (account.ProductionAccessEnabled === false) {
+      logger.warn(
+        'SES is in the SANDBOX. Only verified addresses can receive mail, so enquiry ' +
+          'and application confirmations to the public WILL be rejected. Request ' +
+          'production access in the SES console for this region.',
+        { region: config.smtp.region, sendingEnabled: account.SendingEnabled },
+      );
+    }
+  } catch (error) {
+    logger.debug('Could not read SES account status', describeError(error));
+  }
+}
+
 export async function verifyMailer(): Promise<boolean> {
   const transport = getTransporter();
 
@@ -154,7 +188,14 @@ export async function verifyMailer(): Promise<boolean> {
    * and the message is filed as spam. The send reports 250 OK either way, so nothing
    * downstream can detect this — hence the warning here.
    */
-  const fromDomain = config.smtp.fromEmail.split('@')[1]?.toLowerCase();
+  /**
+   * SMTP only. SES authenticates the identity rather than an account, so a From on a
+   * verified domain is exactly right there and comparing it against SMTP_USER — which
+   * SES never uses — produced a warning that was not merely irrelevant but backwards,
+   * advising a change that would have made deliverability worse.
+   */
+  const fromDomain =
+    config.smtp.provider === 'ses' ? undefined : config.smtp.fromEmail.split('@')[1]?.toLowerCase();
   const authDomain = config.smtp.user.split('@')[1]?.toLowerCase();
 
   if (fromDomain && authDomain && fromDomain !== authDomain) {
@@ -175,6 +216,7 @@ export async function verifyMailer(): Promise<boolean> {
     // The full effective config goes in the success line too, so a working startup
     // still shows which account and how many recipients are actually in play.
     logger.info(`${label} transport verified`, mailConfigReport());
+    if (config.smtp.provider === 'ses') await warnIfSesSandbox();
     return true;
   } catch (error) {
     // Log the failure category and the configuration, never the credentials.

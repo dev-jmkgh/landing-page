@@ -213,13 +213,12 @@ function parseAdminEmails(value: string): string[] {
 /**
  * Default From address when SES is the provider and SMTP_FROM_EMAIL is unset.
  *
- * NOTE ON THE VALUE: this was given as "no-reply.jmkglobalholdings.com", which is a
- * host name rather than an address — it has no local part. It is read here as the
- * conventional `no-reply@jmkglobalholdings.com`. If what was actually verified in SES
- * is the *subdomain* `no-reply.jmkglobalholdings.com`, then the address wanted is
- * something like `mail@no-reply.jmkglobalholdings.com` — set SMTP_FROM_EMAIL to it
- * rather than editing this constant, since the environment is where deployment-
- * specific addresses belong.
+ * Confirmed against the account: `jmkglobalholdings.com` is a verified DOMAIN identity
+ * in ap-south-1 with DKIM SUCCESS, and it carries a custom MAIL FROM domain of
+ * `no-reply.jmkglobalholdings.com`. So any address at the domain is a valid sender,
+ * this one is DKIM-signed, and its envelope sender aligns with the same domain — which
+ * is what SPF and DMARC check. It is a strictly better sender than a gmail.com address
+ * authenticated through SMTP, which can never align.
  */
 const DEFAULT_SES_FROM_EMAIL = 'no-reply@jmkglobalholdings.com';
 
