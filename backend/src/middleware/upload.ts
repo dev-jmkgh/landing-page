@@ -1,11 +1,7 @@
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import { open, unlink, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import multer from 'multer';
 import { config } from '../config/env';
 import { badRequest } from '../utils/httpError';
-import { describeError, logger } from '../utils/logger';
 
 /**
  * Resume upload handling.
@@ -15,31 +11,23 @@ import { describeError, logger } from '../utils/logger';
  *   1. Extension allowlist        (.pdf, .doc, .docx)
  *   2. MIME type allowlist        (client-declared — treated as a hint, not proof)
  *   3. Size limit                 (MAX_UPLOAD_MB)
- *   4. Generated file name        (UUID + extension; the submitted name never touches disk)
- *   5. Magic-byte verification    (after write; mismatched files are deleted)
- *   6. Storage outside the web root, served only through an authenticated route
+ *   4. Generated file name        (UUID + extension; the submitted name is never a path)
+ *   5. Magic-byte verification    (before storing; a mismatch is never written anywhere)
+ *   6. Storage outside the web root — a private bucket, or a directory the web server
+ *      does not serve — reachable only through an authenticated route
+ *
+ * The file is held in memory rather than written to disk on arrival. That is what lets
+ * the same code path store to either destination, and it improves the order of
+ * operations: the bytes are verified *before* anything is written, instead of being
+ * written, checked, and deleted again on failure. The size limit below is what keeps
+ * "in memory" bounded.
  */
 
 const ALLOWED_EXTENSIONS = new Set<string>(config.uploads.allowedExtensions);
 const ALLOWED_MIME_TYPES = new Set<string>(config.uploads.allowedMimeTypes);
 
-/** Creates the upload directory once at startup. */
-export function ensureUploadDirectory(): void {
-  fs.mkdirSync(config.uploads.directory, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination(_request, _file, callback) {
-    callback(null, config.uploads.directory);
-  },
-  filename(_request, file, callback) {
-    const extension = path.extname(file.originalname).toLowerCase();
-    callback(null, `${crypto.randomUUID()}${extension}`);
-  },
-});
-
 export const uploadResume = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: config.uploads.maxBytes,
     files: 1,
@@ -82,48 +70,15 @@ const SIGNATURES: { extension: string; magic: Buffer[] }[] = [
 ];
 
 /**
- * Confirms the file's contents match its extension. A `.pdf` that is really a script
- * fails here and is deleted before anything is written to the database.
+ * Confirms the bytes match the extension. A `.pdf` that is really a script fails here,
+ * before it is stored anywhere and before any database row exists.
  */
-export async function verifyResumeContents(filePath: string): Promise<boolean> {
-  const extension = path.extname(filePath).toLowerCase();
+export function verifyResumeContents(buffer: Buffer, originalName: string): boolean {
+  const extension = path.extname(originalName).toLowerCase();
   const expected = SIGNATURES.find((entry) => entry.extension === extension);
   if (!expected) return false;
+  if (buffer.length === 0) return false;
 
-  let handle: FileHandle | null = null;
-  try {
-    handle = await open(filePath, 'r');
-    const buffer = Buffer.alloc(8);
-    const { bytesRead } = await handle.read(buffer, 0, 8, 0);
-    if (bytesRead === 0) return false;
-
-    return expected.magic.some((magic) => buffer.subarray(0, magic.length).equals(magic));
-  } catch (error) {
-    logger.warn('Could not read uploaded file for verification', describeError(error));
-    return false;
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
-/** Best-effort cleanup used when a submission is rejected after the file was written. */
-export async function removeUpload(filePath: string | undefined): Promise<void> {
-  if (!filePath) return;
-  try {
-    await unlink(filePath);
-  } catch (error) {
-    logger.warn('Could not remove rejected upload', describeError(error));
-  }
-}
-
-/**
- * Resolves a stored file name to an absolute path, refusing anything that escapes the
- * upload directory (path traversal guard for the admin download route).
- */
-export function resolveStoredFile(filename: string): string | null {
-  const resolved = path.resolve(config.uploads.directory, filename);
-  const root = path.resolve(config.uploads.directory);
-
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
-  return resolved;
+  const head = buffer.subarray(0, 8);
+  return expected.magic.some((magic) => head.subarray(0, magic.length).equals(magic));
 }

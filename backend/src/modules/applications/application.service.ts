@@ -2,7 +2,7 @@ import { config } from '../../config/env';
 import { badRequest } from '../../utils/httpError';
 import { describeError, logger } from '../../utils/logger';
 import { createReference, safeFilename, truncate } from '../../utils/text';
-import { resolveStoredFile } from '../../middleware/upload';
+import { createResumeLink, openResume } from '../../services/storage';
 import { sendAdminNotification, sendMail, type MailAttachment, type MailResult } from '../../services/mailer';
 import {
   awaitDelivery,
@@ -45,11 +45,42 @@ const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const EMAIL_WAIT_MS = 12_000;
 
 export type ResumeFile = {
+  /** Opaque storage key — a file name on disk, an object key in S3. */
   storedName: string;
   originalName: string;
   mimeType: string;
   size: number;
+  /**
+   * The bytes, when this request carried them. Present on the multipart path and
+   * absent on the presigned one, where the file went straight to the bucket and this
+   * server never held it — see how the attachment is resolved below.
+   */
+  buffer?: Buffer;
 };
+
+/**
+ * Reads a stored resume back for attaching. Failure is logged and returns null — the
+ * application is already saved and the reviewer can still download the file, so an
+ * unreadable object must not take the notification down with it.
+ */
+async function readStoredResume(key: string, reference: string): Promise<Buffer | null> {
+  try {
+    const opened = await openResume(key);
+    if (!opened) {
+      logger.warn('Stored resume not found; sending notification without it', { reference });
+      return null;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  } catch (error) {
+    logger.error('Could not read stored resume for attachment', {
+      reference,
+      ...describeError(error),
+    });
+    return null;
+  }
+}
 
 async function deliverApplicationEmails(
   id: number,
@@ -150,29 +181,32 @@ export async function createApplication(
 
   /**
    * The resume travels with the admin notification so reviewers can open it from the
-   * inbox. The stored copy stays on disk, outside the web root, reachable only through
-   * the authenticated admin download route — no public or guessable URL is ever
-   * created or emailed.
+   * inbox. The stored copy stays private — a bucket with no public access, or a
+   * directory the web server does not serve — reachable only through the authenticated
+   * admin download route. No public or guessable URL is ever created or emailed.
+   *
+   * The bytes come from memory when this request carried them, and are fetched back
+   * from storage when it did not: on the presigned path the browser uploaded straight
+   * to the bucket, so this is the one place the server reads the file at all.
    */
   const attachments: MailAttachment[] = [];
 
   if (resume && record.resumeOriginalName) {
-    // resolveStoredFile returns null if the name would escape the upload directory.
-    const storedPath = resolveStoredFile(resume.storedName);
-
-    if (!storedPath) {
-      logger.error('Stored resume path failed validation; not attaching', { reference });
-    } else if (resume.size > MAX_ATTACHMENT_BYTES) {
+    if (resume.size > MAX_ATTACHMENT_BYTES) {
       logger.warn('Resume too large to attach; admin will download it instead', {
         reference,
         size: resume.size,
       });
     } else {
-      attachments.push({
-        filename: record.resumeOriginalName,
-        path: storedPath,
-        contentType: resume.mimeType,
-      });
+      const content = resume.buffer ?? (await readStoredResume(resume.storedName, reference));
+
+      if (content) {
+        attachments.push({
+          filename: record.resumeOriginalName,
+          content,
+          contentType: resume.mimeType,
+        });
+      }
     }
   }
 
@@ -189,6 +223,8 @@ export async function createApplication(
     location: input.location,
     resumeOriginalName: record.resumeOriginalName,
     resumeAttached: attachments.length > 0,
+    // Signed after the insert, because the link is keyed by the row's id.
+    resumeUrl: record.resumeFilename ? createResumeLink(id) : null,
     submittedAt: new Date(),
   };
 

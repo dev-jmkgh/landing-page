@@ -21,6 +21,16 @@ const schema = z.object({
   TRUST_PROXY: booleanish.default('0'),
 
   APP_URL: z.string().url().default('http://localhost:3000'),
+
+  /**
+   * Where this API is reachable from outside — https://api.example.com in production.
+   *
+   * Needed because the admin notification email carries a resume download link, and a
+   * link in an email has to be absolute and has to point at the API host rather than
+   * the website. Defaults to localhost, which is right in development and wrong in
+   * production, so it is checked at startup.
+   */
+  API_PUBLIC_URL: z.string().url().default('http://localhost:5000'),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
 
   DATABASE_URL: z.string().optional(),
@@ -86,6 +96,22 @@ const schema = z.object({
   /** Reject the submission when Google cannot be reached. Default: fail open. */
   RECAPTCHA_FAIL_CLOSED: booleanish.default('0'),
 
+  /**
+   * Where resumes are kept. 'local' is the instance disk; 's3' is a bucket.
+   *
+   * A single EC2 box's disk is the one part of that deployment with nothing backing it
+   * up — the nightly mysqldump does not cover uploaded files — so 's3' is the durable
+   * choice in production.
+   */
+  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+
+  /** Required when STORAGE_DRIVER=s3. There is deliberately no default: a wrong bucket
+   *  name is worse than a refusal to start. */
+  S3_BUCKET: z.string().default(''),
+
+  /** Key prefix inside the bucket, so resumes can carry their own lifecycle rule. */
+  S3_PREFIX: z.string().default('resumes'),
+
   UPLOAD_DIR: z.string().default('storage/resumes'),
   MAX_UPLOAD_MB: z.coerce.number().positive().max(25).default(5),
 
@@ -119,6 +145,32 @@ if (isProduction && raw.JWT_SECRET.length < 32) {
       '  node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"',
   );
 }
+
+/**
+ * A bucket name is not something to guess at. Uploading to the wrong bucket either
+ * fails obscurely or, worse, succeeds into somewhere unintended — so refuse to start
+ * rather than pick a default.
+ */
+if (raw.STORAGE_DRIVER === 's3' && !raw.S3_BUCKET.trim()) {
+  throw new Error(
+    'STORAGE_DRIVER=s3 requires S3_BUCKET to be set to the bucket name.\n' +
+      '  The bucket must be private — resumes are personal data, served only through\n' +
+      '  the authenticated admin download route and never by a public URL.',
+  );
+}
+
+
+/**
+ * The admin notification carries an absolute resume download link, so a localhost
+ * value here produces an email whose link works only on the server itself.
+ */
+if (isProduction && raw.API_PUBLIC_URL.includes('localhost')) {
+  console.warn(
+    '[config] API_PUBLIC_URL still points at localhost. Resume download links in ' +
+      'notification emails will not work. Set it to https://api.<your-domain>.',
+  );
+}
+
 
 if (isProduction && !raw.ADMIN_PASSWORD_HASH && !raw.DATABASE_URL && !raw.DB_PASSWORD) {
   // Not fatal — the admin_users table may hold the credentials — but worth flagging.
@@ -225,6 +277,7 @@ export const config = {
   logLevel: raw.LOG_LEVEL,
 
   appUrl: raw.APP_URL.replace(/\/+$/, ''),
+  apiPublicUrl: raw.API_PUBLIC_URL.replace(/\/+$/, ''),
   corsOrigins: raw.CORS_ORIGINS.split(',')
     .map((origin) => origin.trim().replace(/\/+$/, ''))
     .filter(Boolean),
@@ -272,6 +325,14 @@ export const config = {
       raw.MAIL_PROVIDER === 'ses'
         ? Boolean(raw.SMTP_FROM_EMAIL.trim() || raw.SMTP_USER || adminEmails[0])
         : Boolean(raw.SMTP_USER && raw.SMTP_PASSWORD),
+  },
+
+  storage: {
+    driver: raw.STORAGE_DRIVER,
+    bucket: raw.S3_BUCKET.trim(),
+    prefix: raw.S3_PREFIX.trim(),
+    // Shared with SES; one region setting for the whole AWS surface.
+    region: raw.AWS_REGION,
   },
 
   mail: {

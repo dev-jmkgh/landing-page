@@ -162,7 +162,6 @@ export function ApplicationForm() {
     formData.append('website', values.website);
     formData.append('renderedAt', String(renderedAt.current));
     if (recaptchaToken) formData.append('recaptchaToken', recaptchaToken);
-    if (resume) formData.append('resume', resume);
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -172,6 +171,50 @@ export function ApplicationForm() {
     setStatus('idle');
 
     try {
+      /**
+       * Where the file goes.
+       *
+       * When the API offers a presigned URL the browser sends the resume straight to
+       * storage, and the form then carries only a key plus the token proving that URL
+       * was issued for it — the file never passes through the API at all. When it does
+       * not, the file rides along with the form as it always has, which is what happens
+       * in development against local disk.
+       *
+       * A failure to obtain or use the URL is not fatal: it falls back to posting the
+       * file, so a storage hiccup costs bandwidth rather than an application.
+       */
+      if (resume) {
+        let uploaded = false;
+
+        try {
+          const ticket = await api.requestResumeUploadUrl(
+            { filename: resume.name, contentType: resume.type, size: resume.size },
+            controller.signal,
+          );
+
+          if (ticket?.supported) {
+            const put = await fetch(ticket.url, {
+              method: 'PUT',
+              body: resume,
+              headers: ticket.headers,
+              signal: controller.signal,
+            });
+            if (!put.ok) throw new Error(`Upload failed with status ${put.status}`);
+
+            formData.append('resumeKey', ticket.key);
+            formData.append('resumeToken', ticket.token);
+            formData.append('resumeName', resume.name);
+            uploaded = true;
+          }
+        } catch (uploadError) {
+          if (controller.signal.aborted) throw uploadError;
+          // Fall through to the multipart path.
+        }
+
+        if (!uploaded) formData.append('resume', resume);
+      }
+
+
       const result = await api.submitApplication(formData, controller.signal);
       setSubmitted({
         name: values.fullName.trim(),

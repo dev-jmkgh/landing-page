@@ -7,7 +7,7 @@
  */
 
 export { renderEmail, renderText, type EmailDocument } from './layout/base';
-export { formatSubmissionTime } from './layout/components';
+export { formatSubmissionTime, actionButton } from './layout/components';
 export { BRAND } from './layout/brand';
 
 export {

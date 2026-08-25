@@ -2,7 +2,7 @@ import type { Server } from 'node:http';
 import { createApp } from './app';
 import { config } from './config/env';
 import { closePool, verifyConnection } from './db/pool';
-import { ensureUploadDirectory } from './middleware/upload';
+import { ensureStorageReady, storageReport } from './services/storage';
 import { verifyMailer } from './services/mailer';
 import { describeError, logger } from './utils/logger';
 
@@ -11,7 +11,7 @@ import { describeError, logger } from './utils/logger';
  */
 
 async function start(): Promise<void> {
-  ensureUploadDirectory();
+  await ensureStorageReady();
 
   const app = createApp();
 
@@ -25,6 +25,10 @@ async function start(): Promise<void> {
   }
 
   await verifyMailer();
+
+  // Says where resumes will land — the single most confusing thing to get wrong after a
+  // deploy, because a misconfigured driver fails only when someone finally applies.
+  logger.info('Resume storage', storageReport());
 
   const server: Server = app.listen(config.port, () => {
     logger.info('API listening', {

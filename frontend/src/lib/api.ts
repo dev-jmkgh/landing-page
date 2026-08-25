@@ -207,11 +207,37 @@ export const api = {
 
   submitApplication: (formData: FormData, signal?: AbortSignal) =>
     request<ApplicationResponse>('/careers/apply', { method: 'POST', body: formData, signal }),
+
+  /**
+   * Asks for a presigned URL so the resume can go straight to storage instead of
+   * through the API. `supported: false` is a normal answer, not a failure — it means
+   * the server stores files locally and wants the file posted with the form.
+   */
+  requestResumeUploadUrl: (
+    file: { filename: string; contentType: string; size: number },
+    signal?: AbortSignal,
+  ) =>
+    request<ResumeUploadTicket>('/careers/resume-upload-url', {
+      method: 'POST',
+      body: JSON.stringify(file),
+      signal,
+    }),
 };
 
 /* -------------------------------------------------------------------------- */
 /* Admin endpoints                                                             */
 /* -------------------------------------------------------------------------- */
+
+export type ResumeUploadTicket =
+  | { supported: false }
+  | {
+      supported: true;
+      key: string;
+      token: string;
+      url: string;
+      headers: Record<string, string>;
+      expiresInSeconds: number;
+    };
 
 export type EnquiryStatus = 'new' | 'contacted' | 'in_progress' | 'closed';
 export type ApplicationStatus = 'new' | 'reviewing' | 'shortlisted' | 'rejected' | 'hired';

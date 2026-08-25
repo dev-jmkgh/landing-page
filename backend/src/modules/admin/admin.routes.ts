@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { requireAuth, requireCsrf } from '../../middleware/auth';
 import { asyncHandler } from '../../middleware/errorHandler';
 import { loginLimiter } from '../../middleware/rateLimit';
-import { resolveStoredFile } from '../../middleware/upload';
+import { createDownloadUrl, openResume, supportsPresignedUpload } from '../../services/storage';
 import { validateBody, validateQuery } from '../../middleware/validate';
 import { notFound, unauthorized } from '../../utils/httpError';
 import { logger } from '../../utils/logger';
@@ -181,8 +181,23 @@ adminRouter.get(
     if (!application) throw notFound('Application not found.');
     if (!application.resumeFilename) throw notFound('No resume was attached to this application.');
 
-    const absolutePath = resolveStoredFile(application.resumeFilename);
-    if (!absolutePath || !fs.existsSync(absolutePath)) {
+    const downloadName = application.resumeOriginalName ?? `${application.reference}-resume`;
+
+    /**
+     * On S3 the browser is redirected to a short-lived presigned URL rather than the
+     * bytes being proxied through this process. That keeps a five-megabyte download off
+     * the API's event loop, and the URL is signed for sixty seconds — long enough for
+     * the redirect the browser is already following, not long enough to be worth
+     * passing on.
+     */
+    if (supportsPresignedUpload()) {
+      const url = await createDownloadUrl(application.resumeFilename, downloadName);
+      response.redirect(302, url);
+      return;
+    }
+
+    const opened = await openResume(application.resumeFilename);
+    if (!opened) {
       logger.warn('Resume file missing from storage', {
         reference: application.reference,
         filename: application.resumeFilename,
@@ -190,10 +205,9 @@ adminRouter.get(
       throw notFound('The resume file is no longer available.');
     }
 
-    const downloadName = application.resumeOriginalName ?? `${application.reference}-resume`;
-
     response.setHeader('Content-Type', application.resumeMime ?? 'application/octet-stream');
     response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.download(absolutePath, downloadName);
+    response.setHeader('Content-Disposition', `attachment; filename="${downloadName.replace(/["]/g, '')}"`);
+    opened.stream.pipe(response);
   }),
 );

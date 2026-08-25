@@ -89,6 +89,27 @@ export function callout(heading: string, body: string): string {
               </table>`;
 }
 
+/**
+ * A call-to-action button.
+ *
+ * Built as a table with inline styles because that is the only construction Outlook
+ * renders reliably — a styled <a> collapses to plain text there. The href is not escaped
+ * through escapeHtml: it is a URL this application generated, and HTML-escaping the
+ * ampersands in a query string would break it. It is quote-stripped instead so it
+ * cannot terminate the attribute.
+ */
+export function actionButton(label: string, href: string): string {
+  const safeHref = href.replace(/"/g, '');
+  return `
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 0;">
+                  <tr>
+                    <td style="background-color:${colours.accent};border-radius:4px;">
+                      <a href="${safeHref}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#0a1b2e;text-decoration:none;">${escapeHtml(label)}</a>
+                    </td>
+                  </tr>
+                </table>`;
+}
+
 export function signOff(): string {
   return `
               <p style="margin:22px 0 0;font-size:14px;line-height:1.6;color:${colours.ink};">

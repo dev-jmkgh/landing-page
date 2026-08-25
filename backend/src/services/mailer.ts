@@ -184,8 +184,14 @@ function maskEmail(email: string): string {
 
 export type MailAttachment = {
   filename: string;
+  /**
+   * The bytes. Used when the request already held the file, and when it came from a
+   * bucket rather than a path — SES sends a raw MIME message, so an attachment has to
+   * be materialised either way.
+   */
+  content?: Buffer;
   /** File on disk. Streamed by nodemailer; never read into memory here. */
-  path: string;
+  path?: string;
   contentType?: string;
 };
 
@@ -249,7 +255,8 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
         ? {
             attachments: input.attachments.map((attachment) => ({
               filename: sanitiseHeaderValue(attachment.filename),
-              path: attachment.path,
+              ...(attachment.content ? { content: attachment.content } : {}),
+              ...(attachment.path ? { path: attachment.path } : {}),
               ...(attachment.contentType ? { contentType: attachment.contentType } : {}),
             })),
           }

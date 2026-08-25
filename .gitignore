@@ -33,8 +33,14 @@ next-env.d.ts
 # ---------------------------------------------------------------------------
 # Runtime data
 # ---------------------------------------------------------------------------
-uploads/
-storage/
+# Anchored to the repository root on purpose. A bare `storage/` matches a directory
+# of that name at ANY depth, which silently excluded backend/src/services/storage —
+# real source, ignored, and the omission only shows up as a missing module on the
+# server after a deploy. These rules are meant for uploaded files, nothing else.
+/backend/uploads/
+/backend/storage/
+/uploads/
+/storage/
 logs/
 *.log
 npm-debug.log*

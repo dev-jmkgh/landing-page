@@ -1,5 +1,6 @@
 import { renderEmail, renderText, type EmailDocument } from '../layout/base';
 import {
+  actionButton,
   callout,
   detailLines,
   detailTable,
@@ -24,6 +25,12 @@ export type JobApplicationEmailData = {
   resumeOriginalName: string | null;
   /** True when the resume travels with this message as an attachment. */
   resumeAttached: boolean;
+  /**
+   * Signed, expiring download link for the resume. Admin-only in practice — it goes
+   * only to ADMIN_EMAILS — and needs no sign-in, which is the point: a reviewer
+   * reading the notification on a phone can open the file without a session.
+   */
+  resumeUrl?: string | null;
   submittedAt: Date;
 };
 
@@ -43,9 +50,9 @@ export function jobApplicationAdminEmail(data: JobApplicationEmailData): EmailDo
   ];
 
   const resumeNote = data.resumeAttached
-    ? `The resume (${data.resumeOriginalName}) is attached to this email and is also stored securely on the server.`
+    ? `The resume (${data.resumeOriginalName}) is attached to this email, and the link below downloads it directly from storage.`
     : data.resumeOriginalName
-      ? `The resume (${data.resumeOriginalName}) is stored securely on the server and can be downloaded from the admin area. It was not attached to this email.`
+      ? `The resume (${data.resumeOriginalName}) was too large to attach. Use the link below to download it.`
       : 'No resume was uploaded with this application.';
 
   return {
