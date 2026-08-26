@@ -12,7 +12,8 @@ export const BRAND = {
 
   /** Postal address as supplied in the content document. */
   address: '22, NSR Road, Saibaba Kovil, Coimbatore, Tamil Nadu 641011, India',
-  phones: ['+91 88707 73366', '+91 73057 55370'],
+  /** Primary first — the email footer prints them in this order. */
+  phones: ['+91 73057 55370', '+91 88707 73366'],
 
   colours: {
     navy: '#0a1b2e',

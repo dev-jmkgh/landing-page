@@ -14,7 +14,7 @@ import { contactDetails, siteConfig, socialLinks } from '@/lib/site';
 export const metadata: Metadata = buildMetadata({
   title: 'Contact Us — Coimbatore, Tamil Nadu',
   description:
-    'Contact JMK Global Holdings at 22 NSR Road, Saibaba Kovil, Coimbatore 641011. Call +91 88707 73366 or email info@jmkglobalholdings.com.',
+    'Contact JMK Global Holdings at 22 NSR Road, Saibaba Kovil, Coimbatore 641011. Call +91 73057 55370 or email info@jmkglobalholdings.com.',
   path: '/contact',
   keywords: pageKeywords([
     'contact JMK Global Holdings',

@@ -40,9 +40,10 @@ export const contactDetails = {
     country: 'India',
     countryCode: 'IN',
   },
+  /** Primary first — this order is what the footer, contact and careers pages show. */
   phones: [
-    { label: '+91 88707 73366', href: 'tel:+918870773366' },
     { label: '+91 73057 55370', href: 'tel:+917305755370' },
+    { label: '+91 88707 73366', href: 'tel:+918870773366' },
   ],
   /**
    * The number shown in the header and in single-number call actions.

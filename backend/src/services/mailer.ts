@@ -1,6 +1,7 @@
 import { GetAccountCommand, SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config/env';
+import { EMAIL_LOGO_CID, EMAIL_LOGO_PNG } from './email/layout/logo';
 import { describeError, logger } from '../utils/logger';
 import { sanitiseHeaderValue } from '../utils/text';
 
@@ -357,16 +358,27 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
       html: input.html,
       text: input.text,
       ...(input.replyTo ? { replyTo: sanitiseHeaderValue(input.replyTo) } : {}),
-      ...(input.attachments?.length
-        ? {
-            attachments: input.attachments.map((attachment) => ({
-              filename: sanitiseHeaderValue(attachment.filename),
-              ...(attachment.content ? { content: attachment.content } : {}),
-              ...(attachment.path ? { path: attachment.path } : {}),
-              ...(attachment.contentType ? { contentType: attachment.contentType } : {}),
-            })),
-          }
-        : {}),
+      /**
+       * The logo rides with every message as an inline Content-ID part, which is what
+       * lets the header render without the reader allowing remote images. `cid` plus
+       * an inline disposition is the pair that matters: with only `cid` most clients
+       * list it as a downloadable attachment as well as showing it.
+       */
+      attachments: [
+        {
+          filename: 'jmk-logo.png',
+          content: EMAIL_LOGO_PNG,
+          contentType: 'image/png',
+          cid: EMAIL_LOGO_CID,
+          contentDisposition: 'inline' as const,
+        },
+        ...(input.attachments ?? []).map((attachment) => ({
+          filename: sanitiseHeaderValue(attachment.filename),
+          ...(attachment.content ? { content: attachment.content } : {}),
+          ...(attachment.path ? { path: attachment.path } : {}),
+          ...(attachment.contentType ? { contentType: attachment.contentType } : {}),
+        })),
+      ],
     });
 
     // A message id alone proves nothing over SMTP — nodemailer returns one even when
@@ -429,7 +441,46 @@ export type AdminNotificationInput = Omit<MailInput, 'to'>;
  * This is the only way the application sends mail to the business — enquiries and
  * career applications both go through it — so adding a recipient is an .env change
  * and never a code change.
+ *
+ * ONE MESSAGE PER RECIPIENT, not one message addressed to all of them. It costs an
+ * extra send per admin and buys independence: a single bad address no longer decides
+ * whether anyone hears about an enquiry.
+ *
+ * That is not hypothetical. With SES in the sandbox, a message addressed to two admins
+ * where only one is a verified identity is rejected outright — nobody receives it,
+ * including the verified address. Measured before this change: addressed to both,
+ * MessageRejected; sent separately, the verified admin received it. The same shape of
+ * failure outlives the sandbox, because one bouncing or suspended mailbox in the list
+ * would otherwise take the whole notification down with it.
+ *
+ * It also stops the admins' addresses appearing in each other's To header.
  */
 export async function sendAdminNotification(input: AdminNotificationInput): Promise<MailResult> {
-  return sendMail({ ...input, to: config.mail.adminRecipients });
+  const recipients = config.mail.adminRecipients;
+
+  if (recipients.length === 0) {
+    logger.error('Admin notification not sent: ADMIN_EMAILS is empty', {
+      subject: input.subject,
+    });
+    return 'failed';
+  }
+
+  const results = await Promise.all(
+    recipients.map((to) => sendMail({ ...input, to })),
+  );
+
+  if (results.every((result) => result === 'skipped')) return 'skipped';
+
+  const delivered = results.filter((result) => result === 'sent' || result === 'partial').length;
+
+  if (delivered === 0) return 'failed';
+  if (delivered < results.length) {
+    logger.warn('Admin notification reached some recipients but not all', {
+      subject: input.subject,
+      delivered,
+      total: results.length,
+    });
+    return 'partial';
+  }
+  return 'sent';
 }

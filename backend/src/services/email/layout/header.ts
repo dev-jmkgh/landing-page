@@ -1,13 +1,14 @@
 import { escapeHtml } from '../../../utils/text';
 import { BRAND } from './brand';
+import { EMAIL_LOGO_CID } from './logo';
 
 /**
  * The shared email header.
  *
- * The website has no raster logo asset — its identity is a typographic wordmark — so
- * the header reproduces that wordmark in HTML rather than inventing a logo image. That
- * also sidesteps the usual problem with image-based email headers: most clients block
- * remote images by default, and a blocked logo leaves a branded email looking broken.
+ * The logo is embedded and referenced by Content-ID rather than linked, so it renders
+ * without the recipient allowing remote images — see `logo.ts`. The wordmark below it
+ * stays as text: it is the alt text if the image ever fails, and it keeps the company
+ * name selectable and searchable rather than locked inside a picture.
  */
 export function renderHeader(title: string): string {
   const { colours } = BRAND;
@@ -18,11 +19,14 @@ export function renderHeader(title: string): string {
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td style="vertical-align:middle;">
-                    <div style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:0.5px;line-height:1.2;">
-                      ${escapeHtml(BRAND.shortName)}<span style="color:${colours.accentSoft};">.</span>
-                    </div>
-                    <div style="color:#ffffff;font-size:15px;font-weight:600;letter-spacing:0.2px;margin-top:2px;">
-                      ${escapeHtml(BRAND.name)}
+                    <img
+                      src="cid:${EMAIL_LOGO_CID}"
+                      width="150"
+                      alt="${escapeHtml(BRAND.name)}"
+                      style="display:block;width:150px;max-width:150px;height:auto;border:0;outline:none;text-decoration:none;"
+                    />
+                    <div style="color:#b6c4d4;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;margin-top:8px;">
+                      ${escapeHtml(BRAND.tagline)}
                     </div>
                   </td>
                   <td align="right" style="vertical-align:middle;">
