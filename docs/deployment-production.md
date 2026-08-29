@@ -282,9 +282,12 @@ server):
 NODE_ENV, PORT, TRUST_PROXY,
 APP_URL, CORS_ORIGINS,
 DATABASE_URL  (or DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, DB_CONNECTION_LIMIT),
+MAIL_PROVIDER, AWS_REGION,
 SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASSWORD,
 SMTP_FROM_NAME, SMTP_FROM_EMAIL,
 ADMIN_EMAILS,
+API_PUBLIC_URL,
+STORAGE_DRIVER, S3_BUCKET, S3_PREFIX,
 ADMIN_LOGIN_EMAIL, ADMIN_PASSWORD_HASH, JWT_SECRET, SESSION_TTL_HOURS, COOKIE_SAMESITE,
 RECAPTCHA_SECRET_KEY, RECAPTCHA_MIN_SCORE, RECAPTCHA_FAIL_CLOSED,
 UPLOAD_DIR, MAX_UPLOAD_MB,
@@ -301,7 +304,35 @@ APP_URL=https://jmkglobalholdings.com
 CORS_ORIGINS=https://jmkglobalholdings.com,https://www.jmkglobalholdings.com
 UPLOAD_DIR=/var/www/jmkglobalholdings/storage/resumes
 JWT_SECRET=<64 hex chars>         # the API refuses to start in production if under 32
+MAIL_PROVIDER=smtp                # see "Which mail transport" below
+API_PUBLIC_URL=https://api.jmkglobalholdings.com   # resume links in admin email are absolute
+STORAGE_DRIVER=s3                 # requires S3_BUCKET; refuses to start without it
+S3_BUCKET=<private bucket name>
 ```
+
+### Which mail transport
+
+`smtp`, and not by preference.
+
+Amazon SES is fully implemented and switching to it is one value — `MAIL_PROVIDER=ses`
+— with the templates, attachments, logo, reply-to handling and delivery reporting all
+unchanged. It is not in use because **AWS declined production access**, which leaves the
+account in the SES sandbox, where SES delivers only to addresses that are themselves
+verified identities.
+
+That rules SES out here rather than merely inconveniencing it: enquiry and application
+confirmations go to members of the public, whose addresses cannot be verified in
+advance. Measured while sandboxed — an ordinary Gmail address was rejected with
+`MessageRejected`; the same address delivered over SMTP without complaint.
+
+To move back once AWS grants the increase: set `MAIL_PROVIDER=ses`, leave
+`SMTP_FROM_EMAIL` blank so it defaults to `no-reply@jmkglobalholdings.com` on the
+verified domain identity, and restart. The boot log warns if the account is still
+sandboxed, so a premature switch announces itself rather than failing per-send.
+
+Gmail's limits apply while SMTP is in use: roughly 500 recipients a day on a free
+account, 2,000 on Workspace. Each enquiry sends one message per admin plus one
+confirmation, so a two-admin setup costs three messages per submission.
 
 `JWT_SECRET`: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
 
