@@ -211,7 +211,7 @@ function parseAdminEmails(value: string): string[] {
 }
 
 /**
- * Default From address when SES is the provider and SMTP_FROM_EMAIL is unset.
+ * Default From address whenever the transport does not own the sender identity.
  *
  * Confirmed against the account: `jmkglobalholdings.com` is a verified DOMAIN identity
  * in ap-south-1 with DKIM SUCCESS, and it carries a custom MAIL FROM domain of
@@ -220,7 +220,16 @@ function parseAdminEmails(value: string): string[] {
  * is what SPF and DMARC check. It is a strictly better sender than a gmail.com address
  * authenticated through SMTP, which can never align.
  */
-const DEFAULT_SES_FROM_EMAIL = 'no-reply@jmkglobalholdings.com';
+const DEFAULT_FROM_EMAIL = 'no-reply@jmkglobalholdings.com';
+
+/**
+ * Gmail is the one supported transport where the authenticated account is also the
+ * mailbox mail is sent from. Every other host configured here — Brevo, Mailgun, any
+ * SMTP relay — authenticates a service credential that has nothing to do with the
+ * From address, and SES does the same by a different mechanism.
+ */
+const isGmailAccount =
+  raw.MAIL_PROVIDER === 'smtp' && raw.SMTP_HOST.trim().toLowerCase() === 'smtp.gmail.com';
 
 const adminEmails = parseAdminEmails(raw.ADMIN_EMAILS);
 
@@ -296,23 +305,33 @@ export const config = {
     password: raw.SMTP_PASSWORD,
     fromName: raw.SMTP_FROM_NAME,
     /**
-     * The two providers need opposite defaults here.
+     * The default depends on whether the transport owns the sender.
      *
      * Gmail rewrites the envelope sender to the authenticated account unless the
      * address is a verified alias, so anything other than SMTP_USER fails DMARC at the
-     * recipient and lands in spam while still reporting 250 OK. SMTP therefore falls
-     * back to the authenticated account.
+     * recipient and lands in spam while still reporting 250 OK. There, falling back to
+     * the authenticated account is the only safe default.
      *
-     * SES authenticates the *identity*, not an account, so a dedicated no-reply
-     * address is both possible and the better default: replies to these messages are
-     * never read, and every template already sets a Reply-To that goes somewhere real
-     * — the submitter on admin notifications, the admin inbox on confirmations.
+     * A relay is the opposite: SES authenticates an identity and Brevo authenticates a
+     * service login like b7xxxxxxx@smtp-brevo.com, which is not a mailbox anyone should
+     * see. Falling back to SMTP_USER there would put that login in the From of every
+     * message, so the dedicated no-reply address is the default instead. Replies are
+     * not lost — every template sets a Reply-To that goes somewhere real.
      */
+    /**
+     * True only when the authenticated account *is* the mailbox being sent from, which
+     * is the Gmail case. A relay — Brevo, SES, Mailgun — authenticates a service
+     * credential and takes the sender from the message, so the two are unrelated there.
+     *
+     * This is the distinction that matters, not which provider is selected. It used to
+     * be written as `provider === 'ses'`, which quietly assumed every SMTP host was
+     * Gmail and became wrong the moment an SMTP relay was introduced.
+     */
+    senderIsAuthenticatedAccount: isGmailAccount,
+
     fromEmail:
       raw.SMTP_FROM_EMAIL.trim() ||
-      (raw.MAIL_PROVIDER === 'ses'
-        ? DEFAULT_SES_FROM_EMAIL
-        : raw.SMTP_USER || (adminEmails[0] ?? '')),
+      (isGmailAccount ? raw.SMTP_USER || (adminEmails[0] ?? '') : DEFAULT_FROM_EMAIL),
     /**
      * Email is optional in development; the API stays fully functional without it.
      *

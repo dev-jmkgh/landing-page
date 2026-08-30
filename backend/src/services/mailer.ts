@@ -195,8 +195,9 @@ export async function verifyMailer(): Promise<boolean> {
    * SES never uses — produced a warning that was not merely irrelevant but backwards,
    * advising a change that would have made deliverability worse.
    */
-  const fromDomain =
-    config.smtp.provider === 'ses' ? undefined : config.smtp.fromEmail.split('@')[1]?.toLowerCase();
+  const fromDomain = config.smtp.senderIsAuthenticatedAccount
+    ? config.smtp.fromEmail.split('@')[1]?.toLowerCase()
+    : undefined;
   const authDomain = config.smtp.user.split('@')[1]?.toLowerCase();
 
   if (fromDomain && authDomain && fromDomain !== authDomain) {
