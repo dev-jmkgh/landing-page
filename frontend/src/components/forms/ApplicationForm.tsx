@@ -9,6 +9,7 @@ import {
   isApiConfigured,
 } from '@/lib/api';
 import { EXPERIENCE_LEVELS, FIELD_LIMITS, RESUME_UPLOAD } from '@/lib/constants';
+import { CONVERSIONS, trackEvent } from '@/lib/analytics';
 import { DEFAULT_DIAL_CODE } from '@/lib/content/dialCodes';
 import { openPositions } from '@/lib/content/careers';
 import { PhoneField } from '@/components/forms/PhoneField';
@@ -220,6 +221,12 @@ export function ApplicationForm() {
         name: values.fullName.trim(),
         position: values.position,
         emailStatus: result?.emailStatus ?? null,
+      });
+
+      // Only once the application is stored — see the note in EnquiryForm.
+      trackEvent(CONVERSIONS.application, {
+        form: 'careers',
+        position: values.position,
       });
       setStatus('success');
       setValues(EMPTY);

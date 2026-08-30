@@ -9,6 +9,7 @@ import {
   API_NOT_CONFIGURED_MESSAGE,
   isApiConfigured,
 } from '@/lib/api';
+import { CONVERSIONS, trackEvent } from '@/lib/analytics';
 import { INTEREST_OPTIONS, FIELD_LIMITS, SUCCESS_MESSAGES } from '@/lib/constants';
 import {
   validateCompany,
@@ -188,6 +189,17 @@ export function EnquiryForm({
 
       setSuccessMessage(result?.message ?? null);
       setEmailStatus(result?.emailStatus ?? null);
+
+      /**
+       * Recorded after the API confirms the enquiry was stored, not when the button was
+       * pressed — a conversion count that includes failed submissions is worse than no
+       * count. Silent and non-throwing when analytics is off or blocked.
+       */
+      trackEvent(CONVERSIONS.enquiry, {
+        form: 'enquiry',
+        interested_in: values.interestedIn,
+        source,
+      });
       setStatus('success');
       setValues({ ...EMPTY, interestedIn: defaultInterest ?? '' });
       setTouched({});

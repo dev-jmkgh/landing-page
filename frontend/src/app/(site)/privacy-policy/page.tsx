@@ -1,3 +1,4 @@
+import { analyticsEnabled, anyTrackingEnabled, clarityEnabled } from '@/lib/analytics';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PageHero } from '@/components/layout/PageHero';
@@ -90,12 +91,49 @@ export default function PrivacyPolicyPage() {
               marketing purposes.
             </p>
 
-            <h2>6. Cookies</h2>
-            <p>
-              The public pages of this website do not set marketing or analytics cookies. A
-              session cookie is used only in the restricted administration area to keep
-              authorised staff signed in.
-            </p>
+            <h2>6. Cookies and analytics</h2>
+            {/*
+              Written from the same flags the scripts are loaded from, so this section
+              cannot claim one thing while the site does another. A build with no
+              measurement id configured ships no third-party script at all, and says so.
+            */}
+            {anyTrackingEnabled ? (
+              <>
+                <p>
+                  A session cookie is used in the restricted administration area to keep
+                  authorised staff signed in. The public pages additionally use the
+                  measurement services listed below, which set their own cookies or
+                  browser storage to recognise a returning visit.
+                </p>
+                <ul>
+                  {analyticsEnabled ? (
+                    <li>
+                      <strong>Google Analytics 4</strong> — page views and form
+                      submissions, used to understand which pages are useful. IP
+                      addresses are anonymised. We do not use it for advertising and do
+                      not sell or share the data.
+                    </li>
+                  ) : null}
+                  {clarityEnabled ? (
+                    <li>
+                      <strong>Microsoft Clarity</strong> — aggregated interaction
+                      statistics used to find usability problems.
+                    </li>
+                  ) : null}
+                </ul>
+                <p>
+                  You can block these with any browser setting or extension that blocks
+                  third-party scripts. Nothing on this site stops working if you do — the
+                  forms, and every page, behave identically either way.
+                </p>
+              </>
+            ) : (
+              <p>
+                The public pages of this website do not set marketing or analytics cookies.
+                A session cookie is used only in the restricted administration area to keep
+                authorised staff signed in.
+              </p>
+            )}
 
             <h2>7. Security</h2>
             <p>
