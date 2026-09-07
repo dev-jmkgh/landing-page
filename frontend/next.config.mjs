@@ -23,9 +23,26 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
  */
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(/\/$/, '');
 
+/**
+ * Where build artifacts go. Defaults to `.next`.
+ *
+ * Overridable so a production build can run without touching the directory a live
+ * `next dev` is using. `scripts/prepare-work-dir.mjs` refuses to build while anything is
+ * listening on port 3000, because clearing `.next` underneath a dev server corrupts it —
+ * and that refusal is right, but it also means a build cannot be verified without
+ * stopping someone's server. Pointing the build at its own directory removes the
+ * conflict instead of working around it:
+ *
+ *   NEXT_DIST_DIR=.next-build npx next build
+ *
+ * Left unset in normal use, so `npm run build` behaves exactly as before.
+ */
+const distDir = (process.env.NEXT_DIST_DIR ?? '').trim();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
+  ...(distDir ? { distDir } : {}),
   ...(basePath ? { basePath, assetPrefix: basePath } : {}),
   trailingSlash: true,
   // The repository has a lockfile at the root and one here, which otherwise makes

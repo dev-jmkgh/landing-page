@@ -5,3 +5,6 @@
 @import './components.css';
 @import './pages.css';
 @import './gallery.css';
+/* Telecalling admin. Last, so it can build on components.css and is never overridden
+   by a marketing page rule of equal specificity. */
+@import './telecalling.css';

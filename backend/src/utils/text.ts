@@ -46,9 +46,10 @@ const REFERENCE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /**
  * Human-quotable reference, e.g. `ENQ-7KQ4M2XP`. Random rather than sequential so a
- * reference never leaks how many records exist.
+ * reference never leaks how many records exist — which matters more for leads than for
+ * enquiries, since a competitor who can count them learns the size of the pipeline.
  */
-export function createReference(prefix: 'ENQ' | 'APP'): string {
+export function createReference(prefix: 'ENQ' | 'APP' | 'LD'): string {
   const bytes = crypto.randomBytes(8);
   let code = '';
   for (const byte of bytes) {

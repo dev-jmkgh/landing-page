@@ -1,0 +1,15 @@
+{
+  // Typechecks the developer scripts in `scripts/` without letting them into the build.
+  //
+  // The main tsconfig sets rootDir to `src` and emits to `dist`, so adding `scripts/**`
+  // there would either move the whole output tree up a level or compile a test harness
+  // into the deployed bundle. This config borrows the same strictness, adds the scripts,
+  // and emits nothing.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

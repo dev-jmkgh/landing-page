@@ -96,7 +96,7 @@ function currentCsrfToken(): string | null {
 }
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   /** Send the admin session cookie and CSRF header. */
   authenticated?: boolean;
@@ -158,6 +158,26 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   return (data ?? null) as T;
+}
+
+/**
+ * Authenticated request, for API surfaces defined in other modules.
+ *
+ * The telecalling admin API is roughly as large again as the whole website API, so it
+ * lives in `telecalling.ts` rather than growing this file. It still has to go through
+ * the transport above — base URL resolution, the in-memory CSRF token, credential mode
+ * and `ApiError` normalisation — because a second copy of any of those would eventually
+ * disagree with this one.
+ *
+ * `authenticated` is forced on: there is no such thing as an unauthenticated admin
+ * request, and making it a parameter would let a caller accidentally omit the CSRF
+ * header on a state-changing call.
+ */
+export function adminRequest<T>(
+  path: string,
+  options: Omit<RequestOptions, 'authenticated'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, authenticated: true });
 }
 
 /* -------------------------------------------------------------------------- */

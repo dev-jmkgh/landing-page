@@ -91,6 +91,18 @@ const schema = z.object({
   SESSION_TTL_HOURS: z.coerce.number().int().positive().max(168).default(8),
   COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 
+  /**
+   * Mobile app session lifetimes.
+   *
+   * The access token is deliberately short. It is a stateless JWT, so the only way to
+   * revoke one is to let it expire — and deactivating an employee mid-shift has to take
+   * effect in minutes, not hours. The refresh token is long-lived but stored (hashed)
+   * and rotated on every use, so it can be revoked instantly.
+   */
+  MOBILE_ACCESS_TTL_MINUTES: z.coerce.number().int().positive().max(1440).default(15),
+  MOBILE_REFRESH_TTL_DAYS: z.coerce.number().int().positive().max(365).default(60),
+  MOBILE_LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+
   RECAPTCHA_SECRET_KEY: z.string().default(''),
   RECAPTCHA_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
   /** Reject the submission when Google cannot be reached. Default: fail open. */
@@ -369,6 +381,21 @@ export const config = {
     cookieSameSite: raw.COOKIE_SAMESITE,
     sessionCookieName: 'jmk_session',
     csrfCookieName: 'jmk_csrf',
+  },
+
+  /**
+   * Mobile (telecaller app) authentication.
+   *
+   * Shares JWT_SECRET with the admin session on purpose — one secret to rotate, not
+   * two. The two token families are kept apart by their `audience` claim
+   * (`jmk-admin` vs `jmk-mobile`), which is verified on every request. Without that
+   * check a cookie token lifted from a browser would pass as a Bearer token and skip
+   * CSRF protection entirely.
+   */
+  mobileAuth: {
+    accessTtlMinutes: raw.MOBILE_ACCESS_TTL_MINUTES,
+    refreshTtlDays: raw.MOBILE_REFRESH_TTL_DAYS,
+    loginMax: raw.MOBILE_LOGIN_RATE_LIMIT_MAX,
   },
 
   recaptcha: {

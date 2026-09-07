@@ -1,0 +1,486 @@
+/* ==========================================================================
+   Telecalling admin
+
+   A separate stylesheet from components.css, imported after it in globals.css.
+   These rules serve one restricted area that the marketing site never renders, and
+   keeping them apart means the telecalling admin can be read, changed or removed
+   without scrolling past 1300 lines of site component styles.
+
+   Everything here is built from the tokens in tokens.css. No new colours.
+   ========================================================================== */
+
+/* --------------------------------------------------------------- primitives */
+
+/*
+ * Ghost button for light backgrounds.
+ *
+ * components.css has only `.btn--ghost-light`, which is white-on-navy for the admin
+ * header. This is its counterpart for a white panel — used for the destructive-adjacent
+ * actions (cancel a follow-up, deactivate an employee) that should be reachable but not
+ * look like the primary choice.
+ */
+.btn--ghost {
+  border-color: transparent;
+  background-color: transparent;
+  color: var(--navy-700);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background-color: var(--navy-050);
+  border-color: var(--line-200);
+}
+
+/* Compact form controls, for the ones that sit inside table cells. */
+.input--sm,
+.select--sm {
+  padding: 0.4rem 0.55rem;
+  font-size: var(--text-sm);
+}
+
+.select--sm {
+  padding-right: 2rem;
+  background-position: right 0.5rem center;
+}
+
+/* -------------------------------------------------------------------- layout */
+
+.tc-nav {
+  background-color: var(--surface);
+  border-bottom: 1px solid var(--line-200);
+  /*
+   * Sticks below the admin bar while a long lead table scrolls. Section switching is
+   * the most frequent action on this screen, and scrolling back to the top to reach it
+   * gets old within a morning.
+   */
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.tc-nav__inner {
+  display: flex;
+  gap: 0.25rem;
+  /* Horizontal scroll rather than a wrap: on a narrow laptop a wrapped nav pushes the
+     table down by a whole row and the layout jumps as sections change. */
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tc-nav__link {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 0.85rem 1rem;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-500);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.tc-nav__link:hover {
+  color: var(--navy-800);
+}
+
+.tc-nav__link[aria-current='page'] {
+  color: var(--navy-800);
+  border-bottom-color: var(--accent-500);
+}
+
+.tc-nav__link:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: -2px;
+}
+
+.tc-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0.75rem;
+}
+
+.tc-section-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--ink-900);
+  margin: 1.5rem 0 0.75rem;
+}
+
+.tc-card {
+  background-color: var(--surface);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+}
+
+.tc-muted {
+  color: var(--ink-500);
+  font-size: var(--text-sm);
+}
+
+.tc-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+}
+
+.tc-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  background-color: var(--surface-sunken);
+  padding: 0.2rem 0.4rem;
+  border-radius: var(--radius-sm);
+  color: var(--ink-700);
+}
+
+/* ---------------------------------------------------------------- stat tiles */
+
+.tc-stat-grid {
+  display: grid;
+  /*
+   * `auto-fit` with a minimum, not a fixed column count. The dashboard shows four to six
+   * tiles per group depending on the section, and a fixed grid would leave a ragged
+   * final row on some and overflow on others.
+   */
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.tc-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 1rem 1.1rem;
+  background-color: var(--surface);
+  border: 1px solid var(--line-200);
+  border-left: 3px solid var(--navy-500);
+  border-radius: var(--radius-md);
+}
+
+.tc-stat__value {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--navy-800);
+}
+
+.tc-stat__label {
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+}
+
+.tc-stat__hint {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.tc-stat--good {
+  border-left-color: var(--success-600);
+}
+
+.tc-stat--good .tc-stat__value {
+  color: var(--success-600);
+}
+
+.tc-stat--warn {
+  border-left-color: var(--warning-600);
+}
+
+.tc-stat--warn .tc-stat__value {
+  color: var(--warning-600);
+}
+
+.tc-stat--bad {
+  border-left-color: var(--danger-600);
+}
+
+.tc-stat--bad .tc-stat__value {
+  color: var(--danger-600);
+}
+
+/* -------------------------------------------------------------------- badges */
+
+.tc-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.tc-badge--neutral {
+  background-color: var(--surface-sunken);
+  color: var(--ink-700);
+}
+
+.tc-badge--progress {
+  background-color: var(--info-050);
+  color: var(--info-600);
+}
+
+.tc-badge--good {
+  background-color: var(--success-050);
+  color: var(--success-600);
+}
+
+.tc-badge--bad {
+  background-color: var(--danger-050);
+  color: var(--danger-600);
+}
+
+/* ----------------------------------------------------------------- segmented */
+
+.tc-segmented {
+  display: inline-flex;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background-color: var(--surface);
+}
+
+.tc-segmented__button {
+  appearance: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 0.45rem 0.8rem;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-500);
+  border-right: 1px solid var(--line-200);
+  white-space: nowrap;
+}
+
+.tc-segmented__button:last-child {
+  border-right: 0;
+}
+
+.tc-segmented__button:hover {
+  background-color: var(--navy-050);
+  color: var(--navy-800);
+}
+
+.tc-segmented__button[aria-pressed='true'] {
+  background-color: var(--navy-800);
+  color: #fff;
+}
+
+.tc-segmented__button:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: -2px;
+}
+
+/* ------------------------------------------------------------------ bulk bar */
+
+/*
+ * Appears above the lead table only while rows are ticked.
+ *
+ * Sticky, because a bulk selection is often made by scrolling a long list and ticking
+ * as you go — the assign control has to still be reachable at the bottom of it.
+ */
+.tc-bulkbar {
+  position: sticky;
+  top: 3.25rem;
+  z-index: 15;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--accent-050);
+  border: 1px solid var(--accent-200);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.tc-bulkbar .select {
+  width: auto;
+  min-width: 14rem;
+}
+
+/* -------------------------------------------------------------- table extras */
+
+.tc-col-tick {
+  width: 2.5rem;
+}
+
+.tc-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.tc-cell-bad {
+  color: var(--danger-600);
+}
+
+.tc-cell-warn {
+  color: var(--warning-600);
+}
+
+/* --------------------------------------------------------------------- forms */
+
+.tc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.tc-form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+
+/* --------------------------------------------------------------------- chart */
+
+/*
+ * Bar charts as plain HTML.
+ *
+ * Every chart this admin needs is a ranked comparison of one measure across a handful of
+ * categories, which is a div with a width. That reads correctly in a screen reader,
+ * prints, and adds nothing to a bundle that a static export has no cheap way to grow.
+ */
+.tc-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tc-chart__legend {
+  display: flex;
+  gap: 1rem;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.tc-chart__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tc-chart__key::before {
+  content: '';
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  background-color: var(--navy-500);
+}
+
+.tc-chart__key--secondary::before {
+  background-color: var(--success-600);
+}
+
+.tc-chart__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.tc-chart__row {
+  display: grid;
+  /*
+   * Label, bar, value. The label column is fixed so bars share a baseline and can be
+   * compared by eye — a label-width-driven grid would give every row a different origin,
+   * which is the one thing a bar chart must not do.
+   */
+  grid-template-columns: minmax(6rem, 9rem) 1fr minmax(4rem, auto);
+  align-items: center;
+  gap: 0.6rem;
+  font-size: var(--text-sm);
+}
+
+.tc-chart__label {
+  color: var(--ink-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-chart__track {
+  position: relative;
+  display: block;
+  height: 1.35rem;
+  background-color: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.tc-chart__bar {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  display: block;
+  background-color: var(--navy-500);
+  border-radius: var(--radius-sm);
+  min-width: 2px;
+}
+
+/*
+ * The secondary bar is inset and drawn over the primary, so "converted out of assigned"
+ * reads as a proportion of the same bar rather than as two competing quantities.
+ */
+.tc-chart__bar--secondary {
+  inset-block: 0.3rem;
+  background-color: var(--success-600);
+}
+
+.tc-chart__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- responsive */
+
+@media (max-width: 720px) {
+  .tc-chart__row {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+
+  .tc-chart__value {
+    text-align: left;
+  }
+
+  .tc-bulkbar {
+    position: static;
+  }
+
+  .tc-nav {
+    position: static;
+  }
+}
+
+/*
+ * Bars have a real width in print and in reduced-motion contexts because they are
+ * elements, not animations — nothing here needs a motion query. But the sticky
+ * positioning has to go, or a printed table repeats the nav on every page.
+ */
+@media print {
+  .tc-nav,
+  .tc-bulkbar,
+  .tc-segmented {
+    display: none;
+  }
+}

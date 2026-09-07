@@ -73,3 +73,41 @@ export const loginLimiter = build({
   max: config.rateLimit.loginMax,
   message: 'Too many sign-in attempts. Please wait before trying again.',
 });
+
+/**
+ * Mobile employee sign-in. A separate counter from the admin limiter, because a whole
+ * office of telecallers can share one office IP — putting them on the admin budget
+ * would lock out the morning shift.
+ */
+export const mobileLoginLimiter = build({
+  name: 'mobile-login',
+  windowMs: config.rateLimit.windowMs,
+  max: config.mobileAuth.loginMax,
+  message: 'Too many sign-in attempts. Please wait before trying again.',
+});
+
+/**
+ * Refresh-token exchange. Generous: a phone coming back onto the network drains a queue
+ * of pending mutations and may legitimately refresh more than once. Limited at all only
+ * so a stolen refresh token cannot be used to hammer the endpoint.
+ */
+export const refreshLimiter = build({
+  name: 'mobile-refresh',
+  windowMs: 5 * 60 * 1000,
+  max: 60,
+  message: 'Too many refresh attempts. Please wait a moment.',
+});
+
+/**
+ * Mobile write endpoints — call logs, notes, status changes.
+ *
+ * The offline queue can drain dozens of mutations in a burst when a telecaller walks
+ * back into signal, so this has to be wide enough for a genuine day's backlog. It
+ * exists to stop a runaway retry loop, not to pace normal use.
+ */
+export const mobileSyncLimiter = build({
+  name: 'mobile-sync',
+  windowMs: 60 * 1000,
+  max: 240,
+  message: 'Too many updates at once. They will be retried automatically.',
+});

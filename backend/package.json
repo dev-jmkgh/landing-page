@@ -9,11 +9,12 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:migrate:prod": "node dist/db/migrate.js",
-    "hash:password": "node scripts/hash-password.mjs"
+    "hash:password": "node scripts/hash-password.mjs",
+    "test:telecalling": "tsx scripts/e2e-telecalling.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1117.0",

@@ -9,6 +9,8 @@ import { adminRouter } from './modules/admin/admin.routes';
 import { applicationRouter } from './modules/applications/application.routes';
 import { diagnosticsRouter } from './modules/diagnostics/diagnostics.routes';
 import { enquiryRouter } from './modules/enquiries/enquiry.routes';
+import { telecallingAdminRouter } from './modules/telecalling/admin.routes';
+import { mobileRouter } from './modules/telecalling/mobile.routes';
 import { logger } from './utils/logger';
 
 /**
@@ -56,6 +58,23 @@ export function createApp(): Express {
   // and matches the page it comes from. Same router, so there is one implementation.
   app.use('/api/careers', applicationRouter);
   app.use('/api/admin', adminRouter);
+
+  /**
+   * Telecalling.
+   *
+   * Two mounts over one set of services, because the two clients differ in ways that
+   * would otherwise become branches inside shared handlers: the mobile app carries a
+   * Bearer token and is confined to the signed-in employee's own records, while the
+   * admin app carries a cookie session plus CSRF and sees the whole floor.
+   *
+   * `/api/admin/telecalling` sits under the admin prefix but is a separate router from
+   * `adminRouter` — that one authenticates a website operator who reads enquiries, this
+   * one authenticates an employee in the telecalling org chart, with a role and lead
+   * ownership. The two identities are related but not the same, and conflating them
+   * would give every website admin a telecaller's lead list.
+   */
+  app.use('/api/mobile', mobileRouter);
+  app.use('/api/admin/telecalling', telecallingAdminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

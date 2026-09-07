@@ -31,6 +31,7 @@ development, exports, agriculture, renewable energy and real estate.
 12. [Editing site content](#12-editing-site-content)
 13. [Security notes](#13-security-notes)
 14. [Troubleshooting](#14-troubleshooting)
+15. [Telecalling module](#15-telecalling-module)
 
 ---
 
@@ -589,3 +590,111 @@ public issue.
 ---
 
 © JMK Global Holdings. All rights reserved.
+
+---
+
+## 15. Telecalling module
+
+This repository also holds the **telecalling system** added in September 2026: a lead
+management, calling and follow-up platform for the sales floor. It shares this database
+and this API process — there is no second service to deploy.
+
+| Part | Where | Serves |
+|---|---|---|
+| API | `backend/src/modules/telecalling/` | both clients below |
+| Admin web app | `frontend/src/components/admin/telecalling/`, route `/admin/telecalling/` | administrators, managers, supervisors |
+| Employee mobile app | separate repo: [`telecaller-mob-apk`](https://github.com/dev-jmkgh/telecaller-mob-apk) | telecallers, on iOS and Android |
+
+### Schema
+
+Migrations `005`–`009` add: `telecaller_users`, `mobile_sessions`, `leads`,
+`lead_sources`, `lead_notes`, `calls`, `call_recordings`, `follow_ups`,
+`lead_activities`, `audit_logs`, `notifications`, `system_settings`.
+
+`001`–`004` are the website's enquiry and careers tables and are untouched.
+`telecaller_users` is deliberately separate from `admin_users`: that table exists so one
+or two operators can read website enquiries, while this one carries an org chart, roles
+and lead ownership. Someone who needs both has a row in each.
+
+Apply them the usual way:
+
+```bash
+cd backend && npm run db:migrate
+```
+
+Then create the first telecalling administrator:
+
+```bash
+npm run hash:password -- "a-long-password-you-will-hand-over"
+# then insert a row into telecaller_users with role = 'admin' and that hash
+```
+
+### Two authentication models
+
+The one API serves a browser and a phone, and they need different session mechanics.
+Both resolve to `request.actor`, so route handlers never ask which was used.
+
+- **Admin web** — the existing httpOnly cookie session plus CSRF double-submit.
+- **Mobile** — a short-lived Bearer access JWT (15 minutes) plus a hashed, rotating
+  refresh row in `mobile_sessions` (60 days).
+
+Both families are signed with `JWT_SECRET` and separated **only** by their `audience`
+claim (`jmk-admin` vs `jmk-mobile`), verified on every request. That check is
+load-bearing: without it a cookie value lifted from a browser would pass as a Bearer
+token and skip CSRF on every admin route.
+
+New environment variables, all optional with sensible defaults —
+`MOBILE_ACCESS_TTL_MINUTES` (15), `MOBILE_REFRESH_TTL_DAYS` (60),
+`MOBILE_LOGIN_RATE_LIMIT_MAX` (10).
+
+### Verifying a change
+
+```bash
+cd backend
+npm run typecheck        # src + scripts
+npm run test:telecalling # ~110 assertions against a scratch database
+```
+
+`npm run test:telecalling` creates its own database, applies every migration, seeds
+users, boots the real app on an ephemeral port, drives a full day in the life of a
+telecaller over HTTP, then drops the database. Your working database is never touched.
+It covers what a typecheck cannot: ownership scoping, offline-queue idempotency, the
+transactional call-plus-status-plus-follow-up write, role gates, and that deactivating an
+employee really kills their live mobile sessions.
+
+**Building the frontend while `npm run dev` is running** is refused by
+`scripts/prepare-work-dir.mjs`, because clearing `.next` underneath a live dev server
+corrupts it. To verify a build without stopping the server, give it its own work
+directory:
+
+```bash
+cd frontend && NEXT_DIST_DIR=.next-build-check npx next build
+```
+
+### Call recording and call logging — read this before promising either
+
+These are operating-system limits, not gaps in the implementation:
+
+- **Call recording is not possible on the device dialler.** Android 10+ removed
+  third-party access to the call audio stream, and iOS has never permitted it. Only a
+  pre-installed dialler or a carrier app can record.
+- **Call log reads are Android-only**, with `READ_CALL_LOG` and a Play Store
+  declared-permission exemption. iOS exposes nothing about past or in-progress calls.
+
+So the mobile app logs calls two ways, and `calls.source` records which — `call_log`
+(measured from the Android log) or `manual` (confirmed by the telecaller, the only option
+on iOS). The admin call list labels them, because averaging a measured duration with a
+remembered one is misleading.
+
+Recording arrives by routing calls through a cloud telephony provider (Exotel, Twilio,
+Knowlarity), which records server-side and posts a webhook. `calls.channel` is already
+`device` or `cloud` and `call_recordings` is already an optional artifact on a call, so
+adding the provider needs no schema change. `system_settings` holds `recording.enabled`
+(off by default) and `recording.announce` (on — notifying the other party is a legal
+requirement).
+
+### Further documentation
+
+The `.claude/skills/` directory in the parent workspace holds the full specification and
+the conventions for each part: `telecalling-spec`, `telecalling-backend`,
+`telecalling-admin-web`, `telecaller-mobile`.
