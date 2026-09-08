@@ -4,6 +4,20 @@
 .env
 .env.*
 !.env.example
+
+# The frontend's production env IS committed, deliberately.
+#
+# It contains only NEXT_PUBLIC_* values, and Next inlines every one of them into
+# the static bundle at build time — so each is already readable by anyone who
+# opens the site's JavaScript. Keeping it out of the repo bought no secrecy and
+# cost real safety: the deploy script needs it to exist on the server, and a
+# hand-placed file that no commit describes is one nobody notices has drifted.
+#
+# This exception is for the FRONTEND only. `backend/.env` holds the database
+# password, the JWT signing secret and the admin password hash, and stays
+# ignored above — those are genuine secrets and belong only on the server.
+!frontend/.env.production
+
 *.pem
 *.key
 

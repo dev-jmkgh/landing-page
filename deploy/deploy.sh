@@ -7,9 +7,16 @@
 # Pulls the latest commit, rebuilds both sides, applies pending migrations,
 # restarts the API and verifies it answers before declaring success.
 #
-# It never touches backend/.env or frontend/.env.production. Those hold the
-# production secrets, they live only on this server, and a deploy that
-# overwrote them would take the site down and leak nothing useful in exchange.
+# It never touches backend/.env. That holds the database password, the JWT
+# signing secret and the admin password hash; it lives only on this server, and
+# a deploy that overwrote it would take the site down and leak nothing useful in
+# exchange.
+#
+# frontend/.env.production IS in the repo and arrives with the checkout. Every
+# value in it is a NEXT_PUBLIC_* one that Next inlines into the static bundle,
+# so all of them are already readable in the shipped JavaScript — there was
+# nothing to keep secret, and a hand-placed file no commit describes is one
+# nobody notices has drifted.
 #
 # It also never copies the Nginx configs. Certbot rewrote the installed files
 # to add the TLS blocks; copying the repo versions over them would delete that
@@ -49,11 +56,24 @@ else
   as_root() { sudo "$@"; }
 fi
 
-# --- Refuse to run without the production secrets present --------------------
+# --- Refuse to run without the production configuration present --------------
 # Building the frontend without frontend/.env.production would bake an empty API
 # URL into the bundle and silently ship a site whose forms cannot submit.
 [[ -f backend/.env ]] || fail "backend/.env is missing — production secrets are not on this server"
-[[ -f frontend/.env.production ]] || fail "frontend/.env.production is missing — the build would have no API URL"
+[[ -f frontend/.env.production ]] || fail "frontend/.env.production is missing — it is committed, so the checkout is wrong"
+
+# Next's env precedence is:
+#
+#     .env.production.local  >  .env.local  >  .env.production  >  .env
+#
+# so a .env.local in the frontend silently outranks the production file. On a
+# developer's machine that is exactly what it is for; on this server it means
+# building a public site that points at localhost, and the build succeeds while
+# doing it. Refused rather than warned, because the resulting site looks fine
+# until someone submits a form.
+for stray in frontend/.env.local frontend/.env.production.local; do
+  [[ -f "$stray" ]] && fail "$stray exists and outranks frontend/.env.production — remove it before deploying"
+done
 
 PREVIOUS="$(as_app git rev-parse --short HEAD)"
 
@@ -84,9 +104,33 @@ log "Applying database migrations"
 as_app npm --prefix backend run db:migrate:prod
 
 log "Building the website"
+# `next build` sets NODE_ENV=production itself, which is what makes Next read
+# frontend/.env.production. It is passed explicitly anyway so the value does not
+# depend on how this script was invoked.
 as_app npm --prefix frontend ci
-as_app npm --prefix frontend run build
+as_app env NODE_ENV=production npm --prefix frontend run build
 [[ -f frontend/out/index.html ]] || fail "frontend build produced no out/index.html"
+
+log "Verifying the built site carries the production configuration"
+# The API URL is inlined into the JavaScript at build time, so the built output
+# is the only place that proves which one was used. Checking the env file only
+# proves what was intended.
+API_URL="$(sed -n 's/^NEXT_PUBLIC_API_BASE_URL=//p' frontend/.env.production | tr -d '\r' | head -n1)"
+[[ -n "$API_URL" ]] || fail "NEXT_PUBLIC_API_BASE_URL is empty in frontend/.env.production"
+
+if grep -rqF -- "$API_URL" frontend/out; then
+  printf '    %-46s %s\n' "api url baked in" "$API_URL"
+else
+  fail "the built site does not contain $API_URL — the wrong env file was used"
+fi
+
+# A localhost URL in a public bundle means a development env won the precedence
+# fight despite the checks above. Restricted to the JS, because prose on the
+# site may legitimately mention one.
+if grep -rqE 'localhost:[0-9]+' frontend/out --include='*.js'; then
+  fail "the built site contains a localhost URL — a development env leaked into the build"
+fi
+printf '    %-46s %s\n' "no localhost in the bundle" "ok"
 
 log "Restarting $SERVICE"
 as_root systemctl restart "$SERVICE"
