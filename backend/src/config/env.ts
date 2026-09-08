@@ -2,7 +2,31 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
+/**
+ * Environment files, layered.
+ *
+ * `dotenv.config()` on its own reads only `.env`, which meant `backend/.env.production`
+ * was a dead file: it could hold a complete, correct production configuration and the
+ * server would ignore every line of it. That is how `API_PUBLIC_URL` came to be missing
+ * in production while looking present in the repo.
+ *
+ * The order matches what the frontend's Next build already does, so both halves of the
+ * deployment behave the same way:
+ *
+ *     .env.<NODE_ENV>   overrides   .env
+ *
+ * `NODE_ENV` is read from the real process environment rather than from a file, which is
+ * what makes this work: the systemd unit sets `Environment=NODE_ENV=production` before
+ * node starts, so the value is known before any file is parsed. Falling back to
+ * 'development' keeps a bare `node dist/server.js` behaving as it always has.
+ *
+ * A missing file is not an error — `dotenv.config` simply reports one and carries on —
+ * so a server that keeps everything in `.env` is unaffected by this.
+ */
+const nodeEnv = process.env.NODE_ENV ?? 'development';
+
 dotenv.config();
+dotenv.config({ path: `.env.${nodeEnv}`, override: true });
 
 /**
  * Environment configuration.

@@ -98,6 +98,13 @@ as_app npm --prefix backend run build
 # Drop the dev tree afterwards so the running service has only what it needs.
 as_app npm --prefix backend prune --omit=dev
 
+log "Checking the production configuration"
+# Runs against the freshly built dist/config/env.js, so it sees exactly what the
+# service will. Placed before the migrations and the restart: a bad value should
+# stop the deploy while the running site is still untouched, rather than being
+# discovered as a warning in this log after everything has already changed.
+as_app env NODE_ENV=production npm --prefix backend run config:check
+
 log "Applying database migrations"
 # Forward-only and checksummed: already-applied files are skipped, and nothing
 # here drops or truncates. There is no reset path in this runner by design.
