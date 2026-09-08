@@ -43,6 +43,8 @@ interface EmployeeAuthRow extends RowDataPacket {
   is_active: number;
   approval_status: 'pending' | 'approved' | 'rejected';
   rejection_reason: string | null;
+  /** NULL until the applicant has entered the code emailed to them. */
+  email_verified_at: Date | string | null;
 }
 
 export type MobileAccessPayload = {
@@ -76,6 +78,15 @@ function hashRefreshToken(token: string): string {
  */
 export type SignInRefusal =
   | { reason: 'credentials' }
+  /**
+   * Registered, password correct, but the address has never been confirmed.
+   *
+   * Reported ahead of 'pending' because it is the one refusal the applicant can clear
+   * themselves. Telling someone their account is awaiting approval when what it is
+   * actually waiting for is a code sitting in their own inbox would leave them waiting
+   * on an administrator who has nothing to do.
+   */
+  | { reason: 'emailUnverified' }
   | { reason: 'pending' }
   | { reason: 'rejected'; rejectionReason: string | null }
   | { reason: 'deactivated' };
@@ -109,7 +120,8 @@ export async function authenticateEmployee(
   const email = emailInput.trim().toLowerCase();
 
   const row = await queryOne<EmployeeAuthRow>(
-    `SELECT id, name, email, password_hash, role, is_active, approval_status, rejection_reason
+    `SELECT id, name, email, password_hash, role, is_active, approval_status,
+            rejection_reason, email_verified_at
        FROM telecaller_users
       WHERE email = ?
       LIMIT 1`,
@@ -121,6 +133,21 @@ export async function authenticateEmployee(
 
   // No account, or the wrong password. One indistinguishable answer.
   if (!row || !passwordMatches) return { ok: false, refusal: { reason: 'credentials' } };
+
+  /*
+   * Email verification is checked FIRST, ahead of approval state.
+   *
+   * Both can be outstanding at once — a fresh registration is unverified AND pending —
+   * and the order decides what the app tells the person. Reporting 'pending' would send
+   * someone to wait on an administrator when the thing actually blocking them is a code
+   * in their own inbox that they can act on immediately.
+   *
+   * It sits after the password check like every other state, so it cannot be used to
+   * discover whether an address has an account.
+   */
+  if (row.email_verified_at === null) {
+    return { ok: false, refusal: { reason: 'emailUnverified' } };
+  }
 
   if (row.approval_status === 'pending') {
     return { ok: false, refusal: { reason: 'pending' } };
@@ -170,7 +197,13 @@ export type RegistrationInput = {
 };
 
 export type RegistrationResult =
-  | { ok: true; employeeCode: string }
+  /**
+   * `userId` is returned so the caller can issue the email verification code without
+   * looking the row back up by address. A re-read would be a second query racing the
+   * insert it just made, and would have to trust the email as a key at the exact moment
+   * duplicate handling is in play.
+   */
+  | { ok: true; employeeCode: string; userId: number }
   /*
    * A duplicate email is reported plainly. Unlike sign-in, signup MUST tell the user the
    * address is taken or they will retry forever — and it reveals nothing they could not
@@ -203,7 +236,7 @@ export async function registerEmployee(
     const employeeCode = await nextEmployeeCode();
 
     try {
-      await execute(
+      const inserted = await execute(
         `INSERT INTO telecaller_users
            (employee_code, name, email, phone, password_hash, role,
             is_active, approval_status, registered_at)
@@ -212,7 +245,7 @@ export async function registerEmployee(
       );
 
       logger.info('Employee self-registered, awaiting approval', { employeeCode, email });
-      return { ok: true, employeeCode };
+      return { ok: true, employeeCode, userId: inserted.insertId };
     } catch (error) {
       if (!isDuplicateKey(error)) throw error;
 

@@ -21,3 +21,8 @@ export {
   jobApplicationConfirmationEmail,
   type JobApplicationEmailData,
 } from './templates/jobApplication';
+
+export {
+  employeeVerificationEmail,
+  type EmployeeVerificationEmailData,
+} from './templates/employeeVerification';

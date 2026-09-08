@@ -17,6 +17,7 @@ export interface EmployeeRow extends RowDataPacket {
   employee_code: string;
   name: string;
   email: string;
+  email_verified_at: Date | null;
   phone: string | null;
   role: EmployeeRole;
   availability: AvailabilityState;
@@ -47,6 +48,16 @@ export type EmployeeRecord = {
    * cannot tell "never approved" from "approved then switched off".
    */
   approvalStatus: ApprovalStatus;
+  /**
+   * When the applicant confirmed their email address, or null if they have not.
+   *
+   * A separate gate from `approvalStatus`, answering a different question: this is "does
+   * this person control this mailbox", decided automatically by them, where approval is
+   * "should this person work our leads", decided deliberately by a human. Both must be
+   * satisfied before the account can sign in, and approval is refused while this is null
+   * — see migration 011.
+   */
+  emailVerifiedAt: string | null;
   registeredAt: string | null;
   approvedAt: string | null;
   rejectionReason: string | null;
@@ -73,6 +84,16 @@ export function toEmployeeRecord(row: EmployeeRow): EmployeeRecord {
     availability: row.availability,
     isActive: row.is_active === 1,
     approvalStatus: row.approval_status,
+    /**
+     * Null until the applicant entered the code emailed to them.
+     *
+     * Surfaced on the record rather than kept private to the auth module because the
+     * approvals queue needs it: an administrator looking at a pending registration has
+     * to be able to see that it is waiting on the applicant, not on them.
+     */
+    emailVerifiedAt: row.email_verified_at
+      ? new Date(row.email_verified_at).toISOString()
+      : null,
     registeredAt: row.registered_at ? new Date(row.registered_at).toISOString() : null,
     approvedAt: row.approved_at ? new Date(row.approved_at).toISOString() : null,
     rejectionReason: row.rejection_reason,
@@ -83,7 +104,7 @@ export function toEmployeeRecord(row: EmployeeRow): EmployeeRecord {
 }
 
 const EMPLOYEE_COLUMNS = `
-  id, employee_code, name, email, phone, role, availability, is_active,
+  id, employee_code, name, email, email_verified_at, phone, role, availability, is_active,
   approval_status, registered_at, approved_at, rejection_reason,
   last_login_at, created_at, updated_at
 `;

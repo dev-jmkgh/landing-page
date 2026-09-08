@@ -166,6 +166,18 @@ type SeedUser = {
   availability: 'available' | 'busy' | 'on_break' | 'offline';
   active: boolean;
   approval: 'pending' | 'approved' | 'rejected';
+  /**
+   * Whether this demo account has confirmed its email address.
+   *
+   * Defaults to true for everyone, because `email_verified_at` is NULL by default
+   * (fail-closed, see migration 011) and an unverified registration CANNOT be approved.
+   * Left to the default, every pending account in the demo would be unapprovable and
+   * the approvals queue would be untestable.
+   *
+   * `pending2` is deliberately left false so the queue shows both states: one
+   * registration waiting on the administrator, and one still waiting on the applicant.
+   */
+  emailVerified?: boolean;
   rejectionReason?: string;
 };
 
@@ -281,6 +293,12 @@ const USERS: SeedUser[] = [
     availability: 'offline',
     active: false,
     approval: 'pending',
+    /*
+     * Signed up but never entered the code. Approving this one is refused, which is the
+     * state an administrator needs to be able to recognise — otherwise the only way to
+     * discover that behaviour is to hit it on a real applicant.
+     */
+    emailVerified: false,
   },
   {
     key: 'rejected',
@@ -498,14 +516,20 @@ async function main(): Promise<void> {
     const registered = u.approval === 'approved' ? null : sql(shift({ days: -2 }));
     const [res] = await db.execute(
       `INSERT INTO telecaller_users
-         (employee_code, name, email, phone, password_hash, role, availability,
-          is_active, approval_status, registered_at, approved_at, rejection_reason,
-          last_login_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (employee_code, name, email, email_verified_at, phone, password_hash, role,
+          availability, is_active, approval_status, registered_at, approved_at,
+          rejection_reason, last_login_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         u.code,
         u.name,
         u.email,
+        /*
+         * Stated explicitly rather than left to the column default, which is NULL and
+         * means unverified. Registered a little before the account itself so the
+         * timestamps read in a sensible order.
+         */
+        u.emailVerified === false ? null : sql(shift({ days: -3 })),
         u.phone,
         hash,
         u.role,
@@ -531,9 +555,18 @@ async function main(): Promise<void> {
     const [res] = await db.execute(
       `INSERT INTO telecaller_users
          (employee_code, name, email, password_hash, role, availability,
-          is_active, approval_status, approved_at)
-       VALUES (?, ?, ?, ?, 'admin', 'available', 1, 'approved', ?)`,
-      ['TC-1000', 'Administrator', ADMIN_LOGIN_EMAIL, hash, sql(shift({ days: -30 }))],
+          is_active, approval_status, approved_at, email_verified_at)
+       VALUES (?, ?, ?, ?, 'admin', 'available', 1, 'approved', ?, ?)`,
+      [
+        'TC-1000',
+        'Administrator',
+        ADMIN_LOGIN_EMAIL,
+        hash,
+        sql(shift({ days: -30 })),
+        // Verified: this is the operator's own account, and an admin who cannot sign in
+        // to the app they administer is a confusing thing to hand someone.
+        sql(shift({ days: -30 })),
+      ],
     );
     userId.websiteAdmin = (res as mysql.ResultSetHeader).insertId;
     linkedAdmin = ADMIN_LOGIN_EMAIL;
@@ -556,6 +589,9 @@ async function main(): Promise<void> {
   console.log(`      approved  ${USERS.filter((u) => u.approval === 'approved').length}`);
   console.log(`      pending   ${USERS.filter((u) => u.approval === 'pending').length}`);
   console.log(`      rejected  ${USERS.filter((u) => u.approval === 'rejected').length}`);
+  console.log(
+    `      of the pending, ${USERS.filter((u) => u.approval === 'pending' && u.emailVerified === false).length} has not confirmed their email yet`,
+  );
 
   /* -------------------------------------------------------------- leads */
 

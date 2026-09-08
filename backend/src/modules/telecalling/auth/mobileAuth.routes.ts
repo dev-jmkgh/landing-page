@@ -4,6 +4,7 @@ import { requireActor } from '../../../middleware/actor';
 import { asyncHandler } from '../../../middleware/errorHandler';
 import {
   changePasswordLimiter,
+  emailVerificationLimiter,
   mobileLoginLimiter,
   refreshLimiter,
   signupLimiter,
@@ -12,6 +13,12 @@ import { validateBody } from '../../../middleware/validate';
 import { HttpError, unauthorized, validationFailed } from '../../../utils/httpError';
 import { logger } from '../../../utils/logger';
 import { clientIp } from '../../../utils/request';
+import {
+  OTP_TTL_MINUTES,
+  issueEmailOtp,
+  resendEmailOtp,
+  verifyEmailOtp,
+} from './emailVerification.service';
 import { findEmployee } from '../employees/employee.repository';
 import { changeOwnPassword } from '../employees/employee.service';
 import { DEVICE_PLATFORMS } from '../shared.schema';
@@ -117,6 +124,19 @@ function refusalToError(refusal: SignInRefusal): HttpError {
        */
       return unauthorized('Incorrect email or password.');
 
+    case 'emailUnverified':
+      /*
+       * A distinct code, because this is the only refusal the person can clear
+       * themselves. The app routes it to the code entry screen rather than to the
+       * "waiting for approval" one — sending them to wait on an administrator would be
+       * telling them to do nothing about something only they can fix.
+       */
+      return new HttpError(
+        403,
+        'Please confirm your email address first. Enter the code we sent you, or ask for a new one.',
+        { code: 'email_not_verified' },
+      );
+
     case 'pending':
       return new HttpError(
         403,
@@ -213,12 +233,125 @@ mobileAuthRouter.post(
       ip: clientIp(request),
     });
 
+    /*
+     * Issue the verification code as part of registering.
+     *
+     * Awaited rather than fired and forgotten: if the code could not be stored, the app
+     * must not send the applicant to a screen asking them to type one. A mail delivery
+     * failure does NOT fail the request — the account exists either way and they can ask
+     * for a new code — which is why `issueEmailOtp` reports delivery to the log and not
+     * to the caller.
+     */
+    await issueEmailOtp({
+      id: result.userId,
+      name: input.name.trim(),
+      email: input.email.trim().toLowerCase(),
+    });
+
     response.status(201).json({
       success: true,
       employeeCode: result.employeeCode,
       approvalStatus: 'pending',
+      /*
+       * The app branches on this rather than on the message, and it is stated even though
+       * it is currently always true: a client that reads the flag keeps working if
+       * verification ever becomes conditional, whereas one that assumes it does not.
+       */
+      emailVerificationRequired: true,
+      expiresInMinutes: OTP_TTL_MINUTES,
       message:
-        'Your registration has been submitted. An administrator will approve your account before you can sign in.',
+        'Check your email for a 6-digit code to confirm your address. An administrator will then approve your account.',
+    });
+  }),
+);
+
+/* -------------------------------------------------------------------------- */
+/* Email verification                                                          */
+/* -------------------------------------------------------------------------- */
+
+const verifyEmailSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Enter the email address you registered with.'),
+  /*
+   * Exactly six digits. Anything else is refused before it reaches the service, so a
+   * malformed submission cannot consume one of the five attempts against a live code.
+   */
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, 'Enter the 6-digit code from your email.'),
+});
+
+/**
+ * Confirms an email address.
+ *
+ * Answers 200 for a correct code and for an address that was already verified, and 400
+ * for everything else with a single message. The service explains why the failures are
+ * not told apart; the short version is that doing so would turn this into a way to find
+ * out which addresses have accounts.
+ */
+mobileAuthRouter.post(
+  '/verify-email',
+  emailVerificationLimiter,
+  validateBody(verifyEmailSchema),
+  asyncHandler(async (request, response) => {
+    const input = request.body as z.infer<typeof verifyEmailSchema>;
+
+    const result = await verifyEmailOtp(input.email, input.code);
+
+    if (!result.ok) {
+      throw new HttpError(400, 'That code is not valid or has expired. Ask for a new one.', {
+        code: 'verification_failed',
+      });
+    }
+
+    response.json({
+      success: true,
+      alreadyVerified: result.alreadyVerified,
+      /*
+       * Verification does not sign anyone in, and the message says so. The account is
+       * still pending an administrator, and an applicant who thought otherwise would
+       * keep trying the password and reading "waiting for approval" as a fault.
+       */
+      message: result.alreadyVerified
+        ? 'Your email address is already confirmed. An administrator will approve your account before you can sign in.'
+        : 'Thank you — your email address is confirmed. An administrator will approve your account before you can sign in.',
+    });
+  }),
+);
+
+const resendVerificationSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Enter the email address you registered with.'),
+});
+
+/**
+ * Sends a fresh code.
+ *
+ * Reports success for an unknown address and an already-verified one alike, so it cannot
+ * be used to enumerate accounts. The one honest refusal is the per-account cooldown,
+ * because "wait thirty seconds" is actionable and reveals only that the person asking
+ * just asked.
+ */
+mobileAuthRouter.post(
+  '/resend-verification',
+  emailVerificationLimiter,
+  validateBody(resendVerificationSchema),
+  asyncHandler(async (request, response) => {
+    const input = request.body as z.infer<typeof resendVerificationSchema>;
+
+    const result = await resendEmailOtp(input.email);
+
+    if (!result.ok) {
+      throw new HttpError(
+        429,
+        `Please wait ${result.retryAfterSeconds} seconds before asking for another code.`,
+        { code: 'resend_cooldown' },
+      );
+    }
+
+    response.json({
+      success: true,
+      expiresInMinutes: OTP_TTL_MINUTES,
+      message: 'If that address is registered and not yet confirmed, a new code is on its way.',
     });
   }),
 );

@@ -24,6 +24,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Server } from 'node:http';
+import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
@@ -95,12 +96,19 @@ async function setupDatabase(): Promise<mysql.Connection> {
      * forgets creates an account that cannot sign in. This seed forgot, and the whole
      * suite failed at "telecaller signs in", which is exactly the visible failure that
      * default is designed to produce instead of a silent security hole.
+     *
+     * `email_verified_at` is stated for the same reason, and it happened again: migration
+     * 011 defaults it to NULL, sign-in refuses a NULL, and this seed's omission failed the
+     * suite at the same assertion. Both defaults are deliberately hostile to a forgetful
+     * writer. These three are admin-created staff, so a verified address is the truthful
+     * value — nobody emailed them a code.
      */
     `INSERT INTO telecaller_users
-       (employee_code, name, email, password_hash, role, is_active, approval_status)
-     VALUES ('TC-0001', 'Asha Admin', 'admin@example.test', ?, 'admin', 1, 'approved'),
-            ('TC-0002', 'Ravi Caller', 'ravi@example.test', ?, 'telecaller', 1, 'approved'),
-            ('TC-0003', 'Mira Caller', 'mira@example.test', ?, 'telecaller', 1, 'approved')`,
+       (employee_code, name, email, password_hash, role, is_active, approval_status,
+        email_verified_at)
+     VALUES ('TC-0001', 'Asha Admin', 'admin@example.test', ?, 'admin', 1, 'approved', NOW()),
+            ('TC-0002', 'Ravi Caller', 'ravi@example.test', ?, 'telecaller', 1, 'approved', NOW()),
+            ('TC-0003', 'Mira Caller', 'mira@example.test', ?, 'telecaller', 1, 'approved', NOW())`,
     [hash, hash, hash],
   );
 
@@ -675,13 +683,154 @@ async function main(): Promise<void> {
       pendingWrongPassword.json.message,
     );
 
+    /* --- email verification is mandatory before anything else --- */
+
+    console.log('\nemail verification');
+
+    const unverifiedLogin = await applicant.post('/mobile/auth/login', {
+      email: 'priya@example.test',
+      password: 'a-perfectly-long-password',
+    });
+    check(
+      'an unverified account with the RIGHT password is refused 403',
+      unverifiedLogin.status === 403,
+      unverifiedLogin.status,
+    );
+    check(
+      'and reports email_not_verified, NOT approval_pending',
+      unverifiedLogin.json.code === 'email_not_verified',
+      unverifiedLogin.json,
+    );
+    check('and still no tokens', !unverifiedLogin.json.accessToken);
+
+    /*
+     * An unverified registration cannot be approved.
+     *
+     * This is the assertion that makes verification mandatory rather than advisory.
+     * Without it an administrator could click Approve and produce an "approved" account
+     * that still cannot sign in.
+     */
+    const [priyaIdRows] = await db.query(
+      `SELECT id FROM telecaller_users WHERE email = 'priya@example.test'`,
+    );
+    const priyaUserId = Number((priyaIdRows as any[])[0]?.id);
+
+    const earlyApprove = await adminAsBearer.post(
+      `/admin/telecalling/registrations/${priyaUserId}/approve`,
+    );
+    check(
+      'an admin CANNOT approve an unverified registration',
+      earlyApprove.status === 400,
+      earlyApprove.json,
+    );
+    check(
+      'and is told it is waiting on the applicant',
+      String(earlyApprove.json.message).includes('confirmed their email'),
+      earlyApprove.json.message,
+    );
+
+    /* --- the code itself --- */
+
+    const badCode = await applicant.post('/mobile/auth/verify-email', {
+      email: 'priya@example.test',
+      code: '000000',
+    });
+    check('a wrong code is refused 400', badCode.status === 400, badCode.status);
+
+    const unknownAddress = await applicant.post('/mobile/auth/verify-email', {
+      email: 'nobody-at-all@example.test',
+      code: '000000',
+    });
+    check(
+      'an unregistered address is refused IDENTICALLY (no enumeration)',
+      unknownAddress.status === badCode.status && unknownAddress.json.code === badCode.json.code,
+      { unknown: unknownAddress.json, known: badCode.json },
+    );
+
+    const malformed = await applicant.post('/mobile/auth/verify-email', {
+      email: 'priya@example.test',
+      code: '12345',
+    });
+    check(
+      'a 5-digit code is rejected by validation, before it can cost an attempt',
+      malformed.status === 422,
+      malformed.status,
+    );
+
+    /*
+     * Recover the real code from its stored hash.
+     *
+     * The code is emailed, and this harness has no mailbox — but it is stored as a
+     * SHA-256 of six digits, so the live value can be found by trying all of them. That
+     * is only a million hashes, which takes under a second, and it is worth stating
+     * plainly: this is exactly the search the attempt cap and the ten-minute expiry
+     * exist to make useless against the API.
+     */
+    const [otpRows] = await db.query(
+      `SELECT code_hash FROM employee_email_otps
+        WHERE user_id = ? AND consumed_at IS NULL
+        ORDER BY id DESC LIMIT 1`,
+      [priyaUserId],
+    );
+    const wantedHash = (otpRows as any[])[0]?.code_hash as string | undefined;
+    check('signup issued a verification code', Boolean(wantedHash));
+
+    let realCode = '';
+    if (wantedHash) {
+      for (let i = 0; i < 1_000_000; i += 1) {
+        const candidate = String(i).padStart(6, '0');
+        if (createHash('sha256').update(candidate, 'utf8').digest('hex') === wantedHash) {
+          realCode = candidate;
+          break;
+        }
+      }
+    }
+    check('the code is a 6-digit value stored only as a hash', /^\d{6}$/.test(realCode), realCode);
+
+    const verified = await applicant.post('/mobile/auth/verify-email', {
+      email: 'priya@example.test',
+      code: realCode,
+    });
+    check('the correct code verifies the address', verified.status === 200, verified.json);
+    check('and reports it was not already verified', verified.json.alreadyVerified === false);
+
+    const reVerify = await applicant.post('/mobile/auth/verify-email', {
+      email: 'priya@example.test',
+      code: realCode,
+    });
+    check(
+      'verifying again is idempotent rather than an error',
+      reVerify.status === 200 && reVerify.json.alreadyVerified === true,
+      reVerify.json,
+    );
+
+    const [consumedRows] = await db.query(
+      `SELECT consumed_at FROM employee_email_otps WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+      [priyaUserId],
+    );
+    check(
+      'the code is marked consumed, so it cannot be reused',
+      (consumedRows as any[])[0]?.consumed_at !== null,
+    );
+
+    const resend = await applicant.post('/mobile/auth/resend-verification', {
+      email: 'priya@example.test',
+    });
+    check(
+      'resending for an already-verified address reports success, revealing nothing',
+      resend.status === 200,
+      resend.json,
+    );
+
+    /* --- only now does the account reach the approval gate --- */
+
     const pendingLogin = await applicant.post('/mobile/auth/login', {
       email: 'priya@example.test',
       password: 'a-perfectly-long-password',
     });
     check('a pending account with the RIGHT password is refused 403', pendingLogin.status === 403, pendingLogin.status);
     check(
-      'with a code the app can branch on',
+      'and NOW reports approval_pending, the next gate along',
       pendingLogin.json.code === 'approval_pending',
       pendingLogin.json,
     );
@@ -771,6 +920,19 @@ async function main(): Promise<void> {
     /* --- rejection, and reopening it --- */
 
     const sneakyId = Number((sneakyRows as any[])[0]?.id);
+
+    /*
+     * Mark the second applicant verified directly.
+     *
+     * The reject-and-reopen assertions below are about the APPROVAL gate, and leaving
+     * this account unverified would make them fail for an unrelated reason. Done in SQL
+     * rather than through the API because recovering a second code adds nothing to what
+     * the verification assertions above already prove.
+     */
+    await db.execute(
+      `UPDATE telecaller_users SET email_verified_at = NOW() WHERE id = ?`,
+      [sneakyId],
+    );
     const reject = await adminAsBearer.post(
       `/admin/telecalling/registrations/${sneakyId}/reject`,
       { reason: 'Not a member of staff.' },

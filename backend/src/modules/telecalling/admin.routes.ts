@@ -378,6 +378,27 @@ telecallingAdminRouter.post(
       );
     }
 
+    /*
+     * An unconfirmed email address cannot be approved.
+     *
+     * This is the gate that makes verification mandatory rather than advisory. Sign-in
+     * already refuses an unverified account, but without this an administrator could
+     * approve one — and would then have an "approved" employee who still cannot sign in,
+     * with nothing on either screen explaining why.
+     *
+     * It also means approving is a decision about a person who has demonstrably read
+     * mail at that address, rather than about an address somebody typed. A typo'd
+     * registration can never become a live account by being clicked through.
+     *
+     * Refusing rather than silently marking it verified: only the applicant can prove
+     * they control the mailbox, and an administrator clicking Approve is not that proof.
+     */
+    if (employee.emailVerifiedAt === null) {
+      throw badRequest(
+        `${employee.name} has not confirmed their email address yet. They need to enter the code sent to ${employee.email} before the account can be approved.`,
+      );
+    }
+
     const applied = await approveRegistration(id, request.actor!.id);
     if (!applied) {
       // Lost a race with another admin deciding the same registration.

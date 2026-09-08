@@ -122,6 +122,34 @@ export const signupLimiter = build({
 });
 
 /**
+ * Email verification: submitting a code, and asking for a new one.
+ *
+ * Separate from the signup limiter because the two are used at different moments by the
+ * same person — someone who has just registered will immediately submit a code, and
+ * sharing a counter would make a mistyped digit eat their remaining registration
+ * attempts.
+ *
+ * Twenty per window, per IP, and it is the outer bound rather than the real defence.
+ * The defences that matter are per ACCOUNT and cannot be escaped by changing address: a
+ * code dies after five wrong guesses, expires in ten minutes, and re-issuing has a
+ * sixty-second cooldown. This limit exists only so one network cannot grind through
+ * codes for many accounts at once.
+ *
+ * Twenty rather than ten because these telecallers share an office connection and are
+ * onboarded together. At ten, one person mistyping a digit could exhaust the window for
+ * colleagues signing up beside them — and the failure would look like the app being
+ * broken, not like a rate limit, because the message arrives on a code screen they were
+ * told to use.
+ */
+export const emailVerificationLimiter = build({
+  name: 'mobile-email-verification',
+  windowMs: config.rateLimit.windowMs,
+  max: 20,
+  message:
+    'Too many verification attempts from this network. Please wait a few minutes and try again.',
+});
+
+/**
  * Refresh-token exchange. Generous: a phone coming back onto the network drains a queue
  * of pending mutations and may legitimately refresh more than once. Limited at all only
  * so a stolen refresh token cannot be used to hammer the endpoint.
