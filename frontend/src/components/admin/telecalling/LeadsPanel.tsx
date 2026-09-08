@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CellStack, DataTable } from '@/components/admin/DataTable';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
@@ -14,6 +15,7 @@ import {
   type Employee,
   type Lead,
   type LeadQuery,
+  type LeadSourceRecord,
   type LeadStatus,
   type Paginated,
 } from '@/lib/telecalling';
@@ -25,7 +27,48 @@ import { EmptyPanel, LeadStatusBadge, Pager, TableSkeleton, downloadCsv } from '
  * The two modules share one screen because they are the same task: an admin looking at
  * the lead list is deciding who works what. Splitting them would mean filtering twice —
  * once to find the leads, again on an assignment screen to find them a second time.
+ *
+ * Leads can also be created here. The endpoint has always existed and the mobile app has
+ * always used it, but the web had no form — so a lead phoned in to the office, or arriving
+ * on paper, had to be entered on somebody's handset.
  */
+
+type NewLead = {
+  customerName: string;
+  phone: string;
+  alternatePhone: string;
+  email: string;
+  city: string;
+  address: string;
+  source: string;
+  productInterest: string;
+  status: LeadStatus;
+  assignedTo: string;
+  summaryNote: string;
+};
+
+/**
+ * `source` is left empty rather than defaulted to a slug.
+ *
+ * The sources are admin-editable, so hard-coding 'manual' here would break silently the
+ * day someone renames it. It is filled in once the list loads, and validated before
+ * submit so a failed source load cannot produce a lead with no source.
+ *
+ * `assignedTo` is a string because it is bound to a `<select>`; '' means unassigned.
+ */
+const BLANK_LEAD: NewLead = {
+  customerName: '',
+  phone: '',
+  alternatePhone: '',
+  email: '',
+  city: '',
+  address: '',
+  source: '',
+  productInterest: '',
+  status: 'new',
+  assignedTo: '',
+  summaryNote: '',
+};
 
 const PAGE_SIZE = 25;
 
@@ -36,6 +79,17 @@ const SORTS: { key: NonNullable<LeadQuery['sort']>; label: string }[] = [
   { key: 'never_contacted', label: 'Longest untouched' },
   { key: 'name', label: 'Customer name' },
 ];
+
+/**
+ * Whether a lead's next follow-up is in the past.
+ *
+ * Derived on the client from the cached `next_follow_up_at`, deliberately: the column
+ * is maintained transactionally by the API, and asking the server for an "overdue" flag
+ * as well would be a second source of truth for the same comparison.
+ */
+function isOverdue(lead: Lead): boolean {
+  return lead.nextFollowUpAt !== null && new Date(lead.nextFollowUpAt).getTime() < Date.now();
+}
 
 export function LeadsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [status, setStatus] = useState<LeadStatus | 'all'>('all');
@@ -51,6 +105,13 @@ export function LeadsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+
+  const [sources, setSources] = useState<LeadSourceRecord[]>([]);
+
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState<NewLead>(BLANK_LEAD);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [creating, setCreating] = useState(false);
 
   /** Ids ticked for a bulk assignment. */
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -82,6 +143,35 @@ export function LeadsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
         // A failed picker is not worth an error banner — the list still works, and the
         // assignment control simply has no options until the next load.
       });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * The lead sources, for the create form's dropdown.
+   *
+   * Only the active ones are offered: a retired source stays on the leads that already
+   * carry it — so their history reads correctly — but must not be selectable for new
+   * ones, which is the whole point of retiring it.
+   *
+   * The first active source becomes the default selection, so the common case is one
+   * fewer decision. A failure is silent for the same reason as the picker above, and the
+   * form refuses to submit without a source, so this cannot create a sourceless lead.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    telecallingApi
+      .listLeadSources()
+      .then((rows) => {
+        if (cancelled) return;
+        const active = rows.filter((row) => row.isActive);
+        setSources(active);
+        setForm((current) =>
+          current.source === '' && active[0] ? { ...current, source: active[0].slug } : current,
+        );
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -128,6 +218,104 @@ export function LeadsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
   useEffect(() => () => abort.current?.abort(), []);
 
   /* ------------------------------------------------------------------ actions */
+
+  /**
+   * Creates a lead from the web form.
+   *
+   * Validated here as well as on the server. Not for safety — the server is
+   * authoritative and its Zod schema is what actually decides — but so a missing phone
+   * number is reported before a round trip, and so the message names the field.
+   *
+   * `clientUuid` is deliberately NOT sent. It exists for the mobile app's offline queue,
+   * where the same create can be retried after the response was lost; a web form submit
+   * has no such queue, and inventing a uuid per keystroke-session would either dedupe
+   * two genuinely different leads or do nothing at all.
+   */
+  const create = async () => {
+    setFormErrors({});
+    setError(null);
+    setNotice(null);
+
+    const localErrors: Record<string, string> = {};
+
+    if (form.customerName.trim().length < 2) {
+      localErrors.customerName = "Enter the customer's name.";
+    }
+
+    /*
+     * Digits only, 7 to 15, matching what the server accepts. Checked loosely on
+     * purpose: the point is to catch an empty or obviously-wrong box, not to reject a
+     * real number written with spaces or a country code.
+     */
+    const digits = form.phone.replace(/[^\d]/g, '');
+    if (digits.length < 7 || digits.length > 15) {
+      localErrors.phone = 'Enter a phone number of 7 to 15 digits.';
+    }
+
+    if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(form.email.trim())) {
+      localErrors.email = 'Enter a valid email address, or leave it blank.';
+    }
+
+    if (!form.source) {
+      localErrors.source = 'Choose a source.';
+    }
+
+    if (Object.keys(localErrors).length > 0) {
+      setFormErrors(localErrors);
+      return;
+    }
+
+    setCreating(true);
+
+    try {
+      const result = await telecallingApi.createLead({
+        customerName: form.customerName.trim(),
+        phone: form.phone.trim(),
+        // Empty strings become null: the server treats '' as absent for these, and
+        // sending '' would store a blank rather than nothing.
+        alternatePhone: form.alternatePhone.trim() || null,
+        email: form.email.trim().toLowerCase() || null,
+        city: form.city.trim() || null,
+        address: form.address.trim() || null,
+        source: form.source,
+        productInterest: form.productInterest.trim() || null,
+        status: form.status,
+        assignedTo: form.assignedTo === '' ? null : Number(form.assignedTo),
+        summaryNote: form.summaryNote.trim() || null,
+      });
+
+      const owner = result.lead.assignedToName
+        ? ` Assigned to ${result.lead.assignedToName}.`
+        : ' Left unassigned.';
+
+      /*
+       * A duplicate phone is reported, not treated as a failure. The server returns the
+       * existing lead alongside the new one precisely so the decision belongs to whoever
+       * can see both — so the lead IS created and the warning names the other reference.
+       */
+      const duplicate = result.possibleDuplicate
+        ? ` Note: ${result.possibleDuplicate.reference} (${result.possibleDuplicate.customerName}) already has this number.`
+        : '';
+
+      setNotice(`Lead ${result.lead.reference} created for ${result.lead.customerName}.${owner}${duplicate}`);
+
+      // Keep the source and the assignee: entering a stack of paper leads from the same
+      // batch means the next one almost always shares both.
+      setForm({ ...BLANK_LEAD, source: form.source, assignedTo: form.assignedTo });
+      setShowForm(false);
+      await load();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) return onUnauthorized();
+      if (caught instanceof ApiError) {
+        setError(caught.message);
+        setFormErrors(caught.fieldErrors);
+      } else {
+        setError('Could not create the lead.');
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const assign = async (leadId: number, value: string) => {
     setBusyId(leadId);
@@ -370,11 +558,232 @@ export function LeadsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
             <Icon name="download" size={16} />
             Export page
           </button>
+
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => setShowForm((value) => !value)}
+          >
+            <Icon name="add" size={16} />
+            {showForm ? 'Cancel' : 'New lead'}
+          </button>
         </div>
       </div>
 
       {error ? <FormAlert variant="error">{error}</FormAlert> : null}
       {notice ? <FormAlert variant="success">{notice}</FormAlert> : null}
+
+      {showForm ? (
+        <div className="tc-card tc-form">
+          <h3 className="tc-section-title" style={{ marginTop: 0 }}>
+            New lead
+          </h3>
+
+          <div className="tc-form__grid">
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-name">
+                Customer name
+              </label>
+              <input
+                id="tc-lead-name"
+                className="input"
+                value={form.customerName}
+                onChange={(event) => setForm({ ...form, customerName: event.target.value })}
+              />
+              {formErrors.customerName ? (
+                <p className="field__error">{formErrors.customerName}</p>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-phone">
+                Phone
+              </label>
+              <input
+                id="tc-lead-phone"
+                className="input"
+                type="tel"
+                value={form.phone}
+                onChange={(event) => setForm({ ...form, phone: event.target.value })}
+              />
+              {formErrors.phone ? (
+                <p className="field__error">{formErrors.phone}</p>
+              ) : (
+                /*
+                  Said plainly because a duplicate is allowed, which surprises people who
+                  expect the form to stop them. Kept to one short line so it does not
+                  wrap and make this column taller than its neighbours.
+                */
+                <p className="field__hint">A duplicate number is allowed.</p>
+              )}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-alt">
+                Alternate phone (optional)
+              </label>
+              <input
+                id="tc-lead-alt"
+                className="input"
+                type="tel"
+                value={form.alternatePhone}
+                onChange={(event) => setForm({ ...form, alternatePhone: event.target.value })}
+              />
+              {formErrors.alternatePhone ? (
+                <p className="field__error">{formErrors.alternatePhone}</p>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-email">
+                Email (optional)
+              </label>
+              <input
+                id="tc-lead-email"
+                className="input"
+                type="email"
+                value={form.email}
+                onChange={(event) => setForm({ ...form, email: event.target.value })}
+              />
+              {formErrors.email ? <p className="field__error">{formErrors.email}</p> : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-source">
+                Source
+              </label>
+              <select
+                id="tc-lead-source"
+                className="select"
+                value={form.source}
+                onChange={(event) => setForm({ ...form, source: event.target.value })}
+              >
+                {/*
+                  No "choose one" placeholder: the first active source is preselected, and
+                  an empty option only exists to be an error state.
+                */}
+                {sources.length === 0 ? <option value="">Loading…</option> : null}
+                {sources.map((source) => (
+                  <option key={source.slug} value={source.slug}>
+                    {source.label}
+                  </option>
+                ))}
+              </select>
+              {formErrors.source ? <p className="field__error">{formErrors.source}</p> : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-city">
+                City (optional)
+              </label>
+              <input
+                id="tc-lead-city"
+                className="input"
+                value={form.city}
+                onChange={(event) => setForm({ ...form, city: event.target.value })}
+              />
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-product">
+                Product interest (optional)
+              </label>
+              <input
+                id="tc-lead-product"
+                className="input"
+                value={form.productInterest}
+                onChange={(event) => setForm({ ...form, productInterest: event.target.value })}
+              />
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-owner">
+                Assign to
+              </label>
+              <select
+                id="tc-lead-owner"
+                className="select"
+                value={form.assignedTo}
+                onChange={(event) => setForm({ ...form, assignedTo: event.target.value })}
+              >
+                <option value="">Leave unassigned</option>
+                {employees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employee.name}
+                  </option>
+                ))}
+              </select>
+              {formErrors.assignedTo ? (
+                <p className="field__error">{formErrors.assignedTo}</p>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="tc-lead-status">
+                Status
+              </label>
+              <select
+                id="tc-lead-status"
+                className="select"
+                value={form.status}
+                onChange={(event) =>
+                  setForm({ ...form, status: event.target.value as LeadStatus })
+                }
+              >
+                {LEAD_STATUSES.map((value) => (
+                  <option key={value} value={value}>
+                    {LEAD_STATUS_LABELS[value]}
+                  </option>
+                ))}
+              </select>
+              {/*
+                Offered rather than forced to "new" because a lead taken down over the
+                phone has often already been spoken to — the person entering it IS the
+                conversation.
+              */}
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="field__label" htmlFor="tc-lead-address">
+              Address (optional)
+            </label>
+            <input
+              id="tc-lead-address"
+              className="input"
+              value={form.address}
+              onChange={(event) => setForm({ ...form, address: event.target.value })}
+            />
+            {formErrors.address ? <p className="field__error">{formErrors.address}</p> : null}
+          </div>
+
+          <div className="field">
+            <label className="field__label" htmlFor="tc-lead-note">
+              Requirement / notes (optional)
+            </label>
+            <textarea
+              id="tc-lead-note"
+              /* `.textarea`, not `.input` — the stylesheet has a separate rule for it. */
+              className="textarea"
+              rows={3}
+              value={form.summaryNote}
+              onChange={(event) => setForm({ ...form, summaryNote: event.target.value })}
+            />
+            {formErrors.summaryNote ? (
+              <p className="field__error">{formErrors.summaryNote}</p>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => void create()}
+            disabled={creating}
+          >
+            {creating ? 'Creating…' : 'Create lead'}
+          </button>
+        </div>
+      ) : null}
 
       {/* Bulk assignment appears only when something is ticked. */}
       {selected.size > 0 ? (
@@ -431,124 +840,136 @@ export function LeadsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
           onAction={hasFilters ? clearFilters : undefined}
         />
       ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col" className="tc-col-tick">
-                  <input
-                    type="checkbox"
-                    checked={selected.size === data.items.length && data.items.length > 0}
-                    onChange={toggleAll}
-                    aria-label="Select all leads on this page"
-                  />
-                </th>
-                <th scope="col">Customer</th>
-                <th scope="col">Status</th>
-                <th scope="col">Assigned to</th>
-                <th scope="col">Last contacted</th>
-                <th scope="col">Next follow-up</th>
-                <th scope="col">Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((lead) => {
-                const overdue =
-                  lead.nextFollowUpAt !== null &&
-                  new Date(lead.nextFollowUpAt).getTime() < Date.now();
-
-                return (
-                  <tr key={lead.id} aria-busy={busyId === lead.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(lead.id)}
-                        onChange={() => toggle(lead.id)}
-                        aria-label={`Select ${lead.customerName}`}
-                      />
-                    </td>
-
-                    <td>
-                      <strong>{lead.customerName}</strong>
-                      <br />
-                      <span className="tc-muted">{lead.phone}</span>
-                      <br />
-                      <span className="tc-muted tc-mono">{lead.reference}</span>
-                      {lead.productInterest ? (
-                        <>
-                          <br />
-                          <span className="tc-muted">{lead.productInterest}</span>
-                        </>
-                      ) : null}
-                    </td>
-
-                    <td>
-                      <LeadStatusBadge status={lead.status} />
-                      <br />
-                      <select
-                        className="select select--sm"
-                        value={lead.status}
-                        disabled={busyId === lead.id}
-                        onChange={(event) =>
-                          void changeStatus(lead.id, event.target.value as LeadStatus)
-                        }
-                        aria-label={`Change status for ${lead.customerName}`}
-                      >
-                        {LEAD_STATUSES.map((value) => (
-                          <option key={value} value={value}>
-                            {LEAD_STATUS_LABELS[value]}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-
-                    <td>
-                      <select
-                        className="select select--sm"
-                        value={lead.assignedTo === null ? 'unassigned' : String(lead.assignedTo)}
-                        disabled={busyId === lead.id}
-                        onChange={(event) => void assign(lead.id, event.target.value)}
-                        aria-label={`Assign ${lead.customerName}`}
-                      >
-                        <option value="unassigned">Unassigned</option>
-                        {employees.map((employee) => (
-                          <option key={employee.id} value={employee.id}>
-                            {employee.name}
-                          </option>
-                        ))}
-                        {/*
-                          A lead can be owned by a deactivated employee, who is not in the
-                          assignable list. Without this option the select would show the
-                          wrong person as the current owner.
-                        */}
-                        {lead.assignedTo !== null &&
-                        !employees.some((employee) => employee.id === lead.assignedTo) ? (
-                          <option value={String(lead.assignedTo)}>
-                            {lead.assignedToName ?? 'Former employee'} (inactive)
-                          </option>
-                        ) : null}
-                      </select>
-                    </td>
-
-                    <td>{formatDateTime(lead.lastContactedAt)}</td>
-
-                    <td className={overdue ? 'tc-cell-bad' : undefined}>
+        <DataTable
+          rows={data.items}
+          rowKey={(lead) => lead.id}
+          rowBusy={(lead) => busyId === lead.id}
+          rowTone={(lead) => (isOverdue(lead) ? 'bad' : undefined)}
+          minWidth="72rem"
+          caption="Leads, with owner, status and follow-up dates"
+          columns={[
+            {
+              key: 'select',
+              width: '2.75rem',
+              align: 'center',
+              header: (
+                <input
+                  type="checkbox"
+                  checked={selected.size === data.items.length && data.items.length > 0}
+                  onChange={toggleAll}
+                  aria-label="Select all leads on this page"
+                />
+              ),
+              render: (lead) => (
+                <input
+                  type="checkbox"
+                  checked={selected.has(lead.id)}
+                  onChange={() => toggle(lead.id)}
+                  aria-label={`Select ${lead.customerName}`}
+                />
+              ),
+            },
+            {
+              /* No width: the customer column absorbs the leftover space. */
+              key: 'customer',
+              header: 'Customer',
+              render: (lead) => (
+                <CellStack primary={lead.customerName} secondary={lead.phone}>
+                  <span className="tc-muted tc-mono">{lead.reference}</span>
+                  {lead.productInterest ? (
+                    <span className="tc-muted">{lead.productInterest}</span>
+                  ) : null}
+                </CellStack>
+              ),
+            },
+            {
+              key: 'status',
+              header: 'Status',
+              width: '11rem',
+              render: (lead) => (
+                <CellStack primary={<LeadStatusBadge status={lead.status} />}>
+                  <select
+                    className="select select--sm"
+                    value={lead.status}
+                    disabled={busyId === lead.id}
+                    onChange={(event) =>
+                      void changeStatus(lead.id, event.target.value as LeadStatus)
+                    }
+                    aria-label={`Change status for ${lead.customerName}`}
+                  >
+                    {LEAD_STATUSES.map((value) => (
+                      <option key={value} value={value}>
+                        {LEAD_STATUS_LABELS[value]}
+                      </option>
+                    ))}
+                  </select>
+                </CellStack>
+              ),
+            },
+            {
+              key: 'assigned',
+              header: 'Assigned to',
+              width: '12rem',
+              render: (lead) => (
+                <select
+                  className="select select--sm"
+                  value={lead.assignedTo === null ? 'unassigned' : String(lead.assignedTo)}
+                  disabled={busyId === lead.id}
+                  onChange={(event) => void assign(lead.id, event.target.value)}
+                  aria-label={`Assign ${lead.customerName}`}
+                >
+                  <option value="unassigned">Unassigned</option>
+                  {employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.name}
+                    </option>
+                  ))}
+                  {/*
+                    A lead can be owned by a deactivated employee, who is not in the
+                    assignable list. Without this option the select would show the wrong
+                    person as the current owner.
+                  */}
+                  {lead.assignedTo !== null &&
+                  !employees.some((employee) => employee.id === lead.assignedTo) ? (
+                    <option value={String(lead.assignedTo)}>
+                      {lead.assignedToName ?? 'Former employee'} (inactive)
+                    </option>
+                  ) : null}
+                </select>
+              ),
+            },
+            {
+              key: 'lastContacted',
+              header: 'Last contacted',
+              width: '10rem',
+              nowrap: true,
+              render: (lead) => formatDateTime(lead.lastContactedAt),
+            },
+            {
+              key: 'nextFollowUp',
+              header: 'Next follow-up',
+              width: '10rem',
+              nowrap: true,
+              render: (lead) => (
+                <CellStack
+                  primary={
+                    <span className={isOverdue(lead) ? 'tc-cell-bad' : undefined}>
                       {formatDateTime(lead.nextFollowUpAt)}
-                      {overdue ? (
-                        <>
-                          <br />
-                          <span className="tc-badge tc-badge--bad">Overdue</span>
-                        </>
-                      ) : null}
-                    </td>
-
-                    <td>{humanise(lead.source)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </span>
+                  }
+                >
+                  {isOverdue(lead) ? <span className="tc-badge tc-badge--bad">Overdue</span> : null}
+                </CellStack>
+              ),
+            },
+            {
+              key: 'source',
+              header: 'Source',
+              width: '8rem',
+              render: (lead) => humanise(lead.source),
+            },
+          ]}
+        />
       )}
 
       {data ? (

@@ -334,8 +334,19 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
        FROM follow_ups`,
   );
 
+  /*
+   * `total` counts only APPROVED accounts, and `active` only approved-and-enabled ones.
+   *
+   * Without the approval filter a pending self-registration would be counted in the
+   * headcount tile the moment someone signed up — so the dashboard would report staff
+   * the business does not have, and an unvetted applicant would inflate the denominator
+   * of every per-employee average.
+   */
   const employeeRow = await queryOne<RowDataPacket & { total: number; active: number }>(
-    `SELECT COUNT(*) AS total, SUM(is_active = 1) AS active FROM telecaller_users`,
+    `SELECT COUNT(*) AS total,
+            SUM(is_active = 1) AS active
+       FROM telecaller_users
+      WHERE approval_status = 'approved'`,
   );
 
   const total = num(leadRow?.total);
@@ -522,7 +533,8 @@ export async function employeePerformance(range: DateRange): Promise<EmployeePer
     `SELECT u.id AS user_id, u.employee_code, u.name, u.role, u.is_active,
             ${selectList}
        FROM telecaller_users u
-      WHERE u.role = 'telecaller' OR EXISTS (SELECT 1 FROM calls c WHERE c.user_id = u.id)
+      WHERE u.approval_status = 'approved'
+        AND (u.role = 'telecaller' OR EXISTS (SELECT 1 FROM calls c WHERE c.user_id = u.id))
       ORDER BY u.is_active DESC, u.name ASC`,
     params,
   );

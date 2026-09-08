@@ -117,7 +117,25 @@ export const employeeListQuerySchema = paginationSchema.extend({
     .enum(['true', 'false'])
     .optional()
     .transform((value) => (value === undefined ? undefined : value === 'true')),
+  /**
+   * Filter by approval state, so the management screen can isolate the queue.
+   *
+   * Distinct from `active`: a pending and a deactivated employee are both inactive, and
+   * an admin looking for registrations to approve must not have to wade through
+   * ex-employees to find them.
+   */
+  approval: z.enum(['pending', 'approved', 'rejected']).optional(),
   q: z.string().trim().max(120).optional(),
 });
 
 export type EmployeeListQuery = z.infer<typeof employeeListQuerySchema>;
+
+/** Reason shown to the applicant on their next sign-in attempt. */
+export const rejectRegistrationSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .max(255, 'Keep the reason under 255 characters.')
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+});

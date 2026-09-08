@@ -98,6 +98,8 @@ export type FollowUpScope = 'today' | 'upcoming' | 'overdue' | 'pending' | 'comp
 /* Records                                                                     */
 /* -------------------------------------------------------------------------- */
 
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+
 export type Employee = {
   id: number;
   employeeCode: string;
@@ -107,6 +109,26 @@ export type Employee = {
   role: EmployeeRole;
   availability: 'available' | 'busy' | 'on_break' | 'offline';
   isActive: boolean;
+  /**
+   * Where this account sits in the self-registration flow.
+   *
+   * Branch on this rather than on `isActive`. A pending applicant and a deactivated
+   * ex-employee are BOTH inactive, so `isActive` alone cannot tell "never approved"
+   * from "approved, then switched off" — and those need opposite actions.
+   */
+  approvalStatus: ApprovalStatus;
+  /** When the applicant signed up in the mobile app. Null for accounts an admin created. */
+  registeredAt: string | null;
+  /**
+   * When the registration was decided — NOT necessarily approved.
+   *
+   * The server sets this column on rejection as well, so read it as a decision
+   * timestamp and label it accordingly. It is null while the registration is pending,
+   * and is cleared again if a rejection is reopened.
+   */
+  approvedAt: string | null;
+  /** Shown to the applicant on their next sign-in attempt. */
+  rejectionReason: string | null;
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -367,7 +389,19 @@ export const telecallingApi = {
   /* ------------------------------------------------------------- employees */
 
   listEmployees: (
-    query: { page?: number; pageSize?: number; role?: EmployeeRole | 'all'; active?: boolean; q?: string },
+    query: {
+      page?: number;
+      pageSize?: number;
+      role?: EmployeeRole | 'all';
+      active?: boolean;
+      /**
+       * Approval state, which the endpoint has always accepted but this binding never
+       * passed on. It is what lets the management screen isolate the signup queue
+       * instead of leaving applicants mixed in with ex-employees.
+       */
+      approval?: ApprovalStatus;
+      q?: string;
+    },
     signal?: AbortSignal,
   ) =>
     adminRequest<Paginated<Employee>>(
@@ -439,6 +473,67 @@ export const telecallingApi = {
       body: { toEmployeeId },
     }),
 
+  /* ------------------------------------------------- registration approval */
+
+  /**
+   * The count of registrations awaiting a decision.
+   *
+   * A separate, cheap endpoint so the Employees tab can carry a badge without pulling
+   * the whole queue. Note the response key is `pending`, not `count` or `total`.
+   */
+  pendingRegistrationCount: (signal?: AbortSignal) =>
+    adminRequest<{ pending: number }>(`${BASE}/registrations/count`, { signal }).then(
+      (r) => r.pending,
+    ),
+
+  /**
+   * The pending queue, oldest first and unpaginated.
+   *
+   * `listEmployees({ approval: 'pending' })` covers the same rows with paging and
+   * search, which is what the management screen uses. This exists because it is the
+   * only registration route a supervisor can read, and because its ordering is
+   * deliberate — the person who has been waiting longest is at the top.
+   */
+  listRegistrations: (signal?: AbortSignal) =>
+    adminRequest<{ items: Employee[]; total: number }>(`${BASE}/registrations`, { signal }),
+
+  /**
+   * Approve a registration: the account becomes active and can sign in.
+   *
+   * Administrator only, unlike reading the queue — a supervisor can see who is waiting
+   * but not grant access. Refused with 400 if the registration was already decided, so
+   * reload the list afterwards rather than patching the row optimistically.
+   */
+  approveRegistration: (id: number) =>
+    adminRequest<{ employee: Employee }>(`${BASE}/registrations/${id}/approve`, {
+      method: 'POST',
+    }).then((r) => r.employee),
+
+  /**
+   * Reject a registration, optionally saying why.
+   *
+   * The reason is shown to the applicant the next time they try to sign in, which is
+   * the only channel back to them — there is no email on rejection. Server limit is 255
+   * characters after trimming; an empty string is stored as no reason at all.
+   */
+  rejectRegistration: (id: number, reason: string | null) =>
+    adminRequest<{ employee: Employee }>(`${BASE}/registrations/${id}/reject`, {
+      method: 'POST',
+      body: { reason },
+    }).then((r) => r.employee),
+
+  /**
+   * Put a rejected registration back in the queue.
+   *
+   * Only a rejected one: the server refuses with 400 for pending or approved. Approving
+   * a rejected registration directly is also refused, so this is the required first
+   * step when someone was turned down by mistake.
+   */
+  reopenRegistration: (id: number) =>
+    adminRequest<{ employee: Employee }>(`${BASE}/registrations/${id}/reopen`, {
+      method: 'POST',
+    }).then((r) => r.employee),
+
   /* ----------------------------------------------------------------- leads */
 
   listLeads: (query: LeadQuery, signal?: AbortSignal) =>
@@ -456,11 +551,40 @@ export const telecallingApi = {
       timeline: ActivityEntry[];
     }>(`${BASE}/leads/${id}`, { signal }),
 
-  createLead: (body: Record<string, unknown>) =>
-    adminRequest<{ lead: Lead; possibleDuplicate: Lead | null }>(`${BASE}/leads`, {
-      method: 'POST',
-      body,
-    }),
+  /**
+   * Creates a lead.
+   *
+   * Typed rather than `Record<string, unknown>`, which is what this was: an untyped body
+   * on the one call with fourteen optional fields meant a misspelled key compiled fine
+   * and was silently dropped by the server's Zod schema.
+   *
+   * `possibleDuplicate` is advisory, not an error. Two leads can legitimately share a
+   * number and the server deliberately does not reject one — it returns the existing lead
+   * alongside the new one so the person who can see both decides. Show it; do not treat
+   * it as a failure.
+   */
+  createLead: (body: {
+    customerName: string;
+    phone: string;
+    alternatePhone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    city?: string | null;
+    /** A `slug` from `listLeadSources`. An unknown value is normalised to 'other', not rejected. */
+    source: string;
+    productInterest?: string | null;
+    status?: LeadStatus;
+    summaryNote?: string | null;
+    /** Supervisor and above only; a telecaller always gets their own id regardless. */
+    assignedTo?: number | null;
+    enquiryId?: number | null;
+    attachmentKey?: string | null;
+    clientUuid?: string;
+  }) =>
+    adminRequest<{ lead: Lead; possibleDuplicate: Lead | null; deduplicated: boolean }>(
+      `${BASE}/leads`,
+      { method: 'POST', body },
+    ),
 
   updateLead: (id: number, body: Record<string, unknown>) =>
     adminRequest<{ lead: Lead }>(`${BASE}/leads/${id}`, { method: 'PATCH', body }).then(

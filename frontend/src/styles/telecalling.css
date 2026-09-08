@@ -341,10 +341,29 @@
   margin-bottom: 1.25rem;
 }
 
+/*
+ * The submit button sits at its natural width, not the full width of the card.
+ *
+ * `.tc-form` is a flex column, whose items stretch across the cross axis by default, so
+ * the trailing button was rendering as a full-bleed bar the width of the panel — which
+ * reads as a page-level action rather than "submit this form", and at 1500px wide is a
+ * very large navy rectangle.
+ */
+.tc-form > .btn {
+  align-self: start;
+}
+
 .tc-form__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: 1rem;
+  gap: 1rem 1.25rem;
+  /*
+   * Rows are sized by their own content rather than sharing the grid's height, so a
+   * row containing a field with a hint does not make the neighbouring rows taller.
+   * `.field`'s own `align-content: start` handles alignment within a field; this
+   * handles it between rows.
+   */
+  align-items: start;
 }
 
 /* --------------------------------------------------------------------- chart */

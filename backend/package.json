@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "db:seed:telecalling": "tsx scripts/seed-telecalling-demo.ts",
     "db:migrate:prod": "node dist/db/migrate.js",
     "hash:password": "node scripts/hash-password.mjs",
     "test:telecalling": "tsx scripts/e2e-telecalling.ts"

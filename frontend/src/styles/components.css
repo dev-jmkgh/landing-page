@@ -425,6 +425,19 @@
   display: grid;
   gap: 0.4rem;
   min-width: 0;
+  /*
+   * `align-content: start` is load-bearing.
+   *
+   * A `.field` is a grid item of `.tc-form__grid`, which stretches every item to the
+   * height of the tallest one in its row. Without this, the field's own implicit rows
+   * absorb that extra height and the label, input and hint get spread apart — so a
+   * field with a hint (three rows) put its input higher than one without (two rows),
+   * and inputs across a row of the form sat at three different heights.
+   *
+   * Packing to the top means every input in a row starts directly under its label, so
+   * they line up regardless of what sits beneath any of them.
+   */
+  align-content: start;
 }
 
 .field__label {
@@ -1065,6 +1078,95 @@
 
 .data-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+/*
+ * `text-align` now comes from the column definition in `DataTable`, set inline on both
+ * the `th` and the `td` so they cannot disagree. The rule above still declares `start`
+ * as the base so a hand-written table — or one mid-conversion — is not left with the
+ * browser's centred `th` default, which is what made every telecalling table look
+ * crooked.
+ */
+
+/* Content that must stay on one line: dates, phone numbers, button groups. */
+.data-table th[data-nowrap='true'],
+.data-table td[data-nowrap='true'] {
+  white-space: nowrap;
+}
+
+/*
+ * Row emphasis. A left edge rather than a background tint, so it survives the hover
+ * colour and does not fight the status badges the row already contains.
+ */
+.data-table tbody tr[data-tone='bad'] td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger-600);
+}
+
+.data-table tbody tr[data-tone='warn'] td:first-child {
+  box-shadow: inset 3px 0 0 var(--warning-600);
+}
+
+.data-table tbody tr[aria-busy='true'] {
+  opacity: 0.55;
+}
+
+/* --- Table cell primitives ---------------------------------------------- */
+
+/*
+ * Replaces the `<strong>` + `<br />` + muted `<span>` pattern that six of these tables
+ * repeated. A flex column gives real control of the gap between the lines; `<br />`
+ * gave none, which is why the two-line cells sat unevenly against single-line ones.
+ */
+.cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.cell-stack__primary {
+  font-weight: 600;
+  color: var(--ink-700);
+  overflow-wrap: anywhere;
+}
+
+.cell-stack__secondary {
+  font-size: 0.85rem;
+  color: var(--ink-500);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.cell-stack__extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+}
+
+.cell-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  /*
+   * Actions belong at the end of their column. The column is right-aligned via its
+   * definition, and this keeps the flex row itself from stretching to the full cell
+   * width, which is what left the buttons floating in the middle of a too-wide column.
+   */
+  justify-content: flex-end;
+}
+
+/*
+ * Numbers in tables.
+ *
+ * Tabular figures so a column of counts or durations lines up digit for digit. With
+ * proportional figures a column of times reads as ragged even when it is
+ * right-aligned.
+ */
+.data-table td[style*='end'],
+.cell-num {
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- Pagination ---------------------------------------------------------- */

@@ -5,7 +5,25 @@ import type { ReactNode, SVGProps } from 'react';
  * Outline icons are drawn with `currentColor` strokes; brand glyphs are filled.
  */
 
-const outline: Record<string, ReactNode> = {
+/*
+ * `satisfies`, not a `Record<string, ReactNode>` annotation.
+ *
+ * The annotation made `keyof typeof outline` equal to `string`, so `IconName` accepted
+ * ANY string: `<Icon name="add" />` type-checked while no such icon existed, and the
+ * component's `if (!children) return null` swallowed it into a silent gap. `satisfies`
+ * keeps the same shape check on the values while preserving the literal keys, so a
+ * misspelled icon name is now a compile error.
+ */
+const outline = {
+  /*
+   * A plain plus, for "create a new X" buttons.
+   *
+   * Added because there was no add/plus glyph at all, and `Icon` renders nothing for an
+   * unknown name rather than complaining — so `<Icon name="add" />` produced a button
+   * with a gap where its icon should be, and no error anywhere.
+   */
+  add: <path d="M12 5v14M5 12h14" />,
+
   academy: (
     <>
       <path d="M12 3.5 2.5 8.2 12 13l9.5-4.8L12 3.5Z" />
@@ -275,9 +293,9 @@ const outline: Record<string, ReactNode> = {
       <path d="M3.5 4.5V9H8M20.5 19.5V15H16" />
     </>
   ),
-};
+} satisfies Record<string, ReactNode>;
 
-const brand: Record<string, ReactNode> = {
+const brand = {
   facebook: (
     <path d="M13.5 21.5V13h2.86l.43-3.32H13.5V7.56c0-.96.27-1.62 1.65-1.62h1.76V2.97c-.3-.04-1.35-.13-2.56-.13-2.53 0-4.27 1.55-4.27 4.39v2.45H7.2V13h2.88v8.5h3.42Z" />
   ),
@@ -290,7 +308,7 @@ const brand: Record<string, ReactNode> = {
   youtube: (
     <path d="M21.6 7.2a2.52 2.52 0 0 0-1.77-1.79C18.25 5 12 5 12 5s-6.25 0-7.83.41A2.52 2.52 0 0 0 2.4 7.2 26.3 26.3 0 0 0 2 12a26.3 26.3 0 0 0 .4 4.8 2.52 2.52 0 0 0 1.77 1.79C5.75 19 12 19 12 19s6.25 0 7.83-.41a2.52 2.52 0 0 0 1.77-1.79A26.3 26.3 0 0 0 22 12a26.3 26.3 0 0 0-.4-4.8ZM10 15.1V8.9l5.2 3.1-5.2 3.1Z" />
   ),
-};
+} satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof outline | keyof typeof brand;
 
@@ -303,8 +321,15 @@ type IconProps = Omit<SVGProps<SVGSVGElement>, 'name'> & {
 };
 
 export function Icon({ name, size = 20, strokeWidth = 1.6, title, ...rest }: IconProps) {
+  /*
+   * The cast is needed because `name` is the union of BOTH maps' keys, so neither map
+   * can be indexed by it directly. `name in brand` is the runtime discriminant; these
+   * two lines are the only place the distinction exists.
+   */
   const isBrand = name in brand;
-  const children = isBrand ? brand[name] : outline[name];
+  const children = isBrand
+    ? brand[name as keyof typeof brand]
+    : outline[name as keyof typeof outline];
 
   if (!children) return null;
 

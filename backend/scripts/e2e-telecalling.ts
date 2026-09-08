@@ -88,10 +88,19 @@ async function setupDatabase(): Promise<mysql.Connection> {
   const hash = await bcrypt.hash('correct-horse-battery', 12);
 
   await root.query(
-    `INSERT INTO telecaller_users (employee_code, name, email, password_hash, role)
-     VALUES ('TC-0001', 'Asha Admin', 'admin@example.test', ?, 'admin'),
-            ('TC-0002', 'Ravi Caller', 'ravi@example.test', ?, 'telecaller'),
-            ('TC-0003', 'Mira Caller', 'mira@example.test', ?, 'telecaller')`,
+    /*
+     * approval_status is stated explicitly.
+     *
+     * Migration 010 makes the column DEFAULT 'pending' — fail-closed, so a writer that
+     * forgets creates an account that cannot sign in. This seed forgot, and the whole
+     * suite failed at "telecaller signs in", which is exactly the visible failure that
+     * default is designed to produce instead of a silent security hole.
+     */
+    `INSERT INTO telecaller_users
+       (employee_code, name, email, password_hash, role, is_active, approval_status)
+     VALUES ('TC-0001', 'Asha Admin', 'admin@example.test', ?, 'admin', 1, 'approved'),
+            ('TC-0002', 'Ravi Caller', 'ravi@example.test', ?, 'telecaller', 1, 'approved'),
+            ('TC-0003', 'Mira Caller', 'mira@example.test', ?, 'telecaller', 1, 'approved')`,
     [hash, hash, hash],
   );
 
@@ -585,6 +594,261 @@ async function main(): Promise<void> {
       assignedTo: 3,
     });
     check('a lead cannot be assigned to a deactivated employee', assignToDeactivated.status === 400, assignToDeactivated.json);
+
+
+    /* ------------------------------------ self-registration and approval */
+    console.log('\nself-registration and admin approval');
+
+    const applicant = makeClient(base);
+
+    const weakSignup = await applicant.post('/mobile/auth/signup', {
+      name: 'Priya Applicant',
+      email: 'priya@example.test',
+      password: 'tooshort',
+    });
+    check('signup refuses a short password', weakSignup.status === 422, weakSignup.status);
+
+    /*
+     * The privilege-escalation attempt. Anyone holding the APK can call this endpoint, so
+     * the single most valuable thing to try is asking for a role.
+     */
+    const escalation = await applicant.post('/mobile/auth/signup', {
+      name: 'Sneaky Applicant',
+      email: 'sneaky@example.test',
+      password: 'a-perfectly-long-password',
+      role: 'admin',
+      isActive: true,
+      approvalStatus: 'approved',
+      employeeCode: 'TC-9999',
+    });
+    check('signup accepts the registration', escalation.status === 201, escalation.json);
+
+    const [sneakyRows] = await db.query(
+      `SELECT id, role, is_active, approval_status, employee_code
+         FROM telecaller_users WHERE email = 'sneaky@example.test'`,
+    );
+    const sneaky = (sneakyRows as any[])[0];
+    check('a self-chosen role is ignored — forced to telecaller', sneaky?.role === 'telecaller', sneaky);
+    check('a self-chosen isActive is ignored — forced to 0', sneaky?.is_active === 0, sneaky);
+    check(
+      'a self-chosen approvalStatus is ignored — forced to pending',
+      sneaky?.approval_status === 'pending',
+      sneaky,
+    );
+    check(
+      'a self-chosen employee code is ignored — allocated by the server',
+      sneaky?.employee_code !== 'TC-9999',
+      sneaky,
+    );
+
+    const signup = await applicant.post('/mobile/auth/signup', {
+      name: 'Priya Applicant',
+      email: 'priya@example.test',
+      phone: '9800000001',
+      password: 'a-perfectly-long-password',
+    });
+    check('a valid registration is accepted', signup.status === 201, signup.json);
+    check('it reports pending', signup.json.approvalStatus === 'pending', signup.json);
+    check('no tokens are issued at signup', !signup.json.accessToken && !signup.json.refreshToken);
+
+    const dupSignup = await applicant.post('/mobile/auth/signup', {
+      name: 'Priya Again',
+      email: 'priya@example.test',
+      password: 'a-perfectly-long-password',
+    });
+    check('a duplicate email is refused', dupSignup.status === 422, dupSignup.status);
+
+    /* --- the pending account cannot get in, and cannot be enumerated --- */
+
+    const pendingWrongPassword = await applicant.post('/mobile/auth/login', {
+      email: 'priya@example.test',
+      password: 'the-wrong-password',
+    });
+    check(
+      'a pending account with a WRONG password gives the generic credentials error',
+      pendingWrongPassword.status === 401,
+      pendingWrongPassword.json,
+    );
+    check(
+      'and does not leak that the account exists or is pending',
+      pendingWrongPassword.json.message === 'Incorrect email or password.',
+      pendingWrongPassword.json.message,
+    );
+
+    const pendingLogin = await applicant.post('/mobile/auth/login', {
+      email: 'priya@example.test',
+      password: 'a-perfectly-long-password',
+    });
+    check('a pending account with the RIGHT password is refused 403', pendingLogin.status === 403, pendingLogin.status);
+    check(
+      'with a code the app can branch on',
+      pendingLogin.json.code === 'approval_pending',
+      pendingLogin.json,
+    );
+    check('and still no tokens', !pendingLogin.json.accessToken);
+
+    /* --- a pending account is invisible to the rest of the system --- */
+
+    const assignable = await adminAsBearer.get('/admin/telecalling/employees/assignable');
+    check(
+      'a pending applicant does NOT appear in the assignment picker',
+      !(assignable.json.items as Json[]).some((e) => e.email === 'priya@example.test'),
+      (assignable.json.items as Json[]).map((e) => e.email),
+    );
+
+    const dashAfterSignup = await adminAsBearer.get('/admin/telecalling/dashboard');
+    check(
+      'a pending applicant is not counted as an active employee',
+      dashAfterSignup.json.employees_total === undefined ||
+        !(dashAfterSignup.json.employeeRows ?? []).some(
+          (e: Json) => e.name === 'Priya Applicant',
+        ),
+      dashAfterSignup.json.employees,
+    );
+    check(
+      'the dashboard reports the pending registration count',
+      typeof dashAfterSignup.json.pendingRegistrations === 'number' &&
+        dashAfterSignup.json.pendingRegistrations >= 2,
+      dashAfterSignup.json.pendingRegistrations,
+    );
+
+    const assignToPending = await adminAsBearer.post(
+      `/admin/telecalling/leads/${leadId}/assign`,
+      { assignedTo: sneaky ? Number((sneakyRows as any[])[0].id ?? 0) || 99 : 99 },
+    );
+    check('a lead cannot be assigned to a non-approved account', assignToPending.status === 400, assignToPending.status);
+
+    /* --- the approvals queue --- */
+
+    const queue = await adminAsBearer.get('/admin/telecalling/registrations');
+    check('the admin sees the pending queue', queue.status === 200, queue.json);
+    check(
+      'it contains the applicant',
+      (queue.json.items as Json[]).some((e) => e.email === 'priya@example.test'),
+      (queue.json.items as Json[]).map((e) => e.email),
+    );
+
+    const priya = (queue.json.items as Json[]).find((e) => e.email === 'priya@example.test');
+    const priyaId = priya?.id as number;
+
+    const telecallerQueue = await ravi.get('/admin/telecalling/registrations');
+    check('a telecaller cannot see the queue', telecallerQueue.status === 403, telecallerQueue.status);
+
+    const telecallerApprove = await ravi.post(
+      `/admin/telecalling/registrations/${priyaId}/approve`,
+    );
+    check('a telecaller cannot approve', telecallerApprove.status === 403, telecallerApprove.status);
+
+    /* --- approval --- */
+
+    const approve = await adminAsBearer.post(
+      `/admin/telecalling/registrations/${priyaId}/approve`,
+    );
+    check('an admin approves the registration', approve.status === 200, approve.json);
+    check('the account becomes approved', approve.json.employee?.approvalStatus === 'approved');
+    check('and becomes active', approve.json.employee?.isActive === true);
+    check('the approver is recorded', approve.json.employee?.approvedAt !== null);
+
+    const approveTwice = await adminAsBearer.post(
+      `/admin/telecalling/registrations/${priyaId}/approve`,
+    );
+    check('approving twice is refused, not silently repeated', approveTwice.status === 400, approveTwice.status);
+
+    const approvedLogin = await applicant.post('/mobile/auth/login', {
+      email: 'priya@example.test',
+      password: 'a-perfectly-long-password',
+    });
+    check('the approved account can now sign in', approvedLogin.status === 200, approvedLogin.json);
+    check('and receives tokens', Boolean(approvedLogin.json.accessToken));
+    applicant.setToken(approvedLogin.json.accessToken);
+
+    const nowAssignable = await adminAsBearer.get('/admin/telecalling/employees/assignable');
+    check(
+      'the approved employee now appears in the assignment picker',
+      (nowAssignable.json.items as Json[]).some((e) => e.email === 'priya@example.test'),
+    );
+
+    /* --- rejection, and reopening it --- */
+
+    const sneakyId = Number((sneakyRows as any[])[0]?.id);
+    const reject = await adminAsBearer.post(
+      `/admin/telecalling/registrations/${sneakyId}/reject`,
+      { reason: 'Not a member of staff.' },
+    );
+    check('an admin rejects a registration', reject.status === 200, reject.json);
+    check('it records the reason', reject.json.employee?.rejectionReason === 'Not a member of staff.');
+
+    const rejectedLogin = await makeClient(base).post('/mobile/auth/login', {
+      email: 'sneaky@example.test',
+      password: 'a-perfectly-long-password',
+    });
+    check('a rejected account is refused', rejectedLogin.status === 403, rejectedLogin.status);
+    check(
+      'with a distinct code',
+      rejectedLogin.json.code === 'registration_rejected',
+      rejectedLogin.json,
+    );
+    check(
+      'and is told why',
+      String(rejectedLogin.json.message).includes('Not a member of staff'),
+      rejectedLogin.json.message,
+    );
+
+    const reopen = await adminAsBearer.post(
+      `/admin/telecalling/registrations/${sneakyId}/reopen`,
+    );
+    check('a rejection can be reopened', reopen.status === 200, reopen.json);
+    check('back to pending', reopen.json.employee?.approvalStatus === 'pending');
+
+    /* --- revocation actually bites on the token-minting paths --- */
+
+    const priyaSession = approvedLogin.json.refreshToken as string;
+
+    await adminAsBearer.patch(`/admin/telecalling/employees/${priyaId}`, { isActive: false });
+
+    const deactivatedMe = await applicant.get('/mobile/auth/me');
+    check(
+      '/me refuses a deactivated account rather than returning a profile',
+      deactivatedMe.status === 403,
+      deactivatedMe.status,
+    );
+    check(
+      'with a code the app can act on',
+      deactivatedMe.json.code === 'account_deactivated',
+      deactivatedMe.json,
+    );
+
+    /*
+     * The critical one. change-password mints a fresh 60-day session, and an access token
+     * stays valid after deactivation — so without a state re-read inside
+     * createMobileSession a sacked employee could restore their own access.
+     */
+    const deactivatedChangePw = await applicant.post('/mobile/auth/change-password', {
+      currentPassword: 'a-perfectly-long-password',
+      newPassword: 'another-perfectly-long-one',
+    });
+    check(
+      'a deactivated account cannot mint a new session via change-password',
+      deactivatedChangePw.status >= 400,
+      deactivatedChangePw.status,
+    );
+    check(
+      'and no tokens leak out of it',
+      !deactivatedChangePw.json.accessToken && !deactivatedChangePw.json.refreshToken,
+      deactivatedChangePw.json,
+    );
+
+    const deactivatedRefresh = await applicant.post('/mobile/auth/refresh', {
+      refreshToken: priyaSession,
+    });
+    check('and its refresh token is dead', deactivatedRefresh.status === 401, deactivatedRefresh.status);
+
+    /* --- the audit trail --- */
+
+    const approvalAudit = await adminAsBearer.get('/admin/telecalling/audit-logs');
+    const approvalActions = (approvalAudit.json.items as Json[]).map((r) => r.action);
+    check('approval is audited', approvalActions.includes('registration_approved'), approvalActions);
+    check('rejection is audited', approvalActions.includes('registration_rejected'), approvalActions);
 
     /* ------------------------------------------------------ sign out */
     console.log('\nsign out');

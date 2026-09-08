@@ -27,6 +27,10 @@ import type { DevicePlatform, EmployeeRole } from '../shared.schema';
 /** Same reasoning as the admin service: a wrong email must cost the same as a wrong password. */
 const DUMMY_HASH = '$2a$12$C6UzMDM.H6dfI/f/IKcEe.9F7d1Y2vgPQ5DR/gPCk6iiCV8AqOb1S';
 
+/** Matches the cost used by employee.service, so an admin-created and a self-registered
+ *  account verify in comparable time. */
+const BCRYPT_COST = 12;
+
 const ACCESS_AUDIENCE = 'jmk-mobile';
 const ISSUER = 'jmk-api';
 
@@ -37,6 +41,8 @@ interface EmployeeAuthRow extends RowDataPacket {
   password_hash: string;
   role: EmployeeRole;
   is_active: number;
+  approval_status: 'pending' | 'approved' | 'rejected';
+  rejection_reason: string | null;
 }
 
 export type MobileAccessPayload = {
@@ -63,19 +69,47 @@ function hashRefreshToken(token: string): string {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Verifies credentials. Returns the identity on success, null on any failure.
+ * Why a sign-in was refused.
  *
- * Never reports *which* factor failed, and never distinguishes a deactivated account
- * from a wrong password — either would let an outsider enumerate the staff list.
+ * 'rejected' as a reason is deliberately NOT surfaced as a distinct outcome to the
+ * client — see below.
+ */
+export type SignInRefusal =
+  | { reason: 'credentials' }
+  | { reason: 'pending' }
+  | { reason: 'rejected'; rejectionReason: string | null }
+  | { reason: 'deactivated' };
+
+export type SignInResult =
+  | { ok: true; actor: Actor }
+  | { ok: false; refusal: SignInRefusal };
+
+/**
+ * Verifies credentials and reports why a refusal happened.
+ *
+ * THE ORDER HERE IS THE SECURITY PROPERTY. The password is verified FIRST, and the
+ * account's state is only revealed once it is known to be correct.
+ *
+ * That matters because self-registration makes "does this email have an account?" a
+ * question an outsider might want answered, and the app's endpoint is reachable by
+ * anyone who has the APK — which is being handed around on WhatsApp. If a pending
+ * account produced "awaiting approval" on any password, the endpoint would be an
+ * account-existence oracle. Because the state is only disclosed after a correct
+ * password, the only person who learns it is someone who already knows the password,
+ * and telling them why they cannot get in is simply honest.
+ *
+ * A wrong password against a pending, rejected or deactivated account is
+ * indistinguishable from a wrong password against an approved one, and from an email
+ * with no account at all — the DUMMY_HASH comparison keeps the timing comparable too.
  */
 export async function authenticateEmployee(
   emailInput: string,
   password: string,
-): Promise<Actor | null> {
+): Promise<SignInResult> {
   const email = emailInput.trim().toLowerCase();
 
   const row = await queryOne<EmployeeAuthRow>(
-    `SELECT id, name, email, password_hash, role, is_active
+    `SELECT id, name, email, password_hash, role, is_active, approval_status, rejection_reason
        FROM telecaller_users
       WHERE email = ?
       LIMIT 1`,
@@ -85,19 +119,146 @@ export async function authenticateEmployee(
   const hash = row?.password_hash ?? DUMMY_HASH;
   const passwordMatches = await bcrypt.compare(password, hash).catch(() => false);
 
-  if (!row || !passwordMatches || row.is_active !== 1) return null;
+  // No account, or the wrong password. One indistinguishable answer.
+  if (!row || !passwordMatches) return { ok: false, refusal: { reason: 'credentials' } };
+
+  if (row.approval_status === 'pending') {
+    return { ok: false, refusal: { reason: 'pending' } };
+  }
+
+  if (row.approval_status === 'rejected') {
+    return {
+      ok: false,
+      refusal: { reason: 'rejected', rejectionReason: row.rejection_reason },
+    };
+  }
+
+  /*
+   * Approved but switched off. Distinct from pending: this is someone who HAD access and
+   * an administrator removed it, and telling them "awaiting approval" would send them to
+   * wait for something that is never coming.
+   */
+  if (row.is_active !== 1) {
+    return { ok: false, refusal: { reason: 'deactivated' } };
+  }
 
   await execute('UPDATE telecaller_users SET last_login_at = NOW() WHERE id = ?', [row.id]).catch(
     (error) => logger.warn('Could not record last_login_at', describeError(error)),
   );
 
   return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    role: row.role,
-    via: 'bearer',
+    ok: true,
+    actor: {
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      role: row.role,
+      via: 'bearer',
+    },
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Self-registration                                                           */
+/* -------------------------------------------------------------------------- */
+
+export type RegistrationInput = {
+  name: string;
+  email: string;
+  phone: string | null;
+  password: string;
+};
+
+export type RegistrationResult =
+  | { ok: true; employeeCode: string }
+  /*
+   * A duplicate email is reported plainly. Unlike sign-in, signup MUST tell the user the
+   * address is taken or they will retry forever — and it reveals nothing they could not
+   * learn by trying to register any address anyway. This is the standard trade for a
+   * registration form.
+   */
+  | { ok: false; reason: 'email_taken' };
+
+/**
+ * Registers a telecaller, pending approval.
+ *
+ * Three things are deliberately NOT taken from the client:
+ *
+ *   role            — forced to 'telecaller'. Accepting it would let anyone with the APK
+ *                     register themselves as an admin, which is the whole system.
+ *   is_active       — set to 0, so every existing `is_active = 1` query already excludes
+ *                     this account. See migration 010 for why that is the safe shape.
+ *   approval_status — set to 'pending'. Nothing self-serve can reach 'approved'.
+ *
+ * An employee code is allocated now rather than at approval, so the approvals queue can
+ * show a real, quotable identifier and the row is never half-formed.
+ */
+export async function registerEmployee(
+  input: RegistrationInput,
+): Promise<RegistrationResult> {
+  const email = input.email.trim().toLowerCase();
+  const passwordHash = await bcrypt.hash(input.password, BCRYPT_COST);
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const employeeCode = await nextEmployeeCode();
+
+    try {
+      await execute(
+        `INSERT INTO telecaller_users
+           (employee_code, name, email, phone, password_hash, role,
+            is_active, approval_status, registered_at)
+         VALUES (?, ?, ?, ?, ?, 'telecaller', 0, 'pending', NOW())`,
+        [employeeCode, input.name, email, input.phone, passwordHash],
+      );
+
+      logger.info('Employee self-registered, awaiting approval', { employeeCode, email });
+      return { ok: true, employeeCode };
+    } catch (error) {
+      if (!isDuplicateKey(error)) throw error;
+
+      /*
+       * Two unique indexes can collide here. An email clash is terminal and reported;
+       * an employee_code clash is a race between two simultaneous registrations, so the
+       * code is recomputed and the insert retried.
+       */
+      if (await emailIsTaken(email)) return { ok: false, reason: 'email_taken' };
+    }
+  }
+
+  throw new Error('Could not allocate an employee code after three attempts.');
+}
+
+async function emailIsTaken(email: string): Promise<boolean> {
+  const row = await queryOne<RowDataPacket & { total: number }>(
+    'SELECT COUNT(*) AS total FROM telecaller_users WHERE email = ?',
+    [email],
+  );
+  return Number(row?.total ?? 0) > 0;
+}
+
+function isDuplicateKey(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: string }).code === 'ER_DUP_ENTRY'
+  );
+}
+
+/**
+ * Next free TC-#### code.
+ *
+ * Duplicated from employee.repository rather than imported, to keep the auth module free
+ * of a dependency on the employee module — importing it the other way round already
+ * happens and a cycle would be easy to create here.
+ */
+async function nextEmployeeCode(): Promise<string> {
+  const row = await queryOne<RowDataPacket & { highest: number | null }>(
+    `SELECT MAX(CAST(SUBSTRING(employee_code, 4) AS UNSIGNED)) AS highest
+       FROM telecaller_users
+      WHERE employee_code REGEXP '^TC-[0-9]+$'`,
+  );
+  const next = Number(row?.highest ?? 0) + 1;
+  return `TC-${String(next).padStart(4, '0')}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -157,11 +318,40 @@ export function verifyAccessToken(token: string): Actor | null {
 /* Refresh sessions                                                            */
 /* -------------------------------------------------------------------------- */
 
-/** Issues an access token and a brand-new refresh row for one device. */
+/**
+ * Issues an access token and a brand-new refresh row for one device.
+ *
+ * THE STATE RE-READ IS THE POINT. Every path that mints a token comes through here, and
+ * each one previously trusted whatever the caller had already established:
+ *
+ *   /auth/login          — had just checked, so it was fine.
+ *   /auth/change-password — had NOT. It authenticated with a Bearer token, and a token
+ *                          stays valid for its full lifetime after an account is
+ *                          deactivated or rejected. So a sacked employee whose handset
+ *                          still held a live access token could change their password and
+ *                          be issued a fresh 60-day refresh row, restoring access long
+ *                          after it was withdrawn.
+ *
+ * Checking here rather than at each call site means a future token-minting path cannot
+ * reintroduce the same hole by omission — it is fail-closed by construction.
+ */
 export async function createMobileSession(
   actor: Actor,
   device: { name?: string | null; platform?: DevicePlatform; pushToken?: string | null },
 ): Promise<MobileSession> {
+  const state = await queryOne<
+    RowDataPacket & { is_active: number; approval_status: string }
+  >('SELECT is_active, approval_status FROM telecaller_users WHERE id = ? LIMIT 1', [actor.id]);
+
+  if (!state || state.is_active !== 1 || state.approval_status !== 'approved') {
+    logger.warn('Refused to mint a session for an ineligible account', {
+      id: actor.id,
+      active: state?.is_active,
+      approval: state?.approval_status,
+    });
+    throw new Error('Account is not eligible for a session.');
+  }
+
   const refreshToken = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + config.mobileAuth.refreshTtlDays * 86_400_000);
 
@@ -199,6 +389,7 @@ interface SessionRow extends RowDataPacket {
   email: string;
   role: EmployeeRole;
   is_active: number;
+  approval_status: 'pending' | 'approved' | 'rejected';
 }
 
 /**
@@ -219,7 +410,7 @@ export async function rotateMobileSession(
 
   const row = await queryOne<SessionRow>(
     `SELECT s.id, s.user_id, s.device_name, s.device_platform, s.push_token,
-            u.name, u.email, u.role, u.is_active
+            u.name, u.email, u.role, u.is_active, u.approval_status
        FROM mobile_sessions s
        JOIN telecaller_users u ON u.id = s.user_id
       WHERE s.refresh_token_hash = ?
@@ -229,7 +420,13 @@ export async function rotateMobileSession(
     [tokenHash],
   );
 
-  if (!row || row.is_active !== 1) {
+  /*
+   * approval_status is re-checked alongside is_active, not instead of it. A pending
+   * account can never have obtained a refresh token in the first place, but an approved
+   * account that is later REJECTED would still hold one — and this is the point at which
+   * that revocation has to bite.
+   */
+  if (!row || row.is_active !== 1 || row.approval_status !== 'approved') {
     // A presented-but-unknown token is worth noticing: it is either a replayed old
     // token or a deactivated account still trying. Not an error the client can fix.
     logger.warn('Mobile refresh rejected', { known: Boolean(row) });

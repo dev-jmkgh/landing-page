@@ -30,6 +30,7 @@ interface EmployeeRow extends RowDataPacket {
   email: string;
   role: EmployeeRole;
   is_active: number;
+  approval_status: 'pending' | 'approved' | 'rejected';
 }
 
 /**
@@ -41,14 +42,23 @@ interface EmployeeRow extends RowDataPacket {
  */
 async function actorFromEmail(email: string): Promise<Actor | null> {
   const row = await queryOne<EmployeeRow>(
-    `SELECT id, name, email, role, is_active
+    `SELECT id, name, email, role, is_active, approval_status
        FROM telecaller_users
       WHERE email = ?
       LIMIT 1`,
     [email],
   );
 
-  if (!row || row.is_active !== 1) return null;
+  /*
+   * approval_status is checked explicitly even though a pending row also has
+   * is_active = 0, which would already fail this test.
+   *
+   * Stating both is deliberate: this is the path by which a website admin cookie becomes
+   * a telecalling actor, and it is the single most valuable thing for a self-registered
+   * account to reach. Relying on the implicit is_active = 0 would make the safety of this
+   * line depend on a convention enforced in a different file.
+   */
+  if (!row || row.is_active !== 1 || row.approval_status !== 'approved') return null;
 
   return { id: row.id, name: row.name, email: row.email, role: row.role, via: 'cookie' };
 }

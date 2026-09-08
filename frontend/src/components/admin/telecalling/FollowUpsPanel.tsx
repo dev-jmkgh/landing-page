@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
@@ -293,148 +294,152 @@ export function FollowUpsPanel({ onUnauthorized }: { onUnauthorized: () => void 
           }
         />
       ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Due</th>
-                <th scope="col">Customer</th>
-                <th scope="col">Assigned to</th>
-                <th scope="col">Note</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((row) => (
-                <tr key={row.id} aria-busy={busyId === row.id}>
-                  <td className={row.isOverdue ? 'tc-cell-bad' : undefined}>
-                    {formatDateTime(row.dueAt)}
-                    {row.isOverdue ? (
-                      <>
-                        <br />
-                        <Tag tone="bad">Overdue</Tag>
-                      </>
-                    ) : null}
-                    {row.rescheduleCount > 0 ? (
-                      <>
-                        <br />
-                        {/*
-                          Worth showing: a follow-up postponed four times is usually a lead
-                          that needs a different conversation, not a fifth reminder.
-                        */}
-                        <span className="tc-muted">
-                          Moved {row.rescheduleCount}{' '}
-                          {row.rescheduleCount === 1 ? 'time' : 'times'}
-                        </span>
-                      </>
-                    ) : null}
-                  </td>
-
-                  <td>
-                    <strong>{row.leadName}</strong>
-                    <br />
-                    <span className="tc-muted">{row.leadPhone}</span>
-                    <br />
-                    <LeadStatusBadge status={row.leadStatus} />
-                  </td>
-
-                  <td>
-                    {row.state === 'pending' ? (
-                      <select
-                        className="select select--sm"
-                        value={row.assignedTo === null ? '' : String(row.assignedTo)}
-                        disabled={busyId === row.id}
-                        onChange={(event) => void reassign(row, event.target.value)}
-                        aria-label={`Reassign the follow-up for ${row.leadName}`}
-                      >
-                        {row.assignedTo === null ? <option value="">Unassigned</option> : null}
-                        {employees.map((employee) => (
-                          <option key={employee.id} value={employee.id}>
-                            {employee.name}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      (row.assignedToName ?? '—')
-                    )}
-                  </td>
-
-                  <td>
-                    {row.note ?? <span className="tc-muted">—</span>}
-                    {row.state === 'completed' ? (
-                      <>
-                        <br />
-                        <Tag tone="good">
-                          Done {formatDateTime(row.completedAt)}
-                          {row.completedByName ? ` by ${row.completedByName}` : ''}
-                        </Tag>
-                        {row.outcomeNote ? (
-                          <>
-                            <br />
-                            <span className="tc-muted">{row.outcomeNote}</span>
-                          </>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </td>
-
-                  <td>
-                    {row.state === 'pending' ? (
-                      <div className="tc-row-actions">
-                        <button
-                          type="button"
-                          className="btn btn--outline btn--sm"
-                          disabled={busyId === row.id}
-                          onClick={() =>
-                            void act(
-                              row.id,
-                              () => telecallingApi.completeFollowUp(row.id),
-                              'Marked as completed.',
-                            )
-                          }
-                        >
-                          Complete
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--outline btn--sm"
-                          disabled={busyId === row.id}
-                          onClick={() => void postpone(row, 1)}
-                        >
-                          +1 day
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--outline btn--sm"
-                          disabled={busyId === row.id}
-                          onClick={() => void postpone(row, 7)}
-                        >
-                          +1 week
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          disabled={busyId === row.id}
-                          onClick={() =>
-                            void act(
-                              row.id,
-                              () => telecallingApi.cancelFollowUp(row.id),
-                              'Follow-up cancelled.',
-                            )
-                          }
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="tc-muted">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={data.items}
+          rowKey={(row) => row.id}
+          rowBusy={(row) => busyId === row.id}
+          rowTone={(row) => (row.isOverdue ? 'bad' : undefined)}
+          minWidth="62rem"
+          caption="Follow-ups, with their due date, customer, owner and available actions"
+          columns={[
+            {
+              key: 'due',
+              header: 'Due',
+              width: '11rem',
+              nowrap: true,
+              render: (row) => (
+                <CellStack
+                  primary={
+                    <span className={row.isOverdue ? 'tc-cell-bad' : undefined}>
+                      {formatDateTime(row.dueAt)}
+                    </span>
+                  }
+                >
+                  {row.isOverdue ? <Tag tone="bad">Overdue</Tag> : null}
+                  {/*
+                    Worth showing: a follow-up postponed four times is usually a lead that
+                    needs a different conversation, not a fifth reminder.
+                  */}
+                  {row.rescheduleCount > 0 ? (
+                    <span className="tc-muted">
+                      Moved {row.rescheduleCount} {row.rescheduleCount === 1 ? 'time' : 'times'}
+                    </span>
+                  ) : null}
+                </CellStack>
+              ),
+            },
+            {
+              key: 'customer',
+              header: 'Customer',
+              width: '13rem',
+              render: (row) => (
+                <CellStack primary={row.leadName} secondary={row.leadPhone}>
+                  <LeadStatusBadge status={row.leadStatus} />
+                </CellStack>
+              ),
+            },
+            {
+              key: 'assigned',
+              header: 'Assigned to',
+              width: '11rem',
+              render: (row) =>
+                row.state === 'pending' ? (
+                  <select
+                    className="select select--sm"
+                    value={row.assignedTo === null ? '' : String(row.assignedTo)}
+                    disabled={busyId === row.id}
+                    onChange={(event) => void reassign(row, event.target.value)}
+                    aria-label={`Reassign the follow-up for ${row.leadName}`}
+                  >
+                    {row.assignedTo === null ? <option value="">Unassigned</option> : null}
+                    {employees.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  (row.assignedToName ?? '—')
+                ),
+            },
+            {
+              /* No width: this is the column that absorbs whatever space is left. */
+              key: 'note',
+              header: 'Note',
+              render: (row) => (
+                <CellStack
+                  primary={row.note ?? <span className="tc-muted">—</span>}
+                  secondary={row.state === 'completed' ? row.outcomeNote : null}
+                >
+                  {row.state === 'completed' ? (
+                    <Tag tone="good">
+                      Done {formatDateTime(row.completedAt)}
+                      {row.completedByName ? ` by ${row.completedByName}` : ''}
+                    </Tag>
+                  ) : null}
+                </CellStack>
+              ),
+            },
+            {
+              key: 'actions',
+              header: 'Actions',
+              align: 'end',
+              width: '18rem',
+              nowrap: true,
+              render: (row) =>
+                row.state === 'pending' ? (
+                  <CellActions>
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      disabled={busyId === row.id}
+                      onClick={() =>
+                        void act(
+                          row.id,
+                          () => telecallingApi.completeFollowUp(row.id),
+                          'Marked as completed.',
+                        )
+                      }
+                    >
+                      Complete
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      disabled={busyId === row.id}
+                      onClick={() => void postpone(row, 1)}
+                    >
+                      +1 day
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      disabled={busyId === row.id}
+                      onClick={() => void postpone(row, 7)}
+                    >
+                      +1 week
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      disabled={busyId === row.id}
+                      onClick={() =>
+                        void act(
+                          row.id,
+                          () => telecallingApi.cancelFollowUp(row.id),
+                          'Follow-up cancelled.',
+                        )
+                      }
+                    >
+                      Cancel
+                    </button>
+                  </CellActions>
+                ) : (
+                  <span className="tc-muted">—</span>
+                ),
+            },
+          ]}
+        />
       )}
 
       {data ? (

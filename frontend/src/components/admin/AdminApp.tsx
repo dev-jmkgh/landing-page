@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AdminLogin } from '@/components/admin/AdminLogin';
+import { AdminShell } from '@/components/admin/AdminShell';
+import { useAdminSession } from '@/components/admin/useAdminSession';
 import { ApplicationsTable, EnquiriesTable } from '@/components/admin/RecordsTable';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -28,11 +29,62 @@ type StatusFilter = RecordStatus | 'all';
 const PAGE_SIZE = 20;
 const EMPTY_PAGE = { items: [], page: 1, pageSize: PAGE_SIZE, total: 0, totalPages: 1 };
 
-export function AdminApp() {
-  const [session, setSession] = useState<string | null>(null);
-  const [checking, setChecking] = useState(true);
+const TAB_LABELS: Record<Tab, string> = {
+  enquiries: 'Enquiries',
+  applications: 'Applications',
+};
 
+function isTab(value: string | null): value is Tab {
+  return value === 'enquiries' || value === 'applications';
+}
+
+/**
+ * Keeps the visible tab in the URL, mirroring `useSection` in `TelecallingApp`.
+ *
+ * Needed once the sidebar exists: it links to `/admin/enquiries/?tab=applications`, and
+ * without this the tab was local state only, so that link always landed on Enquiries and
+ * the sidebar's Applications row appeared not to work.
+ *
+ * `window` is read in an effect rather than during render because this page is
+ * prerendered at build time, where there is no window.
+ */
+function useTab(): [Tab, (next: Tab) => void] {
   const [tab, setTab] = useState<Tab>('enquiries');
+
+  useEffect(() => {
+    const initial = new URLSearchParams(window.location.search).get('tab');
+    if (isTab(initial)) setTab(initial);
+
+    const onPop = () => {
+      const value = new URLSearchParams(window.location.search).get('tab');
+      setTab(isTab(value) ? value : 'enquiries');
+    };
+
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const go = useCallback((next: Tab) => {
+    setTab(next);
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', next);
+    window.history.pushState({ tab: next }, '', url);
+  }, []);
+
+  return [tab, go];
+}
+
+export function AdminApp() {
+  const {
+    status: sessionStatus,
+    email,
+    configError,
+    handleUnauthorized,
+    signOut,
+  } = useAdminSession();
+
+  const [tab, setTab] = useTab();
   const [status, setStatus] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -46,26 +98,6 @@ export function AdminApp() {
 
   const abortRef = useRef<AbortController | null>(null);
 
-  /* ---------------------------------------------------------------- session */
-
-  useEffect(() => {
-    let cancelled = false;
-    adminApi
-      .session()
-      .then((value) => {
-        if (!cancelled) setSession(value.email);
-      })
-      .catch(() => {
-        if (!cancelled) setSession(null);
-      })
-      .finally(() => {
-        if (!cancelled) setChecking(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   /* --------------------------------------------------------------- filtering */
 
   useEffect(() => {
@@ -78,7 +110,7 @@ export function AdminApp() {
   }, [tab, status, debouncedSearch]);
 
   const load = useCallback(async () => {
-    if (!session) return;
+    if (sessionStatus !== 'signedIn') return;
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -98,14 +130,14 @@ export function AdminApp() {
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return;
       if (caught instanceof ApiError && caught.status === 401) {
-        setSession(null);
+        handleUnauthorized();
         return;
       }
       setError(caught instanceof ApiError ? caught.message : 'Could not load records.');
     } finally {
       setLoading(false);
     }
-  }, [session, tab, status, debouncedSearch, page]);
+  }, [sessionStatus, tab, status, debouncedSearch, page, handleUnauthorized]);
 
   useEffect(() => {
     void load();
@@ -140,7 +172,7 @@ export function AdminApp() {
       }
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
-        setSession(null);
+        handleUnauthorized();
         return;
       }
       setError(caught instanceof ApiError ? caught.message : 'Could not update the status.');
@@ -149,19 +181,9 @@ export function AdminApp() {
     }
   }
 
-  async function signOut() {
-    try {
-      await adminApi.logout();
-    } finally {
-      setSession(null);
-      setEnquiries(EMPTY_PAGE);
-      setApplications(EMPTY_PAGE);
-    }
-  }
-
   /* -------------------------------------------------------------------- views */
 
-  if (checking) {
+  if (sessionStatus === 'checking') {
     return (
       <div className="admin-login">
         <div className="admin-login__card" aria-busy="true">
@@ -173,55 +195,47 @@ export function AdminApp() {
     );
   }
 
-  if (!session) return <AdminLogin onSuccess={setSession} />;
+  if (sessionStatus === 'unavailable') {
+    return (
+      <div className="admin-login">
+        <div className="admin-login__card">
+          <p className="eyebrow">JMK Global Holdings</p>
+          <h1 style={{ fontSize: 'var(--text-2xl)' }}>Admin unavailable</h1>
+          <div style={{ marginTop: '1.25rem' }}>
+            <FormAlert variant="error">{configError}</FormAlert>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /*
+   * 'signedOut' — a redirect to /admin/login/ is already in flight. Render nothing
+   * rather than flashing a table of empty rows on the way out.
+   */
+  if (sessionStatus !== 'signedIn') return null;
 
   const current = tab === 'enquiries' ? enquiries : applications;
   const isEmpty = !loading && current.items.length === 0;
 
   return (
-    <div className="admin-shell">
-      <header className="admin-bar">
-        <div className="container admin-bar__inner">
-          <div>
-            <p className="eyebrow" style={{ marginBottom: '0.25rem' }}>
-              JMK Global Holdings
-            </p>
-            <h1 style={{ color: '#fff', fontSize: 'var(--text-2xl)' }}>Enquiry management</h1>
-          </div>
-          <div className="admin-bar__user">
-            <span>{session}</span>
-            <button type="button" className="btn btn--ghost-light btn--sm" onClick={signOut}>
-              <Icon name="logout" size={16} />
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="container section section--tight" style={{ flex: 1 }}>
-        <div className="admin-toolbar">
-          <div className="admin-tabs" role="tablist" aria-label="Record type">
-            <button
-              type="button"
-              role="tab"
-              className="admin-tab"
-              aria-selected={tab === 'enquiries'}
-              onClick={() => setTab('enquiries')}
-            >
-              Enquiries
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className="admin-tab"
-              aria-selected={tab === 'applications'}
-              onClick={() => setTab('applications')}
-            >
-              Applications
-            </button>
-          </div>
-
-          <div className="admin-filters">
+    <AdminShell
+      area="records"
+      activeKey={tab}
+      onNavigate={(key) => {
+        if (isTab(key)) setTab(key);
+      }}
+      title={TAB_LABELS[tab]}
+      email={email}
+      onSignOut={() => void signOut()}
+    >
+      <div className="admin-toolbar">
+        {/*
+          The tab strip is gone: the sidebar now selects between Enquiries and
+          Applications, and keeping a second control for the same choice meant two
+          widgets that had to agree about which was active.
+        */}
+        <div className="admin-filters">
             <div className="field">
               <label className="field__label" htmlFor="admin-search">
                 Search
@@ -258,12 +272,12 @@ export function AdminApp() {
               </select>
             </div>
 
-            <button type="button" className="btn btn--outline" onClick={() => void load()}>
-              <Icon name="refresh" size={16} />
-              Refresh
-            </button>
-          </div>
+          <button type="button" className="btn btn--outline" onClick={() => void load()}>
+            <Icon name="refresh" size={16} />
+            Refresh
+          </button>
         </div>
+      </div>
 
         {error ? <FormAlert variant="error">{error}</FormAlert> : null}
 
@@ -320,7 +334,6 @@ export function AdminApp() {
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </AdminShell>
   );
 }

@@ -19,6 +19,7 @@
     "lint": "npm --prefix frontend run lint",
     "db:migrate": "npm --prefix backend run db:migrate",
     "db:seed": "npm --prefix backend run db:seed",
+    "db:seed:telecalling": "npm --prefix backend run db:seed:telecalling",
     "hash:password": "npm --prefix backend run hash:password"
   },
   "devDependencies": {

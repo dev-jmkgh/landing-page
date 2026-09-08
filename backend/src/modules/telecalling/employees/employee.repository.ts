@@ -10,6 +10,8 @@ import type { EmployeeListQuery } from './employee.schema';
 
 /** Data access for `telecaller_users`. No business rules — those live in the service. */
 
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+
 export interface EmployeeRow extends RowDataPacket {
   id: number;
   employee_code: string;
@@ -19,6 +21,10 @@ export interface EmployeeRow extends RowDataPacket {
   role: EmployeeRole;
   availability: AvailabilityState;
   is_active: number;
+  approval_status: ApprovalStatus;
+  registered_at: Date | null;
+  approved_at: Date | null;
+  rejection_reason: string | null;
   last_login_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -33,6 +39,17 @@ export type EmployeeRecord = {
   role: EmployeeRole;
   availability: AvailabilityState;
   isActive: boolean;
+  /**
+   * Why an inactive employee is inactive.
+   *
+   * A pending employee ALSO has isActive = false — see migration 010. That is what makes
+   * every existing `is_active = 1` query exclude them safely, and it means isActive alone
+   * cannot tell "never approved" from "approved then switched off".
+   */
+  approvalStatus: ApprovalStatus;
+  registeredAt: string | null;
+  approvedAt: string | null;
+  rejectionReason: string | null;
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -55,6 +72,10 @@ export function toEmployeeRecord(row: EmployeeRow): EmployeeRecord {
     role: row.role,
     availability: row.availability,
     isActive: row.is_active === 1,
+    approvalStatus: row.approval_status,
+    registeredAt: row.registered_at ? new Date(row.registered_at).toISOString() : null,
+    approvedAt: row.approved_at ? new Date(row.approved_at).toISOString() : null,
+    rejectionReason: row.rejection_reason,
     lastLoginAt: row.last_login_at ? new Date(row.last_login_at).toISOString() : null,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
@@ -63,6 +84,7 @@ export function toEmployeeRecord(row: EmployeeRow): EmployeeRecord {
 
 const EMPLOYEE_COLUMNS = `
   id, employee_code, name, email, phone, role, availability, is_active,
+  approval_status, registered_at, approved_at, rejection_reason,
   last_login_at, created_at, updated_at
 `;
 
@@ -95,6 +117,10 @@ export async function listEmployees(
   if (filters.active !== undefined) {
     conditions.push('is_active = ?');
     params.push(filters.active ? 1 : 0);
+  }
+  if (filters.approval) {
+    conditions.push('approval_status = ?');
+    params.push(filters.approval);
   }
   if (filters.q) {
     conditions.push('(name LIKE ? OR email LIKE ? OR employee_code LIKE ? OR phone LIKE ?)');
@@ -135,9 +161,116 @@ export async function listAssignableEmployees(): Promise<EmployeeRecord[]> {
     `SELECT ${EMPLOYEE_COLUMNS}
        FROM telecaller_users
       WHERE is_active = 1
+        AND approval_status = 'approved'
       ORDER BY name ASC`,
   );
   return rows.map(toEmployeeRecord);
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* Self-registration approvals                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Registrations awaiting a decision, oldest first.
+ *
+ * Oldest first on purpose: this is a queue of people who cannot work until someone acts,
+ * so the one who has waited longest is the most urgent. Newest-first ordering would bury
+ * a forgotten applicant.
+ */
+export async function listPendingRegistrations(): Promise<EmployeeRecord[]> {
+  const rows = await query<EmployeeRow>(
+    `SELECT ${EMPLOYEE_COLUMNS}
+       FROM telecaller_users
+      WHERE approval_status = 'pending'
+      ORDER BY registered_at ASC, id ASC`,
+  );
+  return rows.map(toEmployeeRecord);
+}
+
+export async function countPendingRegistrations(): Promise<number> {
+  const row = await queryOne<RowDataPacket & { total: number }>(
+    `SELECT COUNT(*) AS total FROM telecaller_users WHERE approval_status = 'pending'`,
+  );
+  return Number(row?.total ?? 0);
+}
+
+/**
+ * Approves a registration: activates the account and records who decided.
+ *
+ * Guarded on `approval_status = 'pending'`, which makes it idempotent and prevents it
+ * being used to silently re-activate a deactivated employee — that is a different
+ * action, with a different audit entry.
+ */
+export async function approveRegistration(
+  id: number,
+  approvedBy: number,
+): Promise<boolean> {
+  const result = await execute(
+    `UPDATE telecaller_users
+        SET approval_status = 'approved',
+            is_active = 1,
+            approved_by = ?,
+            approved_at = NOW(),
+            rejection_reason = NULL
+      WHERE id = ? AND approval_status = 'pending'`,
+    [approvedBy, id],
+  );
+  return result.affectedRows > 0;
+}
+
+/**
+ * Rejects a registration.
+ *
+ * The row is kept rather than deleted, for two reasons: the applicant is shown the reason
+ * on their next sign-in attempt rather than being left guessing, and the retained row
+ * stops the same address simply re-registering into a fresh pending state — which would
+ * make rejection meaningless. Reversing a rejection is an admin action, not a re-signup.
+ *
+ * `is_active = 0` is written even though a pending row already has it, and the caller
+ * additionally revokes any mobile sessions. Both are belt-and-braces: the guard below
+ * means only a pending row can be rejected and a pending row has never held a session,
+ * but if that guard is ever relaxed the revocation must already be in place rather than
+ * being remembered at the time.
+ */
+export async function rejectRegistration(
+  id: number,
+  rejectedBy: number,
+  reason: string | null,
+): Promise<boolean> {
+  const result = await execute(
+    `UPDATE telecaller_users
+        SET approval_status = 'rejected',
+            is_active = 0,
+            approved_by = ?,
+            approved_at = NOW(),
+            rejection_reason = ?
+      WHERE id = ? AND approval_status = 'pending'`,
+    [rejectedBy, reason, id],
+  );
+  return result.affectedRows > 0;
+}
+
+/**
+ * Reverses a rejection, putting the registration back in the queue.
+ *
+ * Needed because rejection is otherwise terminal and the row blocks the address from
+ * re-registering — so without this an admin who rejects the wrong person has no way back
+ * short of editing the database.
+ */
+export async function reopenRegistration(id: number): Promise<boolean> {
+  const result = await execute(
+    `UPDATE telecaller_users
+        SET approval_status = 'pending',
+            is_active = 0,
+            approved_by = NULL,
+            approved_at = NULL,
+            rejection_reason = NULL
+      WHERE id = ? AND approval_status = 'rejected'`,
+    [id],
+  );
+  return result.affectedRows > 0;
 }
 
 export type InsertEmployeeData = {
@@ -152,9 +285,18 @@ export type InsertEmployeeData = {
 
 export async function insertEmployee(data: InsertEmployeeData): Promise<number> {
   const result = await execute(
+    /*
+     * approval_status is stated EXPLICITLY rather than left to the column default.
+     *
+     * The default is 'pending' (fail-closed — see migration 010), so relying on it here
+     * would make every administrator-created employee unable to sign in. An account an
+     * admin created by hand, with a password they chose and handed over, is approved by
+     * definition; there is nobody left to approve it.
+     */
     `INSERT INTO telecaller_users
-       (employee_code, name, email, phone, password_hash, role, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (employee_code, name, email, phone, password_hash, role, created_by,
+        approval_status, approved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', NOW())`,
     [
       data.employeeCode,
       data.name,

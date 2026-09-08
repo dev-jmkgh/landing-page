@@ -14,6 +14,14 @@ function build(options: {
   max: number;
   message: string;
   name: string;
+  /**
+   * Overrides the default IP key.
+   *
+   * Needed because IP is the wrong identity for some endpoints: an office of telecallers
+   * behind one address would share a counter, so one person exhausting it would lock out
+   * their colleagues.
+   */
+  keyBy?: (request: Parameters<NonNullable<Options['keyGenerator']>>[0]) => string;
 }): ReturnType<typeof rateLimit> {
   const handler: Options['handler'] = (request, response) => {
     logger.warn('Rate limit exceeded', {
@@ -34,6 +42,7 @@ function build(options: {
     standardHeaders: true,
     legacyHeaders: false,
     handler,
+    ...(options.keyBy ? { keyGenerator: options.keyBy } : {}),
   });
 }
 
@@ -87,6 +96,32 @@ export const mobileLoginLimiter = build({
 });
 
 /**
+ * Self-registration.
+ *
+ * Much tighter than sign-in. This endpoint is unauthenticated, reachable by anyone who
+ * has the APK — which is being handed around on WhatsApp — and every call writes a row
+ * and burns a bcrypt hash at cost 12 (~250ms of CPU). Left ungoverned it is both a
+ * table-flooding vector and a cheap way to saturate the process.
+ *
+ * Five per window, not three. Three was the first choice and it is too tight: a
+ * rejected attempt counts, so someone who mistypes their email, then trips the
+ * twelve-character password rule twice, is locked out before submitting anything valid.
+ * The e2e suite hit exactly that. Five still bounds the abuse this is here to stop —
+ * every call writes a row and burns a ~250ms bcrypt hash — while tolerating a real
+ * person getting the form wrong.
+ *
+ * The counter is separate from the sign-in limiter so a failed registration cannot lock
+ * a colleague out of signing in from the same office IP.
+ */
+export const signupLimiter = build({
+  name: 'mobile-signup',
+  windowMs: config.rateLimit.windowMs,
+  max: 5,
+  message:
+    'Too many registration attempts from this network. Please wait a few minutes, or ask your administrator to create the account for you.',
+});
+
+/**
  * Refresh-token exchange. Generous: a phone coming back onto the network drains a queue
  * of pending mutations and may legitimately refresh more than once. Limited at all only
  * so a stolen refresh token cannot be used to hammer the endpoint.
@@ -96,6 +131,26 @@ export const refreshLimiter = build({
   windowMs: 5 * 60 * 1000,
   max: 60,
   message: 'Too many refresh attempts. Please wait a moment.',
+});
+
+/**
+ * Self-service password change.
+ *
+ * This endpoint verifies the caller's CURRENT password, so without a limit it is a
+ * password-guessing oracle for anyone holding an unlocked handset — and a success mints a
+ * fresh 60-day refresh row.
+ *
+ * Keyed on the authenticated employee rather than the IP: a whole floor of telecallers
+ * shares one office address, and an IP key would let one person's attempts lock out
+ * everyone else's legitimate password change.
+ */
+export const changePasswordLimiter = build({
+  name: 'mobile-change-password',
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyBy: (request) =>
+    request.actor ? `actor:${request.actor.id}` : `ip:${request.ip ?? 'unknown'}`,
+  message: 'Too many password change attempts. Please wait before trying again.',
 });
 
 /**

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CellStack, DataTable } from '@/components/admin/DataTable';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
@@ -255,28 +256,38 @@ export function ReportsPanel({ onUnauthorized }: { onUnauthorized: () => void })
           </div>
 
           {dimension === 'source' && data.breakdown.length > 0 ? (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Source</th>
-                    <th scope="col">Leads</th>
-                    <th scope="col">Converted</th>
-                    <th scope="col">Conversion rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.breakdown.map((row) => (
-                    <tr key={row.key}>
-                      <td>{humanise(row.key)}</td>
-                      <td>{row.total}</td>
-                      <td>{row.converted}</td>
-                      <td>{row.conversionRate}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+              <DataTable
+                rows={data.breakdown}
+                rowKey={(row) => row.key}
+                minWidth="34rem"
+                caption="Leads and conversions by source"
+                columns={[
+                  { key: 'source', header: 'Source', render: (row) => humanise(row.key) },
+                  {
+                    /* Counts are right-aligned throughout the reports. */
+                    key: 'total',
+                    header: 'Leads',
+                    align: 'end',
+                    width: '7rem',
+                    render: (row) => row.total,
+                  },
+                  {
+                    key: 'converted',
+                    header: 'Converted',
+                    align: 'end',
+                    width: '8rem',
+                    render: (row) => row.converted,
+                  },
+                  {
+                    key: 'rate',
+                    header: 'Conversion rate',
+                    align: 'end',
+                    width: '10rem',
+                    nowrap: true,
+                    render: (row) => `${row.conversionRate}%`,
+                  },
+                ]}
+              />
           ) : null}
 
           <h2 className="tc-section-title">Employee performance</h2>
@@ -284,77 +295,107 @@ export function ReportsPanel({ onUnauthorized }: { onUnauthorized: () => void })
           {data.performance.length === 0 ? (
             <p className="tc-muted">No employees have activity in this period.</p>
           ) : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Employee</th>
-                    <th scope="col">Calls</th>
-                    <th scope="col">Answered</th>
-                    <th scope="col">Talk time</th>
-                    <th scope="col">Avg call</th>
-                    <th scope="col">Follow-ups</th>
-                    <th scope="col">Leads</th>
-                    <th scope="col">Converted</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.performance.map((row) => (
-                    <tr key={row.userId}>
-                      <td>
-                        <strong>{row.name}</strong>
-                        <br />
+              <DataTable
+                rows={data.performance}
+                rowKey={(row) => row.userId}
+                minWidth="76rem"
+                caption="Per-employee call, follow-up and conversion figures for the period"
+                columns={[
+                  {
+                    key: 'employee',
+                    header: 'Employee',
+                    render: (row) => (
+                      <CellStack primary={row.name}>
                         <span className="tc-muted tc-mono">{row.employeeCode}</span>
                         {!row.isActive ? (
-                          <>
-                            <br />
-                            <span className="tc-badge tc-badge--bad">Deactivated</span>
-                          </>
+                          <span className="tc-badge tc-badge--bad">Deactivated</span>
                         ) : null}
-                      </td>
-                      <td>{row.calls}</td>
-                      <td>
-                        {row.answered}
-                        {row.calls > 0 ? (
-                          <>
-                            <br />
-                            <span className="tc-muted">
-                              {Math.round((row.answered / row.calls) * 100)}%
-                            </span>
-                          </>
-                        ) : null}
-                      </td>
-                      <td>{formatDuration(row.talkTimeSeconds)}</td>
-                      <td>{formatDuration(row.averageDurationSeconds)}</td>
-                      <td>
-                        {row.followUpsCompleted} done
-                        <br />
-                        <span
-                          className={row.followUpsPending > 0 ? 'tc-muted tc-cell-warn' : 'tc-muted'}
-                        >
-                          {row.followUpsPending} pending
-                        </span>
-                      </td>
-                      <td>
-                        {row.leadsAssigned} assigned
-                        <br />
-                        {/*
+                      </CellStack>
+                    ),
+                  },
+                  {
+                    key: 'calls',
+                    header: 'Calls',
+                    align: 'end',
+                    width: '6rem',
+                    render: (row) => row.calls,
+                  },
+                  {
+                    key: 'answered',
+                    header: 'Answered',
+                    align: 'end',
+                    width: '7.5rem',
+                    render: (row) => (
+                      <CellStack
+                        primary={row.answered}
+                        secondary={
+                          row.calls > 0
+                            ? `${Math.round((row.answered / row.calls) * 100)}%`
+                            : null
+                        }
+                      />
+                    ),
+                  },
+                  {
+                    key: 'talkTime',
+                    header: 'Talk time',
+                    align: 'end',
+                    width: '7.5rem',
+                    nowrap: true,
+                    render: (row) => formatDuration(row.talkTimeSeconds),
+                  },
+                  {
+                    key: 'avgCall',
+                    header: 'Avg call',
+                    align: 'end',
+                    width: '7.5rem',
+                    nowrap: true,
+                    render: (row) => formatDuration(row.averageDurationSeconds),
+                  },
+                  {
+                    key: 'followUps',
+                    header: 'Follow-ups',
+                    align: 'end',
+                    width: '8.5rem',
+                    render: (row) => (
+                      <CellStack
+                        primary={`${row.followUpsCompleted} done`}
+                        secondary={
+                          <span className={row.followUpsPending > 0 ? 'tc-cell-warn' : undefined}>
+                            {row.followUpsPending} pending
+                          </span>
+                        }
+                      />
+                    ),
+                  },
+                  {
+                    key: 'leads',
+                    header: 'Leads',
+                    align: 'end',
+                    width: '9rem',
+                    render: (row) => (
+                      <CellStack
+                        primary={`${row.leadsAssigned} assigned`}
+                        /*
                           "Reached" counts distinct customers actually spoken to, not calls
                           made. Labelled explicitly because the two are easy to confuse and
                           conflating them rewards ringing the same person repeatedly.
-                        */}
-                        <span className="tc-muted">{row.leadsContacted} reached</span>
-                      </td>
-                      <td>
-                        {row.leadsConverted}
-                        <br />
-                        <span className="tc-muted">{row.conversionRate}%</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        */
+                        secondary={`${row.leadsContacted} reached`}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'converted',
+                    header: 'Converted',
+                    align: 'end',
+                    width: '8rem',
+                    render: (row) => (
+                      <CellStack primary={row.leadsConverted} secondary={`${row.conversionRate}%`} />
+                    ),
+                  },
+                ]}
+              />
           )}
         </>
       ) : null}

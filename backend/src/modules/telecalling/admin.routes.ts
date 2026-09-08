@@ -35,14 +35,20 @@ import {
   overdueByEmployee,
 } from './dashboard/dashboard.repository';
 import {
+  approveRegistration,
   countOpenLeads,
+  countPendingRegistrations,
   findEmployee,
   listAssignableEmployees,
   listEmployees,
+  listPendingRegistrations,
+  reopenRegistration,
+  rejectRegistration,
 } from './employees/employee.repository';
 import {
   createEmployeeSchema,
   employeeListQuerySchema,
+  rejectRegistrationSchema,
   resetPasswordSchema,
   updateEmployeeSchema,
   type EmployeeListQuery,
@@ -158,7 +164,7 @@ telecallingAdminRouter.get(
   asyncHandler(async (_request, response) => {
     const range = response.locals.query as z.infer<typeof dateRangeSchema>;
 
-    const [dashboard, performance, overdue] = await Promise.all([
+    const [dashboard, performance, overdue, pendingRegistrations] = await Promise.all([
       adminDashboard(range),
       employeePerformance(range),
       // The alert threshold is a setting, so an operations team can decide how long an
@@ -166,9 +172,21 @@ telecallingAdminRouter.get(
       readNumberSetting('followup.overdue_alert_hours', 24).then((hours) =>
         overdueByEmployee(hours),
       ),
+      /*
+       * Surfaced on the dashboard because otherwise nothing tells an admin a registration
+       * is waiting — they would have to go and look at the employees screen on the off
+       * chance, and a telecaller who cannot sign in would just be stuck.
+       */
+      countPendingRegistrations(),
     ]);
 
-    response.json({ success: true, ...dashboard, employees: performance, overdueByEmployee: overdue });
+    response.json({
+      success: true,
+      ...dashboard,
+      employees: performance,
+      overdueByEmployee: overdue,
+      pendingRegistrations,
+    });
   }),
 );
 
@@ -298,6 +316,169 @@ telecallingAdminRouter.post(
     });
 
     response.json({ success: true, moved });
+  }),
+);
+
+
+/* -------------------------------------------------------------------------- */
+/* Self-registration approvals (Module 1 — user access management)             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The pending-registration queue.
+ *
+ * Supervisor-and-above may READ it, so a supervisor can see that someone is waiting and
+ * chase an admin. Only an admin may decide — see the write routes below.
+ */
+telecallingAdminRouter.get(
+  '/registrations',
+  requireRole('supervisor'),
+  asyncHandler(async (_request, response) => {
+    const items = await listPendingRegistrations();
+    response.json({ success: true, items, total: items.length });
+  }),
+);
+
+/**
+ * Just the count, for a badge.
+ *
+ * Separate from the list because the admin shell polls this to decide whether to show a
+ * "N waiting" indicator, and pulling every pending row to render a number is waste.
+ */
+telecallingAdminRouter.get(
+  '/registrations/count',
+  requireRole('supervisor'),
+  asyncHandler(async (_request, response) => {
+    response.json({ success: true, pending: await countPendingRegistrations() });
+  }),
+);
+
+/**
+ * Approves a registration. ADMIN ONLY.
+ *
+ * Matching `POST /employees`, because that is what this is: approving a self-registration
+ * creates a working employee account with access to every customer record its owner is
+ * assigned. It is not a lesser act than creating one by hand, so it does not get a lesser
+ * permission.
+ */
+telecallingAdminRouter.post(
+  '/registrations/:id/approve',
+  ...write('admin'),
+  asyncHandler(async (request, response) => {
+    const id = parseId(request.params.id);
+
+    const employee = await findEmployee(id);
+    if (!employee) throw notFound('Registration not found.');
+
+    if (employee.approvalStatus !== 'pending') {
+      throw badRequest(
+        employee.approvalStatus === 'approved'
+          ? 'That registration has already been approved.'
+          : 'That registration was rejected. Reopen it first if you want to approve it.',
+      );
+    }
+
+    const applied = await approveRegistration(id, request.actor!.id);
+    if (!applied) {
+      // Lost a race with another admin deciding the same registration.
+      throw badRequest('That registration was just decided by someone else. Refresh and check.');
+    }
+
+    await recordAudit({
+      actor: request.actor!,
+      action: 'registration_approved',
+      entityType: 'employee',
+      entityId: id,
+      summary: `Approved the registration of ${employee.name} (${employee.employeeCode})`,
+      meta: { email: employee.email, registeredAt: employee.registeredAt },
+      ipAddress: clientIp(request),
+    });
+
+    logger.info('Registration approved', {
+      id,
+      employeeCode: employee.employeeCode,
+      by: request.actor!.email,
+    });
+
+    response.json({ success: true, employee: await findEmployee(id) });
+  }),
+);
+
+/**
+ * Rejects a registration. ADMIN ONLY.
+ *
+ * The row is kept, not deleted — the applicant is shown the reason on their next sign-in
+ * attempt rather than being left to guess, and the retained row stops the same address
+ * re-registering straight back into the queue.
+ */
+telecallingAdminRouter.post(
+  '/registrations/:id/reject',
+  ...write('admin'),
+  validateBody(rejectRegistrationSchema),
+  asyncHandler(async (request, response) => {
+    const id = parseId(request.params.id);
+    const { reason } = request.body as z.infer<typeof rejectRegistrationSchema>;
+
+    const employee = await findEmployee(id);
+    if (!employee) throw notFound('Registration not found.');
+
+    if (employee.approvalStatus !== 'pending') {
+      throw badRequest('That registration has already been decided.');
+    }
+
+    const applied = await rejectRegistration(id, request.actor!.id, reason);
+    if (!applied) {
+      throw badRequest('That registration was just decided by someone else. Refresh and check.');
+    }
+
+    await recordAudit({
+      actor: request.actor!,
+      action: 'registration_rejected',
+      entityType: 'employee',
+      entityId: id,
+      summary: `Rejected the registration of ${employee.name} (${employee.employeeCode})`,
+      meta: { email: employee.email, reason },
+      ipAddress: clientIp(request),
+    });
+
+    logger.info('Registration rejected', { id, by: request.actor!.email });
+
+    response.json({ success: true, employee: await findEmployee(id) });
+  }),
+);
+
+/**
+ * Puts a rejected registration back in the queue. ADMIN ONLY.
+ *
+ * Exists because rejection is otherwise a dead end: the retained row blocks the address
+ * from re-registering, so an admin who rejects the wrong person would have no route back
+ * without editing the database.
+ */
+telecallingAdminRouter.post(
+  '/registrations/:id/reopen',
+  ...write('admin'),
+  asyncHandler(async (request, response) => {
+    const id = parseId(request.params.id);
+
+    const employee = await findEmployee(id);
+    if (!employee) throw notFound('Registration not found.');
+    if (employee.approvalStatus !== 'rejected') {
+      throw badRequest('Only a rejected registration can be reopened.');
+    }
+
+    const applied = await reopenRegistration(id);
+    if (!applied) throw badRequest('That registration could not be reopened. Refresh and check.');
+
+    await recordAudit({
+      actor: request.actor!,
+      action: 'registration_reopened',
+      entityType: 'employee',
+      entityId: id,
+      summary: `Reopened the registration of ${employee.name} (${employee.employeeCode})`,
+      ipAddress: clientIp(request),
+    });
+
+    response.json({ success: true, employee: await findEmployee(id) });
   }),
 );
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CellStack, DataTable } from '@/components/admin/DataTable';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
@@ -291,32 +292,37 @@ export function SettingsPanel({ onUnauthorized }: { onUnauthorized: () => void }
         !settings || settings.length === 0 ? (
           <EmptyPanel title="No settings" message="Run the database migrations to seed them." />
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Setting</th>
-                  <th scope="col">Value</th>
-                  <th scope="col">Last changed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {settings.map((setting) => (
-                  <tr key={setting.key}>
-                    <td>
-                      <strong className="tc-mono">{setting.key}</strong>
-                      <br />
-                      <span className="tc-muted">
-                        {SETTING_HELP[setting.key] ?? setting.description ?? ''}
-                      </span>
-                    </td>
-                    <td>{renderControl(setting)}</td>
-                    <td>{formatDateTime(setting.updatedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            <DataTable
+              rows={settings}
+              rowKey={(setting) => setting.key}
+              minWidth="46rem"
+              caption="System settings and when each was last changed"
+              columns={[
+                {
+                  key: 'setting',
+                  header: 'Setting',
+                  render: (setting) => (
+                    <CellStack
+                      primary={<span className="tc-mono">{setting.key}</span>}
+                      secondary={SETTING_HELP[setting.key] ?? setting.description ?? ''}
+                    />
+                  ),
+                },
+                {
+                  key: 'value',
+                  header: 'Value',
+                  width: '16rem',
+                  render: (setting) => renderControl(setting),
+                },
+                {
+                  key: 'updated',
+                  header: 'Last changed',
+                  width: '11rem',
+                  nowrap: true,
+                  render: (setting) => formatDateTime(setting.updatedAt),
+                },
+              ]}
+            />
         )
       ) : tab === 'sources' ? (
         <>
@@ -380,63 +386,66 @@ export function SettingsPanel({ onUnauthorized }: { onUnauthorized: () => void }
           {!sources || sources.length === 0 ? (
             <EmptyPanel title="No lead sources" message="Run the migrations to seed the defaults." />
           ) : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Key</th>
-                    <th scope="col">Label</th>
-                    <th scope="col">Shown in the app</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sources.map((source) => (
-                    <tr key={source.slug}>
-                      <td className="tc-mono">{source.slug}</td>
-                      <td>
-                        <input
-                          className="input input--sm"
-                          defaultValue={source.label}
-                          disabled={busyKey === source.slug}
-                          aria-label={`Label for ${source.slug}`}
-                          onBlur={(event) => {
-                            if (event.target.value.trim() !== source.label) {
-                              void saveSource(source, { label: event.target.value.trim() });
-                            }
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className={
-                            source.isActive ? 'btn btn--primary btn--sm' : 'btn btn--outline btn--sm'
+              <DataTable
+                rows={sources}
+                rowKey={(source) => source.slug}
+                minWidth="44rem"
+                caption="Lead sources and whether each is offered in the mobile app"
+                columns={[
+                  {
+                    key: 'slug',
+                    header: 'Key',
+                    width: '11rem',
+                    render: (source) => <span className="tc-mono">{source.slug}</span>,
+                  },
+                  {
+                    key: 'label',
+                    header: 'Label',
+                    render: (source) => (
+                      <input
+                        className="input input--sm"
+                        defaultValue={source.label}
+                        disabled={busyKey === source.slug}
+                        aria-label={`Label for ${source.slug}`}
+                        onBlur={(event) => {
+                          if (event.target.value.trim() !== source.label) {
+                            void saveSource(source, { label: event.target.value.trim() });
                           }
-                          disabled={busyKey === source.slug}
-                          aria-pressed={source.isActive}
-                          onClick={() => void saveSource(source, { isActive: !source.isActive })}
-                        >
-                          {source.isActive ? 'Active' : 'Hidden'}
-                        </button>
-                        {!source.isActive ? (
-                          <>
-                            <br />
-                            <span className="tc-muted">
-                              {/*
-                                Retiring a source never rewrites existing leads — their
-                                history stays accurate. It only stops appearing as an
-                                option for new ones.
-                              */}
-                              Existing leads keep this source
-                            </span>
-                          </>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        }}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'active',
+                    header: 'Shown in the app',
+                    width: '14rem',
+                    render: (source) => (
+                      <CellStack
+                        primary={
+                          <button
+                            type="button"
+                            className={
+                              source.isActive
+                                ? 'btn btn--primary btn--sm'
+                                : 'btn btn--outline btn--sm'
+                            }
+                            disabled={busyKey === source.slug}
+                            aria-pressed={source.isActive}
+                            onClick={() => void saveSource(source, { isActive: !source.isActive })}
+                          >
+                            {source.isActive ? 'Active' : 'Hidden'}
+                          </button>
+                        }
+                        /*
+                          Retiring a source never rewrites existing leads — their history
+                          stays accurate. It only stops appearing as an option for new ones.
+                        */
+                        secondary={source.isActive ? null : 'Existing leads keep this source'}
+                      />
+                    ),
+                  },
+                ]}
+              />
           )}
         </>
       ) : !audit || audit.items.length === 0 ? (
@@ -446,38 +455,47 @@ export function SettingsPanel({ onUnauthorized }: { onUnauthorized: () => void }
         />
       ) : (
         <>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">When</th>
-                  <th scope="col">Who</th>
-                  <th scope="col">What</th>
-                </tr>
-              </thead>
-              <tbody>
-                {audit.items.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>{formatDateTime(entry.createdAt)}</td>
-                    <td>
-                      {/*
+            <DataTable
+              rows={audit.items}
+              rowKey={(entry) => entry.id}
+              minWidth="48rem"
+              caption="Audit trail of administrative actions"
+              columns={[
+                {
+                  key: 'when',
+                  header: 'When',
+                  width: '11rem',
+                  nowrap: true,
+                  render: (entry) => formatDateTime(entry.createdAt),
+                },
+                {
+                  key: 'who',
+                  header: 'Who',
+                  width: '14rem',
+                  render: (entry) => (
+                    <CellStack
+                      /*
                         The actor's name and email are stored on the row, so this still
                         reads correctly after the account has been deleted.
-                      */}
-                      {entry.actorLabel ?? <span className="tc-muted">System</span>}
-                      <br />
+                      */
+                      primary={entry.actorLabel ?? <span className="tc-muted">System</span>}
+                    >
                       <Tag>{entry.actorType}</Tag>
-                    </td>
-                    <td>
-                      {entry.summary}
-                      <br />
-                      <span className="tc-muted tc-mono">{entry.action}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </CellStack>
+                  ),
+                },
+                {
+                  key: 'what',
+                  header: 'What',
+                  render: (entry) => (
+                    <CellStack
+                      primary={entry.summary}
+                      secondary={<span className="tc-mono">{entry.action}</span>}
+                    />
+                  ),
+                },
+              ]}
+            />
 
           <Pager
             page={audit.page}

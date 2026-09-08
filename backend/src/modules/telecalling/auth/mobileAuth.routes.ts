@@ -2,9 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireActor } from '../../../middleware/actor';
 import { asyncHandler } from '../../../middleware/errorHandler';
-import { mobileLoginLimiter, refreshLimiter } from '../../../middleware/rateLimit';
+import {
+  changePasswordLimiter,
+  mobileLoginLimiter,
+  refreshLimiter,
+  signupLimiter,
+} from '../../../middleware/rateLimit';
 import { validateBody } from '../../../middleware/validate';
-import { unauthorized } from '../../../utils/httpError';
+import { HttpError, unauthorized, validationFailed } from '../../../utils/httpError';
 import { logger } from '../../../utils/logger';
 import { clientIp } from '../../../utils/request';
 import { findEmployee } from '../employees/employee.repository';
@@ -14,9 +19,11 @@ import {
   authenticateEmployee,
   createMobileSession,
   pruneMobileSessions,
+  registerEmployee,
   revokeMobileSession,
   rotateMobileSession,
   setPushToken,
+  type SignInRefusal,
 } from './mobileAuth.service';
 
 /**
@@ -47,14 +54,17 @@ mobileAuthRouter.post(
   asyncHandler(async (request, response) => {
     const { email, password, device } = request.body as z.infer<typeof loginSchema>;
 
-    const actor = await authenticateEmployee(email, password);
+    const result = await authenticateEmployee(email, password);
 
-    if (!actor) {
-      logger.warn('Failed mobile sign-in', { ip: clientIp(request) });
-      // One message for a wrong password, an unknown address and a deactivated account.
-      // Distinguishing them would let an outsider enumerate the staff list.
-      throw unauthorized('Incorrect email or password.');
+    if (!result.ok) {
+      logger.warn('Failed mobile sign-in', {
+        ip: clientIp(request),
+        reason: result.refusal.reason,
+      });
+      throw refusalToError(result.refusal);
     }
+
+    const actor = result.actor;
 
     const session = await createMobileSession(actor, {
       name: device?.name ?? null,
@@ -78,6 +88,137 @@ mobileAuthRouter.post(
       success: true,
       ...session,
       employee: profile,
+    });
+  }),
+);
+
+
+/**
+ * Turns a refusal into the response the app should act on.
+ *
+ * The `code` matters as much as the message: the mobile client branches on it to decide
+ * between re-showing the password field and showing the "waiting for approval" screen,
+ * and it must not have to string-match prose to do that.
+ *
+ * 401 for bad credentials, 403 for the account-state cases. The distinction is real —
+ * a 403 here means the password WAS correct and the account is simply not permitted to
+ * sign in yet, which is why the client can safely treat it as "stop asking for the
+ * password".
+ */
+function refusalToError(refusal: SignInRefusal): HttpError {
+  switch (refusal.reason) {
+    case 'credentials':
+      /*
+       * One message for a wrong password, an unknown address, a pending account with the
+       * wrong password, and a deactivated one with the wrong password. Distinguishing
+       * them would turn this endpoint into an account-existence oracle — see
+       * authenticateEmployee for why that matters now that anyone with the APK can reach
+       * the signup endpoint.
+       */
+      return unauthorized('Incorrect email or password.');
+
+    case 'pending':
+      return new HttpError(
+        403,
+        'Your account is waiting for approval. An administrator will approve it shortly — please try again later.',
+        { code: 'approval_pending' },
+      );
+
+    case 'rejected':
+      return new HttpError(
+        403,
+        refusal.rejectionReason
+          ? `Your registration was not approved: ${refusal.rejectionReason}`
+          : 'Your registration was not approved. Please speak to your administrator.',
+        { code: 'registration_rejected' },
+      );
+
+    case 'deactivated':
+      return new HttpError(
+        403,
+        'Your account has been deactivated. Please speak to your administrator.',
+        { code: 'account_deactivated' },
+      );
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Self-registration                                                           */
+/* -------------------------------------------------------------------------- */
+
+const signupSchema = z.object({
+  name: z
+    .string({ required_error: 'Enter your full name.' })
+    .transform((value) => value.replace(/\s+/g, ' ').trim())
+    .pipe(
+      z
+        .string()
+        .min(2, 'Enter your full name.')
+        .max(120, 'Name must be 120 characters or fewer.'),
+    ),
+  email: z
+    .string({ required_error: 'Enter your email address.' })
+    .trim()
+    .toLowerCase()
+    .email('Enter a valid email address.')
+    .max(190),
+  phone: z
+    .string()
+    .trim()
+    .max(20)
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+  /*
+   * Twelve, matching admin-created accounts. Not relaxed for self-registration: these
+   * accounts reach the same customer data, and a self-chosen password is if anything
+   * more likely to be weak than one an administrator generated.
+   */
+  password: z
+    .string({ required_error: 'Choose a password.' })
+    .min(12, 'Use at least 12 characters.')
+    .max(200),
+});
+
+/**
+ * POST /api/mobile/auth/signup
+ *
+ * Creates a telecaller account that CANNOT sign in until an administrator approves it.
+ *
+ * Note what the schema does not accept: no `role`, no `isActive`, no `approvalStatus`,
+ * no `employeeCode`. Zod strips unknown keys by default, so sending them is not merely
+ * ignored downstream — they never reach the service. That is the whole security boundary
+ * of this endpoint, since anyone holding the APK can call it.
+ *
+ * No tokens are returned on success. There is deliberately nothing here that resembles
+ * a session.
+ */
+mobileAuthRouter.post(
+  '/signup',
+  signupLimiter,
+  validateBody(signupSchema),
+  asyncHandler(async (request, response) => {
+    const input = request.body as z.infer<typeof signupSchema>;
+
+    const result = await registerEmployee(input);
+
+    if (!result.ok) {
+      throw validationFailed({
+        email:
+          'An account with that email address already exists. Try signing in, or ask your administrator.',
+      });
+    }
+
+    logger.info('Registration submitted', {
+      employeeCode: result.employeeCode,
+      ip: clientIp(request),
+    });
+
+    response.status(201).json({
+      success: true,
+      employeeCode: result.employeeCode,
+      approvalStatus: 'pending',
+      message:
+        'Your registration has been submitted. An administrator will approve your account before you can sign in.',
     });
   }),
 );
@@ -139,13 +280,46 @@ mobileAuthRouter.post(
   }),
 );
 
-/** Who am I. Used on launch to decide between the login screen and the dashboard. */
+/**
+ * Who am I. Called on launch to decide between the login screen and the dashboard.
+ *
+ * This is the app's revocation checkpoint, so it re-reads authorisation state rather
+ * than trusting the access token. A token stays valid for its full lifetime, so an
+ * employee deactivated or rejected overnight would otherwise open the app to a working
+ * dashboard — and `findEmployee` returns a profile regardless of state, so simply
+ * finding a row proves nothing.
+ *
+ * The refusal carries a `code` so the client can clear its tokens and show the right
+ * screen instead of guessing from prose.
+ */
 mobileAuthRouter.get(
   '/me',
   requireActor,
   asyncHandler(async (request, response) => {
     const profile = await findEmployee(request.actor!.id);
-    if (!profile) throw unauthorized('Your account is no longer active.');
+    if (!profile) throw unauthorized('Your account no longer exists.');
+
+    if (profile.approvalStatus === 'pending') {
+      throw new HttpError(403, 'Your account is still waiting for approval.', {
+        code: 'approval_pending',
+      });
+    }
+
+    if (profile.approvalStatus === 'rejected') {
+      throw new HttpError(
+        403,
+        profile.rejectionReason
+          ? `Your registration was not approved: ${profile.rejectionReason}`
+          : 'Your registration was not approved.',
+        { code: 'registration_rejected' },
+      );
+    }
+
+    if (!profile.isActive) {
+      throw new HttpError(403, 'Your account has been deactivated.', {
+        code: 'account_deactivated',
+      });
+    }
 
     response.json({ success: true, employee: profile });
   }),
@@ -158,6 +332,12 @@ const changePasswordSchema = z.object({
 
 mobileAuthRouter.post(
   '/change-password',
+  /*
+   * Rate limited because this endpoint verifies the CURRENT password, which makes it a
+   * password-guessing oracle for anyone holding an unlocked handset — and it mints a
+   * fresh 60-day session on success.
+   */
+  changePasswordLimiter,
   requireActor,
   validateBody(changePasswordSchema),
   asyncHandler(async (request, response) => {

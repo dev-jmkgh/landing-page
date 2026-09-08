@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
@@ -294,74 +295,95 @@ export function CallsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
             message="Widen the date range, or check that telecallers are logging calls from the mobile app."
           />
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">When</th>
-                  <th scope="col">Employee</th>
-                  <th scope="col">Customer</th>
-                  <th scope="col">Outcome</th>
-                  <th scope="col">Duration</th>
-                  <th scope="col">How logged</th>
-                </tr>
-              </thead>
-              <tbody>
-                {calls.items.map((call) => (
-                  <tr key={call.id}>
-                    <td>{formatDateTime(call.startedAt)}</td>
-                    <td>{call.userName ?? '—'}</td>
-                    <td>
-                      <strong>{call.leadName ?? 'Unknown number'}</strong>
-                      <br />
-                      <span className="tc-muted">{call.phone}</span>
-                      {call.leadReference ? (
-                        <>
-                          <br />
-                          <span className="tc-muted tc-mono">{call.leadReference}</span>
-                        </>
-                      ) : null}
-                    </td>
-                    <td>
+          <DataTable
+            rows={calls.items}
+            rowKey={(call) => call.id}
+            minWidth="66rem"
+            caption="Calls, with employee, customer, outcome and how the record was captured"
+            columns={[
+              {
+                key: 'when',
+                header: 'When',
+                width: '11rem',
+                nowrap: true,
+                render: (call) => formatDateTime(call.startedAt),
+              },
+              {
+                key: 'employee',
+                header: 'Employee',
+                width: '10rem',
+                render: (call) => call.userName ?? '—',
+              },
+              {
+                key: 'customer',
+                header: 'Customer',
+                render: (call) => (
+                  <CellStack
+                    primary={call.leadName ?? 'Unknown number'}
+                    secondary={call.phone}
+                  >
+                    {call.leadReference ? (
+                      <span className="tc-muted tc-mono">{call.leadReference}</span>
+                    ) : null}
+                  </CellStack>
+                ),
+              },
+              {
+                key: 'outcome',
+                header: 'Outcome',
+                width: '11rem',
+                render: (call) => (
+                  <CellStack
+                    primary={
                       <Tag tone={call.outcome === 'answered' ? 'good' : 'neutral'}>
                         {CALL_OUTCOME_LABELS[call.outcome]}
                       </Tag>
-                      <br />
-                      <span className="tc-muted">{humanise(call.direction)}</span>
-                      {!call.followedUp && call.outcome !== 'answered' ? (
-                        <>
-                          <br />
-                          <Tag tone="bad">Callback pending</Tag>
-                        </>
-                      ) : null}
-                    </td>
-                    <td>{formatDuration(call.durationSeconds)}</td>
-                    <td>
-                      {/*
+                    }
+                    secondary={humanise(call.direction)}
+                  >
+                    {!call.followedUp && call.outcome !== 'answered' ? (
+                      <Tag tone="bad">Callback pending</Tag>
+                    ) : null}
+                  </CellStack>
+                ),
+              },
+              {
+                key: 'duration',
+                header: 'Duration',
+                /* Right-aligned so a column of durations lines up digit for digit. */
+                align: 'end',
+                width: '7rem',
+                nowrap: true,
+                render: (call) => formatDuration(call.durationSeconds),
+              },
+              {
+                key: 'source',
+                header: 'How logged',
+                width: '9rem',
+                render: (call) => (
+                  <CellStack
+                    primary={
+                      /*
                         Surfaced deliberately. A duration read from the Android call log is
                         measured; one typed into the post-call sheet on an iPhone is
                         remembered. A manager comparing two telecallers on different
                         platforms needs to know which is which.
-                      */}
-                      {call.source === 'call_log' ? (
+                      */
+                      call.source === 'call_log' ? (
                         <Tag tone="good">Measured</Tag>
                       ) : call.source === 'provider' ? (
                         <Tag tone="good">Provider</Tag>
                       ) : (
                         <Tag>Self-reported</Tag>
-                      )}
-                      {call.hasRecording ? (
-                        <>
-                          <br />
-                          <Tag tone="progress">Recorded</Tag>
-                        </>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      )
+                    }
+                  >
+                    {call.hasRecording ? <Tag tone="progress">Recorded</Tag> : null}
+                  </CellStack>
+                ),
+              },
+            ]}
+          />
         )
       ) : !recordings || recordings.items.length === 0 ? (
         <EmptyPanel
@@ -369,63 +391,80 @@ export function CallsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
           message="Call recording is not available through the device dialler — Android 10+ and every version of iOS block it. Recordings appear here once calls are routed through a telephony provider."
         />
       ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Call</th>
-                <th scope="col">Employee</th>
-                <th scope="col">Customer</th>
-                <th scope="col">Length</th>
-                <th scope="col">Listen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recordings.items.map((recording) => (
-                <tr key={recording.id}>
-                  <td>{formatDateTime(recording.callStartedAt ?? recording.createdAt)}</td>
-                  <td>{recording.userName ?? '—'}</td>
-                  <td>
-                    <strong>{recording.leadName ?? '—'}</strong>
-                    {recording.leadReference ? (
-                      <>
-                        <br />
-                        <span className="tc-muted tc-mono">{recording.leadReference}</span>
-                      </>
-                    ) : null}
-                  </td>
-                  <td>{formatDuration(recording.durationSeconds)}</td>
-                  <td>
-                    {playingId === recording.id ? (
-                      /*
-                       * The audio element is mounted only after the manager asks for it.
-                       * Rendering twenty-five of them would fire twenty-five authenticated
-                       * requests for customer call audio — and write twenty-five
-                       * access-audit entries — for a page that was merely scrolled past.
-                       */
-                      <audio
-                        controls
-                        autoPlay
-                        preload="none"
-                        src={telecallingApi.recordingAudioUrl(recording.id)}
-                        style={{ maxWidth: '15rem' }}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn--outline btn--sm"
-                        onClick={() => setPlayingId(recording.id)}
-                      >
-                        <Icon name="phone" size={15} />
-                        Play
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={recordings.items}
+          rowKey={(recording) => recording.id}
+          minWidth="58rem"
+          caption="Call recordings available to play"
+          columns={[
+            {
+              key: 'call',
+              header: 'Call',
+              width: '11rem',
+              nowrap: true,
+              render: (recording) =>
+                formatDateTime(recording.callStartedAt ?? recording.createdAt),
+            },
+            {
+              key: 'employee',
+              header: 'Employee',
+              width: '11rem',
+              render: (recording) => recording.userName ?? '—',
+            },
+            {
+              key: 'customer',
+              header: 'Customer',
+              render: (recording) => (
+                <CellStack primary={recording.leadName ?? '—'}>
+                  {recording.leadReference ? (
+                    <span className="tc-muted tc-mono">{recording.leadReference}</span>
+                  ) : null}
+                </CellStack>
+              ),
+            },
+            {
+              key: 'length',
+              header: 'Length',
+              align: 'end',
+              width: '7rem',
+              nowrap: true,
+              render: (recording) => formatDuration(recording.durationSeconds),
+            },
+            {
+              key: 'listen',
+              header: 'Listen',
+              align: 'end',
+              width: '17rem',
+              render: (recording) =>
+                playingId === recording.id ? (
+                  /*
+                   * The audio element is mounted only after the manager asks for it.
+                   * Rendering twenty-five of them would fire twenty-five authenticated
+                   * requests for customer call audio — and write twenty-five access-audit
+                   * entries — for a page that was merely scrolled past.
+                   */
+                  <audio
+                    controls
+                    autoPlay
+                    preload="none"
+                    src={telecallingApi.recordingAudioUrl(recording.id)}
+                    style={{ maxWidth: '15rem' }}
+                  />
+                ) : (
+                  <CellActions>
+                    <button
+                      type="button"
+                      className="btn btn--outline btn--sm"
+                      onClick={() => setPlayingId(recording.id)}
+                    >
+                      <Icon name="phone" size={15} />
+                      Play
+                    </button>
+                  </CellActions>
+                ),
+            },
+          ]}
+        />
       )}
 
       {current ? (

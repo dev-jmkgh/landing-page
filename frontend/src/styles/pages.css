@@ -1695,6 +1695,256 @@
   color: var(--color-on-dark-muted);
 }
 
+/* -------------------------------------------------------------------------- */
+/* Admin layout: fixed sidebar beside a scrolling main column                  */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Added when the two admin applications were given a shared sidebar. Before this each
+ * one was a full-width column with its own dark title bar and its own tab strip, and
+ * neither linked to the other — so the telecalling module was unreachable unless you
+ * already knew its URL.
+ */
+
+.admin-layout {
+  min-height: 100vh;
+  background-color: var(--surface-muted);
+  display: grid;
+  /*
+   * The sidebar column is fixed rather than fractional. Nine section names of varying
+   * length in an `auto` column would make the content area jump width as you moved
+   * between areas.
+   */
+  grid-template-columns: 16.5rem 1fr;
+}
+
+.admin-layout__side {
+  background-color: var(--navy-900);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-5) var(--space-4);
+  /*
+   * Sticky, full height, and independently scrollable. With nine sections plus the
+   * signed-in footer this can exceed a short laptop viewport, and a sidebar that
+   * scrolls the page instead of itself loses the sign-out button off the bottom.
+   */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.admin-side__brand {
+  padding-inline: var(--space-2);
+}
+
+.admin-side__product {
+  margin: 0.15rem 0 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  flex: 1;
+}
+
+.admin-nav__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-nav__title {
+  margin: 0 0 0.25rem;
+  padding-inline: var(--space-2);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.admin-nav__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+/*
+ * One rule for both elements. Half these rows are buttons (same-page section switch)
+ * and half are links (a real navigation to the other admin route), and the distinction
+ * is meaningful to the browser but should be invisible to the eye.
+ */
+.admin-nav__link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.6rem var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  font: inherit;
+  font-size: 0.94rem;
+  text-align: left;
+  text-decoration: none;
+  color: rgba(255, 255, 255, 0.76);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.admin-nav__link:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.admin-nav__link:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.admin-nav__link[aria-current='page'] {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 600;
+}
+
+.admin-side__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: var(--space-3) var(--space-2) 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.admin-side__user {
+  font-size: var(--text-sm);
+  color: rgba(255, 255, 255, 0.7);
+  /* An email can be long, and it must not push the sidebar wider than its column. */
+  overflow-wrap: anywhere;
+}
+
+.admin-layout__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.admin-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--gutter);
+  background-color: #fff;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.admin-topbar__title {
+  margin: 0;
+  font-size: var(--text-xl);
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Shown only where the sidebar collapses into a drawer. */
+.admin-topbar__menu {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: #fff;
+  color: var(--ink-700);
+  cursor: pointer;
+}
+
+.admin-layout__content {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-6) var(--gutter) var(--space-8);
+}
+
+.admin-layout__scrim {
+  display: none;
+}
+
+.admin-login__notice {
+  /*
+   * The login card is centred in a full-height dark field, so a notice above it needs
+   * the same centring and a width that matches the card rather than the viewport.
+   */
+  max-width: 26rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--gutter) 0;
+  background-color: var(--navy-900);
+}
+
+@media (max-width: 60rem) {
+  .admin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  /*
+   * Off-canvas rather than hidden. `display: none` would drop the navigation out of the
+   * accessibility tree, and the drawer needs to be there to slide in.
+   */
+  .admin-layout__side {
+    position: fixed;
+    z-index: 60;
+    width: min(17rem, 82vw);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .admin-layout__side[data-open='true'] {
+    transform: translateX(0);
+  }
+
+  .admin-topbar__menu {
+    display: inline-flex;
+  }
+
+  .admin-layout__scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    width: 100%;
+    border: 0;
+    padding: 0;
+    background-color: rgba(5, 15, 28, 0.55);
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-layout__side {
+    transition: none;
+  }
+}
+
 .admin-login {
   display: grid;
   place-items: center;
@@ -1748,6 +1998,34 @@
   background-color: #fff;
   color: var(--navy-900);
   box-shadow: var(--shadow-xs);
+}
+
+/*
+ * A count on a tab, for work that is waiting.
+ *
+ * Used by the pending-registrations tab, where someone cannot do their job until an
+ * administrator acts. It is `inline-flex` with a `min-width` rather than a fixed size so
+ * a two- or three-digit count grows into a pill instead of overflowing a circle.
+ *
+ * Danger red, not the brand colour: this is a queue of people locked out of the app, and
+ * it should read as something to clear rather than as decoration. It is only rendered
+ * when the count is above zero, so it never sits on the tab as permanent furniture.
+ */
+.admin-tab .tc-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-left: 0.4rem;
+  padding-inline: 0.35rem;
+  border-radius: var(--radius-pill, 999px);
+  background-color: var(--danger-600);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .admin-detail {
