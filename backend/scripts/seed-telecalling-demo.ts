@@ -26,6 +26,7 @@
  * while demoing the telecalling module would be an unpleasant surprise.
  */
 import bcrypt from 'bcryptjs';
+import { readFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
@@ -40,6 +41,45 @@ if (process.env.NODE_ENV === 'production') {
   console.error('Refusing to run: NODE_ENV is production.');
   console.error('This script deletes every row in the telecalling tables.');
   process.exit(1);
+}
+
+/**
+ * Refuse to wipe whichever database `.env.production` names.
+ *
+ * The NODE_ENV check above is not enough on its own. It is set by the systemd unit for
+ * the service, not by a shell — so an operator who sshes in and runs this by hand, or
+ * who reaches for it while looking for a way to create an admin employee row, has no
+ * NODE_ENV at all and sails straight past it. The command then empties `leads`, `calls`
+ * and `follow_ups` on the live system.
+ *
+ * The production database name is read from `.env.production` rather than hard-coded, so
+ * this keeps protecting the right database if it is ever renamed.
+ *
+ * To grant an admin access to the telecalling screens — the reason someone is most
+ * likely to be looking at this file — use `npm run admin:link` instead. It inserts one
+ * row and deletes nothing.
+ */
+const targetDb = process.env.DB_NAME ?? 'jmk';
+
+try {
+  const productionEnv = readFileSync('.env.production', 'utf8');
+  const productionDb = /^DB_NAME=(.*)$/m.exec(productionEnv)?.[1]?.trim();
+
+  if (productionDb && productionDb === targetDb && process.env.CONFIRM_WIPE !== targetDb) {
+    console.error(`Refusing to run: "${targetDb}" is the database named in .env.production.`);
+    console.error('');
+    console.error('This script DELETES every row in the telecalling tables — leads, calls,');
+    console.error('follow-ups, notes and employees.');
+    console.error('');
+    console.error('If you only need to give an admin access to the telecalling screens:');
+    console.error('    npm run admin:link -- their@email.com');
+    console.error('');
+    console.error(`If you genuinely mean to wipe it:  CONFIRM_WIPE=${targetDb} npm run db:seed:telecalling`);
+    process.exit(1);
+  }
+} catch {
+  // No .env.production on this machine, so there is no production name to protect
+  // against. The NODE_ENV check above still applies.
 }
 
 /**

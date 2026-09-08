@@ -15,6 +15,7 @@
     "db:seed:telecalling": "tsx scripts/seed-telecalling-demo.ts",
     "db:migrate:prod": "node dist/db/migrate.js",
     "config:check": "node scripts/check-production-config.mjs",
+    "admin:link": "node scripts/link-admin-employee.mjs",
     "hash:password": "node scripts/hash-password.mjs",
     "test:telecalling": "tsx scripts/e2e-telecalling.ts"
   },
