@@ -17,7 +17,8 @@
     "config:check": "node scripts/check-production-config.mjs",
     "admin:link": "node scripts/link-admin-employee.mjs",
     "hash:password": "node scripts/hash-password.mjs",
-    "test:telecalling": "tsx scripts/e2e-telecalling.ts"
+    "test:telecalling": "tsx scripts/e2e-telecalling.ts",
+    "admin:password": "node scripts/set-admin-password.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1117.0",
