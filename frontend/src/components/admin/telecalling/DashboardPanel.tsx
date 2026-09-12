@@ -15,7 +15,7 @@ import {
   RangePicker,
   StatCard,
   StatGrid,
-  TableSkeleton,
+  StatGridSkeleton,
   rangeFor,
   type RangePreset,
 } from './shared';
@@ -63,7 +63,25 @@ export function DashboardPanel({ onUnauthorized }: { onUnauthorized: () => void 
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  if (loading && !data) return <TableSkeleton rows={8} />;
+  /*
+   * Tiles, not table rows.
+   *
+   * This screen is three stat grids above one table, and standing in for it with eight
+   * table rows described a layout that never appears — so the page visibly rearranged
+   * itself the moment the data landed.
+   */
+  if (loading && !data) {
+    return (
+      <>
+        <h2 className="tc-section-title">Leads</h2>
+        <StatGridSkeleton count={6} />
+        <h2 className="tc-section-title">Calls</h2>
+        <StatGridSkeleton count={6} />
+        <h2 className="tc-section-title">Follow-ups and team</h2>
+        <StatGridSkeleton count={4} />
+      </>
+    );
+  }
 
   if (!data) {
     return (
@@ -117,25 +135,39 @@ export function DashboardPanel({ onUnauthorized }: { onUnauthorized: () => void 
 
       <h2 className="tc-section-title">Leads</h2>
       <StatGrid>
-        <StatCard value={leads.total} label="Total leads" />
-        <StatCard value={leads.new} label="Not yet contacted" tone={leads.new > 0 ? 'warn' : 'default'} />
+        <StatCard value={leads.total} label="Total leads" icon="target" />
+        <StatCard
+          value={leads.new}
+          label="Not yet contacted"
+          tone={leads.new > 0 ? 'warn' : 'default'}
+          icon="inbox"
+        />
         <StatCard
           value={leads.unassigned}
           label="Unassigned"
           tone={leads.unassigned > 0 ? 'warn' : 'default'}
           hint={leads.unassigned > 0 ? 'Nobody is working these' : undefined}
         />
-        <StatCard value={leads.assigned} label="Assigned" />
-        <StatCard value={leads.converted} label="Converted" tone="good" />
-        <StatCard value={leads.lost} label="Lost" tone={leads.lost > 0 ? 'bad' : 'default'} />
+        <StatCard value={leads.assigned} label="Assigned" icon="users" />
+        <StatCard value={leads.converted} label="Converted" tone="good" icon="check" />
+        <StatCard
+          value={leads.lost}
+          label="Lost"
+          tone={leads.lost > 0 ? 'bad' : 'default'}
+          icon="close"
+        />
       </StatGrid>
 
       <h2 className="tc-section-title">Calls</h2>
       <StatGrid>
-        <StatCard value={calls.total} label="Total calls" />
-        <StatCard value={calls.answered} label="Answered" tone="good" />
-        <StatCard value={calls.missed} label="Not answered" />
-        <StatCard value={formatDuration(calls.talkTimeSeconds)} label="Total talk time" />
+        <StatCard value={calls.total} label="Total calls" icon="phone" />
+        <StatCard value={calls.answered} label="Answered" tone="good" icon="check" />
+        <StatCard value={calls.missed} label="Not answered" icon="phone" />
+        <StatCard
+          value={formatDuration(calls.talkTimeSeconds)}
+          label="Total talk time"
+          icon="clock"
+        />
         <StatCard
           value={calls.total > 0 ? `${Math.round((calls.answered / calls.total) * 100)}%` : '—'}
           label="Answer rate"

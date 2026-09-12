@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { Icon } from '@/components/ui/Icon';
+import { Icon, type IconName } from '@/components/ui/Icon';
 import {
   LEAD_STATUS_LABELS,
   LEAD_STATUS_TONE,
@@ -28,17 +28,48 @@ export function StatCard({
   label,
   tone = 'default',
   hint,
+  icon,
 }: {
   value: number | string;
   label: string;
   tone?: 'default' | 'good' | 'warn' | 'bad';
   hint?: string;
+  /**
+   * Optional glyph, shown above the figure.
+   *
+   * Optional rather than required because every existing caller omits it, and a stat
+   * grid where some tiles have an icon and some do not still reads correctly — the icon
+   * sits in its own row above the number rather than beside it.
+   */
+  icon?: IconName;
 }) {
   return (
-    <div className={`tc-stat tc-stat--${tone}`}>
+    <div className={`tc-stat tc-stat--${tone} tc-reveal`}>
+      {icon ? (
+        <span className="tc-stat__icon" aria-hidden="true">
+          <Icon name={icon} size={16} />
+        </span>
+      ) : null}
       <span className="tc-stat__value">{value}</span>
       <span className="tc-stat__label">{label}</span>
       {hint ? <span className="tc-stat__hint">{hint}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * Placeholder tiles, shaped like the stat grid they stand in for.
+ *
+ * The dashboard used to render nothing at all while its single request was in flight, so
+ * the screen was blank and then fully populated. Showing the shape first makes the same
+ * wait read as loading rather than as broken.
+ */
+export function StatGridSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div className="tc-stat-grid" aria-busy="true">
+      {Array.from({ length: count }, (_, index) => (
+        <div key={index} className="skeleton tc-skeleton--stat" />
+      ))}
     </div>
   );
 }

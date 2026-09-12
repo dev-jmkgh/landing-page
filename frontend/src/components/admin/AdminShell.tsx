@@ -74,7 +74,12 @@ export function AdminShell({
 
         <div className="admin-side__foot">
           {email ? <span className="admin-side__user">{email}</span> : null}
-          <button type="button" className="btn btn--ghost-light btn--sm" onClick={onSignOut}>
+          {/*
+            `btn--ghost`, not `btn--ghost-light`. The latter is white text on a
+            white-alpha border, built for the navy header — against the light sidebar
+            this panel now uses it was invisible.
+          */}
+          <button type="button" className="btn btn--ghost btn--sm" onClick={onSignOut}>
             <Icon name="logout" size={16} />
             Sign out
           </button>
