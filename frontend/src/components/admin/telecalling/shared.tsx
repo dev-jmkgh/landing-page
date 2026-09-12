@@ -32,7 +32,11 @@ export function StatCard({
 }: {
   value: number | string;
   label: string;
-  tone?: 'default' | 'good' | 'warn' | 'bad';
+  /**
+   * `accent` is the fifth tone and exists for the walked-in status, so a tile and a badge
+   * describing the same thing are the same colour. See LEAD_STATUS_TONE in lib/telecalling.
+   */
+  tone?: 'default' | 'good' | 'warn' | 'bad' | 'accent';
   hint?: string;
   /**
    * Optional glyph, shown above the figure.

@@ -149,6 +149,7 @@ export function DashboardPanel({ onUnauthorized }: { onUnauthorized: () => void 
           hint={leads.unassigned > 0 ? 'Nobody is working these' : undefined}
         />
         <StatCard value={leads.assigned} label="Assigned" icon="users" />
+        <StatCard value={leads.walkedIn} label="Walked in" tone="accent" icon="pin" />
         <StatCard value={leads.converted} label="Converted" tone="good" icon="check" />
         <StatCard
           value={leads.lost}

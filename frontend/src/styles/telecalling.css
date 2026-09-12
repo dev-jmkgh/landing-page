@@ -261,6 +261,24 @@
   background-color: var(--danger-600);
 }
 
+/*
+ * The walked-in tone. Literal values rather than tokens because this hue belongs to one
+ * status rather than to the palette, and it is the same pair the badge and the mobile app
+ * use — so the status looks like itself wherever it appears.
+ */
+.tc-stat--accent::before {
+  background-color: #6d28d9;
+}
+
+.tc-stat--accent .tc-stat__value {
+  color: #6d28d9;
+}
+
+.tc-stat--accent .tc-stat__icon {
+  background-color: #ede9fe;
+  color: #6d28d9;
+}
+
 .tc-stat--bad .tc-stat__value {
   color: var(--danger-600);
 }
@@ -290,6 +308,20 @@
 .tc-badge--good {
   background-color: var(--success-050);
   color: var(--success-600);
+}
+
+/*
+ * The fifth tone, for "walked in" and nothing else.
+ *
+ * Violet because the other four were spoken for and a walk-in has to be tellable apart
+ * from `interested` and `converted` at a glance — colouring all three green would defeat
+ * the reason for looking. #6d28d9 on #ede9fe measures 5.98:1, clear of AA for the small
+ * bold type a badge uses. The same pair is used by the mobile app, so one status looks
+ * like itself in both places.
+ */
+.tc-badge--accent {
+  background-color: #ede9fe;
+  color: #6d28d9;
 }
 
 .tc-badge--bad {

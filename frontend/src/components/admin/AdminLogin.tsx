@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { FormAlert, SubmitButton, TextField } from '@/components/forms/Fields';
 import { ApiError, adminApi } from '@/lib/api';
 import { validateEmail, validateRequired } from '@/lib/validation';
+import { assetPath } from '@/lib/paths';
 
 export function AdminLogin({ onSuccess }: { onSuccess: (email: string) => void }) {
   const [email, setEmail] = useState('');
@@ -43,9 +44,19 @@ export function AdminLogin({ onSuccess }: { onSuccess: (email: string) => void }
   return (
     <div className="admin-login">
       <div className="admin-login__card">
-        <p className="eyebrow">JMK Global Holdings</p>
-        <h1 style={{ fontSize: 'var(--text-2xl)' }}>Admin sign in</h1>
-        <p style={{ color: 'var(--ink-500)', margin: '0.5rem 0 1.75rem', fontSize: '0.94rem' }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          className="admin-login__logo"
+          src={assetPath('/images/brand/logo.png')}
+          alt="JMK Global Holdings"
+          width={508}
+          height={160}
+          decoding="async"
+          fetchPriority="high"
+        />
+
+        <h1 className="admin-login__title">Admin sign in</h1>
+        <p className="admin-login__lede">
           Restricted area. Enquiries and applications are only visible to authorised staff.
         </p>
 

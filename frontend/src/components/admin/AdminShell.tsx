@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { AdminNav, type AdminArea } from '@/components/admin/AdminNav';
 import { Icon } from '@/components/ui/Icon';
+import { assetPath } from '@/lib/paths';
 
 /**
  * The chrome around every admin screen: sidebar, title bar, signed-in user, sign-out.
@@ -59,9 +60,22 @@ export function AdminShell({
       */}
       <aside className="admin-layout__side" data-open={drawerOpen ? 'true' : undefined}>
         <div className="admin-side__brand">
-          <p className="eyebrow" style={{ margin: 0 }}>
-            JMK Global Holdings
-          </p>
+          {/*
+            The real lockup, not a text eyebrow.
+
+            Dimensions are declared so the sidebar reserves the space before the image
+            loads — without them the navigation below shifts down on first paint.
+          */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            className="admin-side__logo"
+            src={assetPath('/images/brand/logo.png')}
+            alt="JMK Global Holdings"
+            width={508}
+            height={160}
+            decoding="async"
+            fetchPriority="high"
+          />
           <p className="admin-side__product">Admin</p>
         </div>
 

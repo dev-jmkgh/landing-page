@@ -1759,8 +1759,24 @@
 }
 
 .admin-side__brand {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
   padding: var(--space-2) var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
+}
+
+/*
+ * Width-constrained, height automatic.
+ *
+ * The artwork is 508x160 and `height: auto` keeps that ratio whatever the column does,
+ * so the lockup never distorts. The cap is the sidebar's content width less its padding;
+ * without it a wide logo would push the fixed 16.5rem column and the whole grid with it.
+ */
+.admin-side__logo {
+  width: 100%;
+  max-width: 11rem;
+  height: auto;
 }
 
 .admin-side__product {
@@ -2053,9 +2069,38 @@
   width: 100%;
   max-width: 26rem;
   background-color: #fff;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: clamp(1.75rem, 4vw, 2.5rem);
   box-shadow: var(--shadow-lg);
+}
+
+/*
+ * The lockup above the form.
+ *
+ * Centred and sized in `vw` between two bounds, so it stays legible on a phone and does
+ * not dominate the card on a desktop. `height: auto` preserves the 508x160 ratio at every
+ * step of that range.
+ */
+.admin-login__logo {
+  display: block;
+  width: clamp(9rem, 40vw, 12rem);
+  height: auto;
+  margin: 0 auto var(--space-6);
+}
+
+.admin-login__title {
+  margin: 0;
+  font-size: var(--text-2xl);
+  text-align: center;
+}
+
+.admin-login__lede {
+  margin: var(--space-2) 0 var(--space-6);
+  color: var(--ink-500);
+  font-size: 0.94rem;
+  text-align: center;
+  text-wrap: balance;
 }
 
 .admin-toolbar {

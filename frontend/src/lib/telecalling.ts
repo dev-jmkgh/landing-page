@@ -33,6 +33,15 @@ export const LEAD_STATUSES = [
   'lost',
   'invalid_number',
   'not_reachable',
+  /*
+   * The customer came to the office.
+   *
+   * Appended, not inserted where it belongs semantically (between `interested` and
+   * `converted`), because MySQL stores an ENUM as an index into its value list — moving
+   * an existing value would change the meaning of every row already stored. Display
+   * order is decided by the UI, which is free to put it wherever it reads best.
+   */
+  'walked_in',
 ] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -47,10 +56,21 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   lost: 'Lost',
   invalid_number: 'Invalid number',
   not_reachable: 'Not reachable',
+  walked_in: 'Walked in',
 };
 
-/** Grouped so the UI can colour a status without a ten-branch conditional. */
-export const LEAD_STATUS_TONE: Record<LeadStatus, 'neutral' | 'progress' | 'good' | 'bad'> = {
+/**
+ * Grouped so the UI can colour a status without an eleven-branch conditional.
+ *
+ * `accent` is the fifth tone, and it exists for exactly one status. A walk-in is the
+ * strongest signal in the vocabulary short of a sale, and colouring it `good` would make
+ * it indistinguishable from `interested` and `converted` in a list where telling those
+ * three apart is the whole point of looking.
+ */
+export const LEAD_STATUS_TONE: Record<
+  LeadStatus,
+  'neutral' | 'progress' | 'good' | 'bad' | 'accent'
+> = {
   new: 'neutral',
   contacted: 'progress',
   interested: 'good',
@@ -61,6 +81,7 @@ export const LEAD_STATUS_TONE: Record<LeadStatus, 'neutral' | 'progress' | 'good
   lost: 'bad',
   invalid_number: 'bad',
   not_reachable: 'neutral',
+  walked_in: 'accent',
 };
 
 export const CALL_OUTCOMES = [
@@ -299,6 +320,8 @@ export type AdminDashboard = {
     unassigned: number;
     converted: number;
     lost: number;
+    /** Customers who came to the office. Added with migration 012. */
+    walkedIn: number;
   };
   calls: { total: number; answered: number; missed: number; talkTimeSeconds: number };
   followUps: { today: number; overdue: number; completed: number };

@@ -359,6 +359,41 @@ async function main(): Promise<void> {
     check('the call note is attached to the lead', afterCall.json.notes?.some((n: Json) => n.kind === 'call_note'));
     check('both calls are in the lead history', afterCall.json.calls?.length === 2, afterCall.json.calls?.length);
 
+    /* --- the "walked in" status, end to end --- */
+
+    console.log('\nwalked-in status');
+
+    /*
+     * Added as an ENUM value in migration 012. The point of these assertions is that the
+     * three copies of the vocabulary — the database enum, the backend's LEAD_STATUSES and
+     * the two clients' — actually agree. A mismatch does not fail a build: the request is
+     * accepted by Zod and then rejected by MySQL with a truncation warning, or worse,
+     * silently coerced to the empty string.
+     */
+    const walkedIn = await ravi.post(`/mobile/leads/${leadId}/status`, {
+      status: 'walked_in',
+      note: 'Came to the office on Saturday.',
+    });
+    check('a telecaller can set the walked-in status', walkedIn.status === 200, walkedIn.json);
+
+    const afterWalkIn = await ravi.get(`/mobile/leads/${leadId}`);
+    check(
+      'it is stored and read back intact',
+      afterWalkIn.json.lead?.status === 'walked_in',
+      afterWalkIn.json.lead?.status,
+    );
+
+
+    const bogusStatus = await ravi.post(`/mobile/leads/${leadId}/status`, {
+      status: 'walked-in',
+    });
+    check(
+      'the hyphenated spelling is refused, so the convention cannot drift',
+      bogusStatus.status === 422,
+      bogusStatus.status,
+    );
+
+
     const clearedQueue = await ravi.get('/mobile/calls/pending-callbacks');
     check(
       'connecting cleared the earlier unanswered attempt from the queue',
@@ -454,6 +489,37 @@ async function main(): Promise<void> {
       password: 'correct-horse-battery',
     });
     adminAsBearer.setToken(adminLogin.json.accessToken);
+
+    /*
+     * The admin half of the walked-in checks.
+     *
+     * Here rather than beside the mobile half because `adminAsBearer` is created on the
+     * line above — reading it earlier is a temporal dead zone error, not a test failure,
+     * and it aborts the whole run.
+     */
+    const walkedInFilter = await adminAsBearer.get('/admin/telecalling/leads?status=walked_in');
+    check(
+      'an admin can filter leads by walked-in',
+      walkedInFilter.status === 200,
+      walkedInFilter.status,
+    );
+    check(
+      'and the walked-in lead is in that result',
+      (walkedInFilter.json.items as Json[] | undefined)?.some((row) => Number(row.id) === leadId),
+      walkedInFilter.json.items,
+    );
+
+    const otherStatusFilter = await adminAsBearer.get('/admin/telecalling/leads?status=converted');
+    check(
+      'and it is NOT returned under a different status',
+      !(otherStatusFilter.json.items as Json[] | undefined)?.some(
+        (row) => Number(row.id) === leadId,
+      ),
+      otherStatusFilter.json.items,
+    );
+
+    // Put it back, so every assertion after this sees the status it expects.
+    await ravi.post(`/mobile/leads/${leadId}/status`, { status: 'interested' });
 
     const adminDash = await adminAsBearer.get('/admin/telecalling/dashboard');
     check('an admin can read the admin dashboard', adminDash.status === 200, adminDash.json);

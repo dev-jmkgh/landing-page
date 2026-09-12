@@ -266,6 +266,8 @@ export type AdminDashboard = {
     unassigned: number;
     converted: number;
     lost: number;
+    /** Customers who came to the office. Added with migration 012. */
+    walkedIn: number;
   };
   calls: {
     total: number;
@@ -297,14 +299,21 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
       unassigned: number;
       converted: number;
       lost: number;
+      walked_in: number;
     }
   >(
+    /*
+     * One more SUM on a scan that was happening anyway. A separate query for the
+     * walked-in tile would double the work to answer a question the same rows already
+     * contain.
+     */
     `SELECT COUNT(*) AS total,
             SUM(status = 'new') AS fresh,
             SUM(assigned_to IS NOT NULL) AS assigned,
             SUM(assigned_to IS NULL) AS unassigned,
             SUM(status = 'converted') AS converted,
-            SUM(status = 'lost') AS lost
+            SUM(status = 'lost') AS lost,
+            SUM(status = 'walked_in') AS walked_in
        FROM leads
       WHERE is_archived = 0${leadRange}`,
     leadParams,
@@ -360,6 +369,7 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
       unassigned: num(leadRow?.unassigned),
       converted,
       lost: num(leadRow?.lost),
+      walkedIn: num(leadRow?.walked_in),
     },
     calls: {
       total: num(callRow?.total),

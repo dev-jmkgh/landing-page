@@ -28,6 +28,15 @@ export const LEAD_STATUSES = [
   'lost',
   'invalid_number',
   'not_reachable',
+  /*
+   * The customer came to the office.
+   *
+   * Appended, not inserted where it belongs semantically (between `interested` and
+   * `converted`), because MySQL stores an ENUM as an index into its value list — moving
+   * an existing value would change the meaning of every row already stored. Display
+   * order is decided by the UI, which is free to put it wherever it reads best.
+   */
+  'walked_in',
 ] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
