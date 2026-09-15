@@ -73,8 +73,20 @@ export async function employeeDashboard(userId: number): Promise<EmployeeDashboa
       converted: number;
     }
   >(
+    /*
+     * `fresh` counts leads never contacted, NOT leads whose status is still 'new'.
+     *
+     * Those are different sets and the difference is not small. Logging a call does not
+     * change a lead's status — the post-call sheet only writes one if the telecaller
+     * picks it — so a lead that has been rung twice stays 'new' and kept appearing under
+     * "Not yet called". The reverse also happened: a lead set to 'not_reachable' without
+     * a call left the tile while still never having been contacted.
+     *
+     * `last_contacted_at` is the column that records contact, maintained by the call
+     * logger, so it is the one the tile's own label describes.
+     */
     `SELECT COUNT(*) AS assigned,
-            SUM(status = 'new') AS fresh,
+            SUM(last_contacted_at IS NULL) AS fresh,
             SUM(status NOT IN ('converted','lost','not_interested','invalid_number')) AS open,
             SUM(status = 'converted') AS converted
        FROM leads
@@ -307,8 +319,9 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
      * walked-in tile would double the work to answer a question the same rows already
      * contain.
      */
+    /* `fresh` is "never contacted", for the reason given on the employee query above. */
     `SELECT COUNT(*) AS total,
-            SUM(status = 'new') AS fresh,
+            SUM(last_contacted_at IS NULL) AS fresh,
             SUM(assigned_to IS NOT NULL) AS assigned,
             SUM(assigned_to IS NULL) AS unassigned,
             SUM(status = 'converted') AS converted,

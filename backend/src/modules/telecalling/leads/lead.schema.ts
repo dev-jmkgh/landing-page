@@ -215,6 +215,14 @@ export const leadListQuerySchema = paginationSchema.extend({
     .union([z.literal('unassigned'), z.coerce.number().int().positive()])
     .optional(),
   q: z.string().trim().max(120).optional(),
+  /**
+   * Contact history, which is not the same question as `status`.
+   *
+   * `never_contacted` already exists as a SORT, but a sort only orders — it cannot answer
+   * "show me the ones I have not rung". The dashboard's "Not yet called" tile needs a
+   * list that contains exactly what it counted, so this filters.
+   */
+  contacted: z.enum(['never', 'any']).optional(),
   sort: z.enum(LEAD_SORTS).default('recent'),
   archived: z
     .enum(['true', 'false'])

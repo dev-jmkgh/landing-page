@@ -217,6 +217,14 @@ function buildLeadFilters(
     params.push(filters.source);
   }
 
+  // No parameter: the values are a closed enum, so the column is compared to a literal
+  // rather than bound, and there is nothing a caller could inject.
+  if (filters.contacted === 'never') {
+    conditions.push('l.last_contacted_at IS NULL');
+  } else if (filters.contacted === 'any') {
+    conditions.push('l.last_contacted_at IS NOT NULL');
+  }
+
   if (filters.from) {
     conditions.push('l.created_at >= ?');
     params.push(`${filters.from} 00:00:00`);

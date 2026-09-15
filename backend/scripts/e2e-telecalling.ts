@@ -464,6 +464,43 @@ async function main(): Promise<void> {
     check('dashboard reports talk time', dashboard.json.calls?.talkTimeSeconds === 214, dashboard.json.calls);
     check('dashboard tiles are numbers, never null', Object.values(dashboard.json.leads as Json).every((v) => typeof v === 'number'), dashboard.json.leads);
 
+    /* --- "not yet called" means never contacted, not status = new --- */
+
+    /*
+     * `leadId` has had two calls logged against it by this point, and its status was set
+     * to 'interested' by the second. The second lead has never been rung.
+     *
+     * The tile used to count `status = 'new'`, which is a different question: logging a
+     * call does not set a status unless the telecaller picks one, so a lead that had been
+     * rung twice kept appearing under "Not yet called". Measured on the dev database
+     * before the fix — 10 counted, 13 genuinely uncalled, 1 counted despite being called.
+     */
+    check(
+      'the uncalled tile counts leads with no contact history',
+      dashboard.json.leads?.new === 1,
+      dashboard.json.leads,
+    );
+
+    /*
+     * One request, not three.
+     *
+     * This harness runs near the global rate limit by the time it reaches here, and an
+     * earlier draft of this block spent three probes on one behaviour — which pushed an
+     * unrelated lead-source test into a 429 that read like a validation failure. This
+     * single response carries both facts worth asserting.
+     */
+    const uncalled = await ravi.get('/mobile/leads?contacted=never');
+    check(
+      'and the matching filter returns the same number',
+      uncalled.json.total === dashboard.json.leads?.new,
+      { filter: uncalled.json.total, tile: dashboard.json.leads?.new },
+    );
+    check(
+      'the called lead is absent from it, whatever its status',
+      !(uncalled.json.items as Json[] | undefined)?.some((row) => Number(row.id) === leadId),
+      uncalled.json.items,
+    );
+
     const activity = await ravi.get('/mobile/activity');
     check('activity summary counts leads contacted, not calls made', activity.json.leadsContacted === 1, activity.json);
     check('average duration is over answered calls only', activity.json.averageDurationSeconds === 214, activity.json);
