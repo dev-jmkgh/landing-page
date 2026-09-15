@@ -26,6 +26,7 @@ import path from 'node:path';
 import type { Server } from 'node:http';
 import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import { optionalPhoneField } from '../src/modules/telecalling/shared.schema';
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
 
@@ -731,6 +732,63 @@ async function main(): Promise<void> {
       password: 'a-perfectly-long-password',
     });
     check('a duplicate email is refused', dupSignup.status === 422, dupSignup.status);
+
+    /* --- the phone number is genuinely optional --- */
+
+    /*
+     * The signup form labels this "Phone number (optional)" and sends
+     * `phone.trim() || null`, so an explicit null is the production path. It used to be
+     * rejected: the rule was `z.string().trim().max(20).optional()`, and `.optional()`
+     * means `string | undefined` — it does not admit null. The field was optional in the
+     * UI, nullable in the column, and required by the one rule in between.
+     *
+     * Only ONE registration is spent here. `signupLimiter` allows five per window and the
+     * assertions above already use four; the remaining shapes are checked against the
+     * rule itself below, which needs no request.
+     */
+    const noPhone = await applicant.post('/mobile/auth/signup', {
+      name: 'Nirmal No Phone',
+      email: 'nirmal.nophone@example.test',
+      phone: null,
+      password: 'a-perfectly-long-password',
+    });
+    check(
+      'signup accepts an explicit null phone (what the app sends)',
+      noPhone.status === 201,
+      noPhone.json,
+    );
+
+    const [storedPhone] = await db.query(
+      `SELECT phone FROM telecaller_users WHERE email = 'nirmal.nophone@example.test'`,
+    );
+    check(
+      'and it is stored as NULL rather than an empty string',
+      (storedPhone as any[])[0]?.phone === null,
+      (storedPhone as any[])[0],
+    );
+
+    /*
+     * Every other way a client can say "not given", checked against the rule directly.
+     *
+     * No HTTP, so the rate limiter cannot turn a validation regression into a 429 that
+     * reads like one — which is exactly what happened the first time this was written.
+     */
+    for (const [label, input] of [
+      ['undefined', undefined],
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+    ] as [string, unknown][]) {
+      const parsed = optionalPhoneField.safeParse(input);
+      check(
+        `the phone rule normalises ${label} to null`,
+        parsed.success && parsed.data === null,
+        parsed.success ? parsed.data : parsed.error.issues[0]?.message,
+      );
+    }
+
+    // "Optional" must not have quietly become "unvalidated".
+    const junk = optionalPhoneField.safeParse('12');
+    check('but a malformed phone is still refused', !junk.success, junk);
 
     /* --- the pending account cannot get in, and cannot be enumerated --- */
 

@@ -21,7 +21,7 @@ import {
 } from './emailVerification.service';
 import { findEmployee } from '../employees/employee.repository';
 import { changeOwnPassword } from '../employees/employee.service';
-import { DEVICE_PLATFORMS } from '../shared.schema';
+import { DEVICE_PLATFORMS, optionalPhoneField } from '../shared.schema';
 import {
   authenticateEmployee,
   createMobileSession,
@@ -182,12 +182,21 @@ const signupSchema = z.object({
     .toLowerCase()
     .email('Enter a valid email address.')
     .max(190),
-  phone: z
-    .string()
-    .trim()
-    .max(20)
-    .optional()
-    .transform((value) => (value && value.length > 0 ? value : null)),
+  /*
+   * Genuinely optional, in every shape a client can express "not given".
+   *
+   * This was a hand-rolled `z.string().trim().max(20).optional()`, and `.optional()` in
+   * Zod means `string | undefined` — it does NOT admit `null`. The signup form labels the
+   * field "Phone number (optional)" and sends `phone.trim() || null`, so leaving it blank
+   * sent an explicit null and the request was rejected with "Expected string, received
+   * null" on a field the UI had just called optional.
+   *
+   * `optionalPhoneField` is the shared rule the lead forms already use: it accepts
+   * undefined, null and the empty string, normalises all three to null, and validates the
+   * format only when something was actually supplied. Reusing it also means a telecaller's
+   * phone number and a customer's are held to one rule rather than two that can drift.
+   */
+  phone: optionalPhoneField,
   /*
    * Twelve, matching admin-created accounts. Not relaxed for self-registration: these
    * accounts reach the same customer data, and a self-chosen password is if anything
