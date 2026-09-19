@@ -621,11 +621,18 @@ export async function recordCallTx(
  * server's `phoneMatchKey` use: the call log writes `+919876543210` where the lead form
  * was given `9876543210`, and an exact comparison would find nothing in the common case.
  *
- * Adopted calls are stamped as recorded and followed up at the same time. Creating the
- * lead IS the act of filing them: they are in a customer's history from this moment, and
- * leaving them unrecorded would have the Incoming list go on asking the telecaller to
- * write up calls it has just written up for them. The write-up sheet stays available on
- * each one, so a note can still be added afterwards — being recorded is not being closed.
+ * Adopted calls are marked followed up, but deliberately NOT marked recorded.
+ *
+ * Those are different claims and an earlier version made both. Creating the lead deals
+ * with the call — the telecaller has acted, so the row should stop demanding attention —
+ * but it says nothing about what was discussed. Stamping `recorded_at` here asserted that
+ * somebody had written the call up when nobody had, and it did it in bulk: create one
+ * lead and every historical call from that number silently became "record added" with no
+ * note behind it, so the Incoming list stopped asking for the very thing the business
+ * wants collected.
+ *
+ * A detected call is evidence that a conversation happened. Only a person can say what
+ * was said, and until one has, these stay unrecorded.
  *
  * Returns how many calls were adopted, so the caller can decide whether the lead's
  * timeline deserves a line about it.
@@ -657,8 +664,7 @@ export async function adoptOrphanCallsTx(
   const [result] = await connection.execute<ResultSetHeader>(
     `UPDATE calls
         SET lead_id = ?,
-            followed_up = 1,
-            recorded_at = IFNULL(recorded_at, CURRENT_TIMESTAMP)
+            followed_up = 1
       WHERE user_id = ?
         AND lead_id IS NULL
         AND (${clause})`,

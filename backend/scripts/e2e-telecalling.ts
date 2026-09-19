@@ -652,6 +652,32 @@ async function main(): Promise<void> {
       (strangerLead.json.calls as Json[]).some((row) => row.id === incomingUnknown.json.call?.id),
       (strangerLead.json.calls as Json[]).map((row) => row.id),
     );
+    /*
+     * Adopted, handled — and still waiting to be written up.
+     *
+     * Creating the lead dealt with the call; it did not say what was discussed. An
+     * earlier version stamped these as recorded, which claimed a write-up nobody had
+     * done and quietly removed the prompt to do it.
+     */
+    check(
+      'the adopted call is NOT claimed to have been written up',
+      (strangerLead.json.calls as Json[]).find(
+        (row) => row.id === incomingUnknown.json.call?.id,
+      )?.recordedAt === null,
+      (strangerLead.json.calls as Json[]).find(
+        (row) => row.id === incomingUnknown.json.call?.id,
+      )?.recordedAt,
+    );
+    check(
+      'but it is marked handled, so it stops asking for attention',
+      (strangerLead.json.calls as Json[]).find(
+        (row) => row.id === incomingUnknown.json.call?.id,
+      )?.followedUp === true,
+      (strangerLead.json.calls as Json[]).find(
+        (row) => row.id === incomingUnknown.json.call?.id,
+      )?.followedUp,
+    );
+
     check(
       'and the timeline says where that history came from',
       (strangerLead.json.timeline as Json[]).some(
