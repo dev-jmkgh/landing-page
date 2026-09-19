@@ -939,6 +939,22 @@ export function LeadsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
               ),
             },
             {
+              /*
+               * When the lead arrived, next to when it was last worked.
+               *
+               * The two answer different questions and the table was only answering one.
+               * "Last contacted — —" on half the rows says nobody has rung them; it does
+               * not say whether that is because they came in an hour ago or have been
+               * sitting untouched since last month. Only the second is a problem, and
+               * until now the table gave a manager no way to tell them apart.
+               */
+              key: 'createdAt',
+              header: 'Created',
+              width: '10rem',
+              nowrap: true,
+              render: (lead) => formatDateTime(lead.createdAt),
+            },
+            {
               key: 'lastContacted',
               header: 'Last contacted',
               width: '10rem',
