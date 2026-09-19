@@ -41,6 +41,26 @@ process.env.NODE_ENV = 'development';
 process.env.JWT_SECRET = 'e2e-check-secret-that-is-long-enough-to-be-fine';
 process.env.LOG_LEVEL = 'error';
 
+/**
+ * The API-wide rate limit is lifted for this suite.
+ *
+ * It is 120 requests a minute per IP, and this harness is a few hundred requests arriving
+ * from one address in well under that — so it was running into the ceiling, and tests were
+ * being written around it: probes trimmed, assertions folded together, and one 429 already
+ * misread as a validation failure. That is the limiter shaping the test suite instead of
+ * the suite testing the product.
+ *
+ * Nothing here asserts on the limiter, so raising it removes false failures without
+ * removing coverage. The limiter itself is covered by `npm run test:ratelimit`, which
+ * boots the app on the real defaults and drives one IP past the ceiling — a check that
+ * has to run in a process where the ceiling has NOT been raised, which is why it is a
+ * separate script rather than a section here.
+ *
+ * The per-endpoint limiters — login, signup, password change — are NOT touched, because
+ * those protect specific behaviours this suite does exercise.
+ */
+process.env.RATE_LIMIT_MAX_REQUESTS = '100000';
+
 let passed = 0;
 let failed = 0;
 
@@ -514,6 +534,171 @@ async function main(): Promise<void> {
       lookup.json.items?.length,
     );
 
+    /* ------------------------------------------------ incoming calls */
+    /*
+     * Calls the customer made to us, imported from the handset's call log.
+     *
+     * The app reads the Android log on resume and posts each row through the SAME
+     * endpoint as an outgoing call, with `direction: 'incoming'` and a `clientUuid`
+     * DERIVED from the log row rather than randomly generated. That derivation is what
+     * makes re-importing free, and it is the property the replay assertion below exists
+     * to protect: the import runs on every resume, every relaunch and every reinstall,
+     * so anything that could turn one physical call into two rows would have done so by
+     * the end of a single day.
+     */
+    console.log('\ncalls that came in');
+
+    const strangerNumber = '+91 90000 11122';
+    const incomingStartedAt = new Date(Date.now() - 1_800_000).toISOString();
+
+    const incomingUnknown = await ravi.post('/mobile/calls', {
+      // No leadId, because the app could not match the number to one.
+      phone: strangerNumber,
+      direction: 'incoming',
+      outcome: 'missed',
+      source: 'call_log',
+      durationSeconds: 0,
+      startedAt: incomingStartedAt,
+      clientUuid: '44444444-4444-4444-8444-444444444444',
+    });
+    check('a missed call from an unknown number is logged', incomingUnknown.status === 201, incomingUnknown.json);
+    check(
+      'it is not attached to a lead, because none matches',
+      incomingUnknown.json.call?.leadId === null,
+      incomingUnknown.json.call?.leadId,
+    );
+    check(
+      'the direction is preserved',
+      incomingUnknown.json.call?.direction === 'incoming',
+      incomingUnknown.json.call?.direction,
+    );
+
+    const incomingReplay = await ravi.post('/mobile/calls', {
+      phone: strangerNumber,
+      direction: 'incoming',
+      outcome: 'missed',
+      startedAt: incomingStartedAt,
+      clientUuid: '44444444-4444-4444-8444-444444444444',
+    });
+    check(
+      're-importing the same call-log row does not duplicate it',
+      incomingReplay.json.deduplicated === true &&
+        incomingReplay.json.call?.id === incomingUnknown.json.call?.id,
+      incomingReplay.json,
+    );
+
+    const incomingKnown = await ravi.post('/mobile/calls', {
+      // Also no leadId: the app sends what the log gave it and lets the server match.
+      phone: '09876543210',
+      direction: 'incoming',
+      outcome: 'answered',
+      source: 'call_log',
+      durationSeconds: 45,
+      startedAt: new Date(Date.now() - 900_000).toISOString(),
+      clientUuid: '55555555-5555-4555-8555-555555555555',
+    });
+    check('an incoming call from a known number is logged', incomingKnown.status === 201, incomingKnown.json);
+
+    const incomingList = await ravi.get('/mobile/calls?direction=incoming');
+    check('the incoming filter returns only incoming calls', incomingList.json.total === 2, incomingList.json.total);
+    check(
+      'and nothing outgoing leaks into it',
+      (incomingList.json.items as Json[]).every((row) => row.direction === 'incoming'),
+      (incomingList.json.items as Json[]).map((row) => row.direction),
+    );
+
+    const incomingDash = await ravi.get('/mobile/dashboard');
+    check(
+      'the dashboard counts what came in today',
+      incomingDash.json.incoming?.today === 2,
+      incomingDash.json.incoming,
+    );
+    check(
+      'and separates the ones nobody picked up',
+      incomingDash.json.incoming?.missedToday === 1,
+      incomingDash.json.incoming,
+    );
+    check(
+      'both incoming calls need action until somebody deals with them',
+      incomingDash.json.incoming?.unhandled === 2,
+      incomingDash.json.incoming,
+    );
+
+    /* --------------------------- unknown caller becomes a lead --------- */
+    const sourceList = await ravi.get('/mobile/lead-sources');
+    check(
+      'Incoming call is an offered lead source',
+      (sourceList.json.items as Json[]).some((row) => row.slug === 'incoming_call'),
+      (sourceList.json.items as Json[]).map((row) => row.slug),
+    );
+
+    const fromStranger = await ravi.post('/mobile/leads', {
+      customerName: 'Priya Menon',
+      phone: strangerNumber,
+      source: 'incoming_call',
+      clientUuid: '66666666-6666-4666-8666-666666666666',
+    });
+    check('a lead is created from the unknown caller', fromStranger.status === 201, fromStranger.json);
+    check(
+      'the source is kept, not normalised to other',
+      fromStranger.json.lead?.source === 'incoming_call',
+      fromStranger.json.lead?.source,
+    );
+
+    const strangerLeadId = fromStranger.json.lead?.id as number;
+    const strangerLead = await ravi.get('/mobile/leads/' + strangerLeadId);
+    check(
+      'the call that produced the lead is now in its history',
+      (strangerLead.json.calls as Json[]).some((row) => row.id === incomingUnknown.json.call?.id),
+      (strangerLead.json.calls as Json[]).map((row) => row.id),
+    );
+    check(
+      'and the timeline says where that history came from',
+      (strangerLead.json.timeline as Json[]).some(
+        (row) => row.type === 'call_logged' && String(row.summary).includes('Linked'),
+      ),
+      (strangerLead.json.timeline as Json[]).map((row) => row.summary),
+    );
+
+    /*
+     * Adoption must not reach across telecallers.
+     *
+     * Mira has her own unattached incoming call from the same number. Ravi creating a
+     * lead for it takes his own call and leaves hers alone — if it took both, one
+     * telecaller creating a lead would silently move a colleague's conversation into a
+     * record they own.
+     */
+    const miraIncoming = await mira.post('/mobile/calls', {
+      phone: strangerNumber,
+      direction: 'incoming',
+      outcome: 'missed',
+      startedAt: new Date(Date.now() - 2_400_000).toISOString(),
+      clientUuid: '77777777-7777-4777-8777-777777777777',
+    });
+    check('another telecaller logs a call from the same number', miraIncoming.status === 201, miraIncoming.json);
+
+    const raviSecondLead = await ravi.post('/mobile/leads', {
+      customerName: 'Priya Menon second enquiry',
+      phone: strangerNumber,
+      source: 'incoming_call',
+      clientUuid: '88888888-8888-4888-8888-888888888888',
+    });
+    check('a second lead on the same number is allowed', raviSecondLead.status === 201, raviSecondLead.json);
+
+    const miraCalls = await mira.get('/mobile/calls?direction=incoming');
+    check(
+      'creating that lead did not adopt the other telecallers call',
+      (miraCalls.json.items as Json[])[0]?.leadId === null,
+      (miraCalls.json.items as Json[])[0],
+    );
+
+    const strangerLeadAgain = await ravi.get('/mobile/leads/' + strangerLeadId);
+    check(
+      'and the first lead kept the call it had already adopted',
+      (strangerLeadAgain.json.calls as Json[]).some((row) => row.id === incomingUnknown.json.call?.id),
+      (strangerLeadAgain.json.calls as Json[]).map((row) => row.id),
+    );
+
     /* ---------------------------------------------- notifications */
     const notifications = await ravi.get('/mobile/notifications');
     check('notifications endpoint responds', notifications.status === 200, notifications.json);
@@ -561,13 +746,42 @@ async function main(): Promise<void> {
 
     const adminDash = await adminAsBearer.get('/admin/telecalling/dashboard');
     check('an admin can read the admin dashboard', adminDash.status === 200, adminDash.json);
-    check('admin dashboard counts all leads', adminDash.json.leads?.total === 2, adminDash.json.leads);
+    /*
+     * Four: the two Ravi created by hand, plus the two the incoming-call section created
+     * from the same unknown number. Written as a literal rather than derived from an
+     * earlier response on purpose — a total computed from the same API it is checking
+     * would pass even if both were wrong together.
+     */
+    check('admin dashboard counts all leads', adminDash.json.leads?.total === 4, adminDash.json.leads);
     check('admin dashboard counts unassigned leads', adminDash.json.leads?.unassigned === 0, adminDash.json.leads);
+    /*
+     * Three incoming calls exist across both telecallers — two of Ravi's and one of
+     * Mira's — and one of the three was answered, so two were not.
+     */
+    check(
+      'admin dashboard separates the calls customers made to us',
+      adminDash.json.calls?.incoming === 3,
+      adminDash.json.calls,
+    );
+    check(
+      'and counts the incoming ones nobody answered',
+      adminDash.json.calls?.incomingMissed === 2,
+      adminDash.json.calls,
+    );
+    check(
+      'incoming is a subset of the call total, not an addition to it',
+      (adminDash.json.calls as Json).incoming <= (adminDash.json.calls as Json).total,
+      adminDash.json.calls,
+    );
     check('admin dashboard lists employee performance', Array.isArray(adminDash.json.employees), adminDash.json.employees);
 
     const raviRow = (adminDash.json.employees as Json[]).find((row) => row.name === 'Ravi Caller');
-    check('performance rows carry per-employee call counts', raviRow?.calls === 2, raviRow);
-    check('performance rows carry talk time', raviRow?.talkTimeSeconds === 214, raviRow);
+    // Two outgoing and two incoming; the replayed import is deduplicated and is not one
+    // of them, which is the point of counting here rather than trusting the insert.
+    check('performance rows carry per-employee call counts', raviRow?.calls === 4, raviRow);
+    // 214 from the connected outgoing call, 45 from the answered incoming one. The two
+    // unanswered calls contribute nothing, because a ring is not talk time.
+    check('performance rows carry talk time', raviRow?.talkTimeSeconds === 259, raviRow);
     check('performance rows carry leads contacted', raviRow?.leadsContacted === 1, raviRow);
 
     const telecallerOnAdmin = await ravi.get('/admin/telecalling/dashboard');
@@ -577,7 +791,26 @@ async function main(): Promise<void> {
     check('a telecaller is refused the recordings list', telecallerRecordings.status === 403);
 
     const adminLeads = await adminAsBearer.get('/admin/telecalling/leads');
-    check('an admin sees every lead regardless of owner', adminLeads.json.total === 2, adminLeads.json.total);
+    check('an admin sees every lead regardless of owner', adminLeads.json.total === 4, adminLeads.json.total);
+
+    /*
+     * The admin calls list can be narrowed to one direction.
+     *
+     * This is what the Calls panel's Direction filter sends, and unlike the mobile list
+     * it is not scoped to one telecaller — so it must return Mira's incoming call as
+     * well as Ravi's.
+     */
+    const adminIncoming = await adminAsBearer.get('/admin/telecalling/calls?direction=incoming');
+    check(
+      'an admin can narrow the call list to incoming calls',
+      adminIncoming.json.total === 3,
+      adminIncoming.json.total,
+    );
+    check(
+      'and it spans every telecaller, not just one',
+      new Set((adminIncoming.json.items as Json[]).map((row) => row.userId)).size === 2,
+      (adminIncoming.json.items as Json[]).map((row) => row.userId),
+    );
 
     const perf = await adminAsBearer.get('/admin/telecalling/reports/performance');
     check('the performance report responds', perf.status === 200 && Array.isArray(perf.json.items));

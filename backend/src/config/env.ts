@@ -151,8 +151,41 @@ const schema = z.object({
   UPLOAD_DIR: z.string().default('storage/resumes'),
   MAX_UPLOAD_MB: z.coerce.number().positive().max(25).default(5),
 
+  /**
+   * The window for the limiters that exist to stop guessing: login, signup, email
+   * verification, the public forms.
+   *
+   * Fifteen minutes, and it must stay long. "Five signups per window" is only a
+   * meaningful barrier because the window is long — shortening it to a minute would let
+   * the same attacker make sixty times as many attempts an hour while the configured
+   * number stayed reassuringly small.
+   *
+   * The API-wide limiter deliberately does NOT use this. It is a capacity guard, not an
+   * anti-guessing measure, and the two want opposite shapes.
+   */
   RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().positive().default(15),
-  RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(100),
+
+  /**
+   * The API-wide limiter: `GLOBAL_RATE_LIMIT_WINDOW_SECONDS` and
+   * `RATE_LIMIT_MAX_REQUESTS` together.
+   *
+   * 120 requests a minute, per IP. This is a runaway-client backstop and a rough ceiling
+   * on what one address can cost the server — it is not trying to identify anybody, so a
+   * short window with a generous allowance is the right shape: a burst is normal, a
+   * sustained flood is not, and an honest client that trips it recovers in under a minute
+   * instead of being locked out for a quarter of an hour.
+   *
+   * It was 100 per FIFTEEN minutes, which is under seven a minute. The mobile app spends
+   * that on a single launch, and every telecaller in an office shares one NAT address, so
+   * the limiter was firing on ordinary work — while `mobileSyncLimiter`, sitting behind
+   * it at 240 a minute, never got the chance to.
+   *
+   * Sizing: roughly ten telecallers behind one address, each averaging a dozen requests a
+   * minute while actively working.
+   */
+  GLOBAL_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().positive().default(60),
+  RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
+
   FORM_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
 
@@ -445,7 +478,10 @@ export const config = {
   },
 
   rateLimit: {
+    /** The anti-guessing window. Shared by login, signup, verification and the forms. */
     windowMs: raw.RATE_LIMIT_WINDOW_MINUTES * 60 * 1000,
+    /** The API-wide capacity guard's own window, independent of the one above. */
+    globalWindowMs: raw.GLOBAL_RATE_LIMIT_WINDOW_SECONDS * 1000,
     max: raw.RATE_LIMIT_MAX_REQUESTS,
     formMax: raw.FORM_RATE_LIMIT_MAX,
     loginMax: raw.LOGIN_RATE_LIMIT_MAX,

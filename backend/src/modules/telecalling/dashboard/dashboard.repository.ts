@@ -53,6 +53,20 @@ export type EmployeeDashboard = {
     missed: number;
     talkTimeSeconds: number;
   };
+  /**
+   * Calls the customer made to us.
+   *
+   * Separate from `calls`, which counts both directions, because the two answer different
+   * questions: `calls.today` is how much work the telecaller did, `incoming` is how much
+   * work came to them. A day of forty outgoing calls and a day of forty incoming ones are
+   * not the same day, and one number cannot say which it was.
+   */
+  incoming: {
+    today: number;
+    missedToday: number;
+    /** Not day-bounded: a call missed on Friday is still unhandled on Monday. */
+    unhandled: number;
+  };
   pendingCallbacks: number;
   unreadNotifications: number;
 };
@@ -117,25 +131,53 @@ export async function employeeDashboard(userId: number): Promise<EmployeeDashboa
       answered: number;
       missed: number;
       talk_time: number;
+      incoming: number;
+      incoming_missed: number;
     }
   >(
+    /*
+     * The incoming columns ride along on this query rather than getting one of their own.
+     *
+     * Same table, same row set, same day — a second query would scan
+     * `idx_calls_user_started` twice to read two more numbers out of rows already in
+     * hand. `outcome <> 'answered'` is the same test the Incoming screen uses to colour a
+     * row missed, so the tile and the list cannot disagree about what missed means.
+     */
     `SELECT COUNT(*) AS total,
             SUM(outcome = 'answered') AS answered,
             SUM(outcome = 'missed') AS missed,
-            COALESCE(SUM(CASE WHEN outcome = 'answered' THEN duration_seconds ELSE 0 END), 0) AS talk_time
+            COALESCE(SUM(CASE WHEN outcome = 'answered' THEN duration_seconds ELSE 0 END), 0) AS talk_time,
+            SUM(direction = 'incoming') AS incoming,
+            SUM(direction = 'incoming' AND outcome <> 'answered') AS incoming_missed
        FROM calls
       WHERE user_id = ? AND DATE(started_at) = CURDATE()`,
     [userId],
   );
 
-  const pendingRow = await queryOne<RowDataPacket & { total: number; unread: number }>(
+  const pendingRow = await queryOne<
+    RowDataPacket & { total: number; unread: number; incoming_unhandled: number }
+  >(
+    /*
+     * `incoming_unhandled` is not a subset of `total`, and the overlap is the point.
+     *
+     * `total` — the callback queue — is every unanswered call in either direction. An
+     * incoming call the telecaller ANSWERED but has not acted on is missing from it, and
+     * that is exactly the call this feature exists to surface: the customer got through,
+     * said something, and nobody has done anything since. So this counts unhandled
+     * incoming calls whatever their outcome, and the two figures are shown as two tiles
+     * rather than being added together.
+     */
     `SELECT
        (SELECT COUNT(*) FROM calls
          WHERE user_id = ?
            AND followed_up = 0
            AND outcome IN ('missed','rejected','busy','unreachable','no_answer')) AS total,
+       (SELECT COUNT(*) FROM calls
+         WHERE user_id = ?
+           AND direction = 'incoming'
+           AND followed_up = 0) AS incoming_unhandled,
        (SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL) AS unread`,
-    [userId, userId],
+    [userId, userId, userId],
   );
 
   return {
@@ -155,6 +197,11 @@ export async function employeeDashboard(userId: number): Promise<EmployeeDashboa
       answered: num(callRow?.answered),
       missed: num(callRow?.missed),
       talkTimeSeconds: num(callRow?.talk_time),
+    },
+    incoming: {
+      today: num(callRow?.incoming),
+      missedToday: num(callRow?.incoming_missed),
+      unhandled: num(pendingRow?.incoming_unhandled),
     },
     pendingCallbacks: num(pendingRow?.total),
     unreadNotifications: num(pendingRow?.unread),
@@ -286,6 +333,15 @@ export type AdminDashboard = {
     answered: number;
     missed: number;
     talkTimeSeconds: number;
+    /**
+     * Of `total`, how many the customer initiated, and how many of those nobody picked up.
+     *
+     * Reported inside `calls` rather than beside it because they are a subset of the same
+     * figure — presenting them as a separate total invites a manager to add the two
+     * together and double-count the period's activity.
+     */
+    incoming: number;
+    incomingMissed: number;
   };
   followUps: {
     today: number;
@@ -336,12 +392,21 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
   const callRange = rangeClause('started_at', range, callParams);
 
   const callRow = await queryOne<
-    RowDataPacket & { total: number; answered: number; missed: number; talk_time: number }
+    RowDataPacket & {
+      total: number;
+      answered: number;
+      missed: number;
+      talk_time: number;
+      incoming: number;
+      incoming_missed: number;
+    }
   >(
     `SELECT COUNT(*) AS total,
             SUM(outcome = 'answered') AS answered,
             SUM(outcome IN ('missed','rejected','busy','unreachable','no_answer')) AS missed,
-            COALESCE(SUM(CASE WHEN outcome = 'answered' THEN duration_seconds ELSE 0 END), 0) AS talk_time
+            COALESCE(SUM(CASE WHEN outcome = 'answered' THEN duration_seconds ELSE 0 END), 0) AS talk_time,
+            SUM(direction = 'incoming') AS incoming,
+            SUM(direction = 'incoming' AND outcome <> 'answered') AS incoming_missed
        FROM calls
       WHERE 1 = 1${callRange}`,
     callParams,
@@ -389,6 +454,8 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
       answered: num(callRow?.answered),
       missed: num(callRow?.missed),
       talkTimeSeconds: num(callRow?.talk_time),
+      incoming: num(callRow?.incoming),
+      incomingMissed: num(callRow?.incoming_missed),
     },
     followUps: {
       today: num(followUpRow?.today),

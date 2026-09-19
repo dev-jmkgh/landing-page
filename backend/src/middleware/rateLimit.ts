@@ -46,10 +46,20 @@ function build(options: {
   });
 }
 
-/** Baseline limit applied to the whole API. */
+/**
+ * Baseline limit applied to the whole API: 120 requests a minute, per IP.
+ *
+ * Its window is `globalWindowMs`, NOT the `windowMs` every other limiter in this file
+ * uses. That separation is the point. The limiters below are there to make guessing
+ * expensive, so they want a long window and a small count. This one is a capacity guard,
+ * so it wants a short window and a large count — and while the two shared a window, one
+ * of them was always configured wrong. It was the wrong one: at 100 per fifteen minutes
+ * the API-wide guard was stricter than every endpoint-specific limiter it sits in front
+ * of, including `mobileSyncLimiter` at 240 a minute, which it made unreachable.
+ */
 export const globalLimiter = build({
   name: 'global',
-  windowMs: config.rateLimit.windowMs,
+  windowMs: config.rateLimit.globalWindowMs,
   max: config.rateLimit.max,
   message: 'Too many requests. Please wait a few minutes and try again.',
 });

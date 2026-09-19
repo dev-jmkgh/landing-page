@@ -4,6 +4,7 @@ import { logger } from '../../../utils/logger';
 import { createReference } from '../../../utils/text';
 import { canActOnOwner, hasRole, ownershipScope, type Actor } from '../actor';
 import { recordActivity, recordActivityTx, recordAudit } from '../activity/activity.repository';
+import { adoptOrphanCallsTx } from '../calls/call.repository';
 import { findEmployee } from '../employees/employee.repository';
 import { queueNotification } from '../notifications/notification.repository';
 import { CLOSED_LEAD_STATUSES, type LeadStatus } from '../shared.schema';
@@ -147,6 +148,45 @@ export async function createLead(
         type: 'lead_assigned',
         summary: `${actor.name} assigned this lead`,
         meta: { assignedTo },
+      });
+    }
+
+    /**
+     * Calls from this number that belonged to nobody now belong to this lead.
+     *
+     * The unknown-caller path: a customer rings, the call is imported from the handset's
+     * call log with no lead to attach to, and the employee taps "Create lead" on it. The
+     * conversation that produced the lead has to be in the lead's history, or the record
+     * opens claiming no one has ever spoken to this person.
+     *
+     * Runs for every lead, not only ones created from the Incoming screen — the employee
+     * who adds the lead from the Leads tab ten minutes later deserves the same history,
+     * and matching on the number rather than on a call id the client passed is what makes
+     * that work. It is also why the client sends nothing new: the phone number it already
+     * sends is the whole input.
+     *
+     * Scoped inside `adoptOrphanCallsTx` to the actor's own calls that belong to no lead,
+     * so this can neither move a call out of another customer's history nor pull in a
+     * colleague's conversations.
+     */
+    const adopted = await adoptOrphanCallsTx(connection, actor.id, id, [
+      input.phone,
+      input.alternatePhone,
+    ]);
+
+    if (adopted > 0) {
+      await recordActivityTx(connection, {
+        leadId: id,
+        userId: actor.id,
+        // One line, not one per call. The activity rows would all be stamped with the
+        // moment the lead was created rather than the times the calls happened, so a row
+        // each would read as a burst of calls that never occurred.
+        type: 'call_logged',
+        summary:
+          adopted === 1
+            ? `Linked an earlier call from this number to ${actor.name}`
+            : `Linked ${adopted} earlier calls from this number to ${actor.name}`,
+        meta: { adoptedCalls: adopted },
       });
     }
 

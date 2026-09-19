@@ -1,5 +1,12 @@
 import type { PoolConnection } from 'mysql2/promise';
-import { execute, query, queryOne, type RowDataPacket, type SqlParam } from '../../../db/pool';
+import {
+  execute,
+  query,
+  queryOne,
+  type ResultSetHeader,
+  type RowDataPacket,
+  type SqlParam,
+} from '../../../db/pool';
 import type { OwnershipScope } from '../actor';
 import {
   likeTerm,
@@ -518,4 +525,67 @@ export async function findRecordingKey(
   return row
     ? { key: row.storage_key, mime: row.mime_type, leadId: row.lead_id, userId: row.user_id }
     : null;
+}
+
+/**
+ * Attaches the actor's unattached calls from this number to a lead that has just been created.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * `logCall` already matches an incoming call to a lead by phone number, so a call that
+ * arrives AFTER the lead exists attaches itself. The reverse order has no such path: a
+ * customer rings a number nobody has a lead for, the call is stored with `lead_id NULL`,
+ * and the employee then taps "Create lead" on it. Without this the new lead would open
+ * with an empty history despite having been created from a conversation.
+ *
+ * WHY IT CANNOT STEAL A CALL
+ * --------------------------
+ * `lead_id IS NULL` means only calls that belong to no lead are eligible — a call already
+ * filed against a customer is never re-pointed, so creating a lead can never move history
+ * out of another lead's record. `user_id = ?` restricts it to the actor's own calls, so a
+ * new lead cannot absorb a colleague's conversations. Both conditions are in the WHERE
+ * clause rather than checked in application code, because this runs inside the lead's
+ * creation transaction and a missed check there would be a silent data leak.
+ *
+ * Matching is the trailing nine digits, the same key `resolveEarlierMissedCallsTx` and the
+ * server's `phoneMatchKey` use: the call log writes `+919876543210` where the lead form
+ * was given `9876543210`, and an exact comparison would find nothing in the common case.
+ *
+ * Returns how many calls were adopted, so the caller can decide whether the lead's
+ * timeline deserves a line about it.
+ */
+export async function adoptOrphanCallsTx(
+  connection: PoolConnection,
+  userId: number,
+  leadId: number,
+  phones: (string | null | undefined)[],
+): Promise<number> {
+  const keys = phones
+    .map((phone) => {
+      const digits = (phone ?? '').replace(/\D/g, '');
+      return digits.length > 9 ? digits.slice(-9) : digits;
+    })
+    // Six digits is the shortest thing worth matching on. Below that a LIKE '%...' would
+    // sweep up unrelated numbers, and adopting the wrong call is worse than adopting none.
+    .filter((key) => key.length >= 6);
+
+  if (keys.length === 0) return 0;
+
+  const clause = keys
+    .map(
+      () =>
+        `REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?`,
+    )
+    .join(' OR ');
+
+  const [result] = await connection.execute<ResultSetHeader>(
+    `UPDATE calls
+        SET lead_id = ?
+      WHERE user_id = ?
+        AND lead_id IS NULL
+        AND (${clause})`,
+    [leadId, userId, ...keys.map((key) => `%${key}`)],
+  );
+
+  return result.affectedRows;
 }

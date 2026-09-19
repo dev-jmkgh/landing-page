@@ -323,7 +323,15 @@ export type AdminDashboard = {
     /** Customers who came to the office. Added with migration 012. */
     walkedIn: number;
   };
-  calls: { total: number; answered: number; missed: number; talkTimeSeconds: number };
+  calls: {
+    total: number;
+    answered: number;
+    missed: number;
+    talkTimeSeconds: number;
+    /** A subset of `total`, not an addition to it: calls the customer made to us. */
+    incoming: number;
+    incomingMissed: number;
+  };
   followUps: { today: number; overdue: number; completed: number };
   employees: { total: number; active: number };
   conversionRate: number;

@@ -173,6 +173,28 @@ export function DashboardPanel({ onUnauthorized }: { onUnauthorized: () => void 
           value={calls.total > 0 ? `${Math.round((calls.answered / calls.total) * 100)}%` : '—'}
           label="Answer rate"
         />
+        {/*
+          Incoming, as a share of the total rather than as a rival total.
+
+          Telecallers' handsets report the calls customers make to them, so this is the
+          only place the business can see how much of the day's activity it did not
+          initiate. The hint says it is a subset, because "Total calls 400 / Incoming 90"
+          otherwise reads as 490.
+        */}
+        <StatCard
+          value={calls.incoming}
+          label="Incoming"
+          icon="phone"
+          tone="accent"
+          hint="Customers who called in — included in total calls"
+        />
+        <StatCard
+          value={calls.incomingMissed}
+          label="Incoming missed"
+          icon="phone"
+          tone={calls.incomingMissed > 0 ? 'bad' : 'default'}
+          hint="Nobody picked up"
+        />
         <StatCard
           value={`${conversionRate}%`}
           label="Conversion rate"

@@ -38,6 +38,13 @@ export function CallsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [preset, setPreset] = useState<RangePreset>('week');
   const [employeeId, setEmployeeId] = useState<number | 'all'>('all');
   const [outcome, setOutcome] = useState<CallOutcome | 'all'>('all');
+  /*
+   * Incoming calls are read off the telecaller's handset and logged through the same
+   * endpoint as outgoing ones, so they arrive in this table mixed in with the rest. A
+   * manager asking "how much business is the phone bringing us" cannot answer it from a
+   * mixed list, and the direction column alone does not filter.
+   */
+  const [direction, setDirection] = useState<'all' | 'outgoing' | 'incoming'>('all');
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const [page, setPage] = useState(1);
@@ -60,7 +67,7 @@ export function CallsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
 
   useEffect(() => {
     setPage(1);
-  }, [tab, preset, employeeId, outcome, debounced]);
+  }, [tab, preset, employeeId, outcome, direction, debounced]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +99,7 @@ export function CallsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
           pageSize: PAGE_SIZE,
           userId: employeeId,
           outcome,
+          direction,
           q: debounced || undefined,
           ...range,
         };
@@ -135,7 +143,7 @@ export function CallsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
     } finally {
       setLoading(false);
     }
-  }, [tab, page, employeeId, outcome, debounced, range, onUnauthorized]);
+  }, [tab, page, employeeId, outcome, direction, debounced, range, onUnauthorized]);
 
   useEffect(() => {
     void load();
@@ -242,6 +250,26 @@ export function CallsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
 
           {tab === 'calls' ? (
             <div className="field">
+              <label className="field__label" htmlFor="tc-call-direction">
+                Direction
+              </label>
+              <select
+                id="tc-call-direction"
+                className="select"
+                value={direction}
+                onChange={(event) =>
+                  setDirection(event.target.value as 'all' | 'outgoing' | 'incoming')
+                }
+              >
+                <option value="all">Both directions</option>
+                <option value="outgoing">Outgoing</option>
+                <option value="incoming">Incoming</option>
+              </select>
+            </div>
+          ) : null}
+
+          {tab === 'calls' ? (
+            <div className="field">
               <label className="field__label" htmlFor="tc-call-outcome">
                 Outcome
               </label>
@@ -292,7 +320,11 @@ export function CallsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
         !calls || calls.items.length === 0 ? (
           <EmptyPanel
             title="No calls in this period"
-            message="Widen the date range, or check that telecallers are logging calls from the mobile app."
+            message={
+              direction === 'incoming'
+                ? "Incoming calls are read from each telecaller’s handset when they open the app. Widen the date range, or check that they have granted call-log access."
+                : 'Widen the date range, or check that telecallers are logging calls from the mobile app.'
+            }
           />
         ) : (
           <DataTable
