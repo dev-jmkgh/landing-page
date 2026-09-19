@@ -699,6 +699,236 @@ async function main(): Promise<void> {
       (strangerLeadAgain.json.calls as Json[]).map((row) => row.id),
     );
 
+    /* ------------------------- writing up a detected call ------------- */
+    /*
+     * An incoming call exists before anybody has looked at it, so "add a call record" is
+     * an amendment, not an insert. These assertions guard the property that makes a
+     * duplicate call record impossible rather than merely unlikely: there is one row per
+     * physical call, and writing it up changes that row.
+     */
+    console.log('\ncall records');
+
+    const unrecorded = (incomingList.json.items as Json[]).find(
+      (row) => row.id === incomingKnown.json.call?.id,
+    );
+    check(
+      'a detected call starts out not written up',
+      unrecorded?.recordedAt === null,
+      unrecorded?.recordedAt,
+    );
+    /*
+     * The number belongs to TWO leads — a household sharing a handset, seeded earlier in
+     * this file — so the server declined to guess and left the call unattached. That is
+     * correct, and it is also the exact situation that made the Incoming list offer
+     * "Create lead" for a number every telecaller would recognise: the screen was reading
+     * attachment as existence. These two assertions pin the difference.
+     */
+    check(
+      'a call from an ambiguous number is left unattached rather than guessed at',
+      unrecorded?.leadId === null,
+      unrecorded?.leadId,
+    );
+
+    const ambiguous = await ravi.post('/mobile/leads/lookup/by-phones', {
+      phones: [String(unrecorded?.phone)],
+    });
+    check(
+      'but the number is still recognised as belonging to existing leads',
+      ((ambiguous.json.items as Json)[String(unrecorded?.phone)] as Json[]).length === 2,
+      ambiguous.json.items,
+    );
+
+    const beforeRecord = await ravi.get('/mobile/calls?direction=incoming');
+    const countBefore = beforeRecord.json.total as number;
+
+    /*
+     * The telecaller says which of the two it was. This is the only way a call gets a lead
+     * here, and it is why the write-up sheet has to accept one — an ambiguous number
+     * cannot be resolved by the server without picking a customer at random.
+     *
+     * A lead of its own, deliberately. An earlier draft wrote this up against the main
+     * lead and set its status to 'interested', which quietly undid the walked-in status a
+     * completely unrelated test had set forty lines earlier — the failure surfaced in the
+     * admin section and pointed nowhere near here.
+     */
+    const anita = await ravi.post('/mobile/leads', {
+      customerName: 'Anita Rao',
+      phone: '+91 90000 88822',
+      source: 'manual',
+      clientUuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
+    const anitaLeadId = anita.json.lead?.id as number;
+
+    const recorded = await ravi.post('/mobile/calls/' + incomingKnown.json.call?.id + '/record', {
+      leadId: anitaLeadId,
+      note: 'Asked about the evening batch. Sending fees.',
+      leadStatus: 'interested',
+      followUpAt: new Date(Date.now() + 172_800_000).toISOString(),
+      followUpNote: 'Call after the fee structure lands.',
+    });
+    check('the call is written up', recorded.status === 200, recorded.json);
+    check(
+      'and naming the lead attached the call to it',
+      recorded.json.call?.leadId === anitaLeadId,
+      recorded.json.call?.leadId,
+    );
+    check(
+      'the attached call now carries the lead status for the list to render',
+      typeof recorded.json.call?.leadStatus === 'string',
+      recorded.json.call?.leadStatus,
+    );
+    check('it is stamped as recorded', recorded.json.call?.recordedAt !== null, recorded.json.call);
+    check(
+      'writing it up also clears it from the unhandled list',
+      recorded.json.call?.followedUp === true,
+      recorded.json.call,
+    );
+    check(
+      'the follow-up booked with it is created',
+      typeof recorded.json.followUpId === 'number',
+      recorded.json,
+    );
+
+    const afterRecord = await ravi.get('/mobile/calls?direction=incoming');
+    check(
+      'and NO second call row was created',
+      (afterRecord.json.total as number) === countBefore,
+      { before: countBefore, after: afterRecord.json.total },
+    );
+
+    const recordedLead = await ravi.get('/mobile/leads/' + anitaLeadId);
+    check(
+      'the note lands in the lead history against that call',
+      (recordedLead.json.notes as Json[]).some(
+        (note) => note.callId === incomingKnown.json.call?.id && note.kind === 'call_note',
+      ),
+      (recordedLead.json.notes as Json[]).map((n) => n.callId),
+    );
+    check(
+      'the status chosen while writing it up is applied to the lead',
+      recordedLead.json.lead?.status === 'interested',
+      recordedLead.json.lead?.status,
+    );
+
+    /* --- writing up twice amends, it does not duplicate --- */
+    const recordedAgain = await ravi.post('/mobile/calls/' + incomingKnown.json.call?.id + '/record', {
+      note: 'Correction: morning batch, not evening.',
+    });
+    check('the same call can be written up again', recordedAgain.status === 200, recordedAgain.json);
+
+    const afterSecond = await ravi.get('/mobile/calls?direction=incoming');
+    check(
+      'and the second write-up still creates no extra call row',
+      (afterSecond.json.total as number) === countBefore,
+      { before: countBefore, after: afterSecond.json.total },
+    );
+
+    /* --- writing up an unknown caller needs a lead for the parts that need one --- */
+    const strangerCall = await ravi.post('/mobile/calls', {
+      phone: '+91 90000 77744',
+      direction: 'incoming',
+      outcome: 'missed',
+      source: 'call_log',
+      startedAt: new Date(Date.now() - 300_000).toISOString(),
+      clientUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    });
+    const orphan = strangerCall.json.call as Json;
+    check('a call from a number no lead has is unattached', orphan?.leadId === null, orphan);
+
+    const noLeadNote = await ravi.post('/mobile/calls/' + orphan?.id + '/record', {
+      note: 'This has nowhere to go.',
+    });
+    check(
+      'a note on a call with no lead is refused, not silently dropped',
+      noLeadNote.status === 422 || noLeadNote.status === 400,
+      { status: noLeadNote.status, body: noLeadNote.json },
+    );
+
+    const outcomeOnly = await ravi.post('/mobile/calls/' + orphan?.id + '/record', {
+      outcome: 'missed',
+    });
+    check(
+      'but confirming the outcome alone is allowed with no lead',
+      outcomeOnly.status === 200,
+      outcomeOnly.json,
+    );
+    check(
+      'and that marks it recorded',
+      outcomeOnly.json.call?.recordedAt !== null,
+      outcomeOnly.json.call,
+    );
+
+    /* --- a call cannot be moved between customers --- */
+    const otherLead = await ravi.post('/mobile/leads', {
+      customerName: 'Somebody Else',
+      phone: '+91 90000 55511',
+      source: 'manual',
+      clientUuid: '99999999-9999-4999-8999-999999999999',
+    });
+    const hijack = await ravi.post('/mobile/calls/' + incomingKnown.json.call?.id + '/record', {
+      leadId: otherLead.json.lead?.id,
+      note: 'Should not move this call.',
+    });
+    check('re-recording an attached call succeeds', hijack.status === 200, hijack.json);
+    check(
+      'but it does NOT move the call to the lead the client named',
+      hijack.json.call?.leadId === anitaLeadId,
+      { expected: anitaLeadId, now: hijack.json.call?.leadId },
+    );
+
+    /* --- one telecaller cannot write up another's call --- */
+    const foreign = await mira.post('/mobile/calls/' + incomingKnown.json.call?.id + '/record', {
+      outcome: 'answered',
+    });
+    check(
+      "another telecaller cannot write up someone else's call",
+      foreign.status === 404,
+      foreign.status,
+    );
+
+    /* ------------------------- batch phone lookup ---------------------- */
+    /*
+     * What the Incoming list uses to decide between "View lead" and "Create lead". Getting
+     * this wrong in the false direction is how duplicate leads get made, so it is asserted
+     * against the same number in three different renderings.
+     */
+    const batch = await ravi.post('/mobile/leads/lookup/by-phones', {
+      phones: ['+91 98765 43210', '09876543210', '9876543210', '+91 90000 99999'],
+    });
+    check('the batch lookup responds', batch.status === 200, batch.json);
+    check(
+      'a known number matches however it is written',
+      ['+91 98765 43210', '09876543210', '9876543210'].every(
+        (phone) => ((batch.json.items as Json)[phone] as Json[]).length > 0,
+      ),
+      batch.json.items,
+    );
+    check(
+      'an unknown number matches nothing',
+      ((batch.json.items as Json)['+91 90000 99999'] as Json[]).length === 0,
+      (batch.json.items as Json)['+91 90000 99999'],
+    );
+    check(
+      'matches carry the name and status the list needs to render',
+      (((batch.json.items as Json)['9876543210'] as Json[])[0] as Json)?.name !== undefined &&
+        (((batch.json.items as Json)['9876543210'] as Json[])[0] as Json)?.status !== undefined,
+      ((batch.json.items as Json)['9876543210'] as Json[])[0],
+    );
+
+    const tooMany = await ravi.post('/mobile/leads/lookup/by-phones', {
+      phones: Array.from({ length: 51 }, (_, i) => '900000000' + i),
+    });
+    check('an oversized batch is refused', tooMany.status === 422, tooMany.status);
+
+    const miraBatch = await mira.post('/mobile/leads/lookup/by-phones', {
+      phones: ['9876543210'],
+    });
+    check(
+      "the batch lookup does not reveal a colleague's leads",
+      ((miraBatch.json.items as Json)['9876543210'] as Json[]).length === 0,
+      miraBatch.json.items,
+    );
+
     /* ---------------------------------------------- notifications */
     const notifications = await ravi.get('/mobile/notifications');
     check('notifications endpoint responds', notifications.status === 200, notifications.json);
@@ -752,20 +982,29 @@ async function main(): Promise<void> {
      * earlier response on purpose — a total computed from the same API it is checking
      * would pass even if both were wrong together.
      */
-    check('admin dashboard counts all leads', adminDash.json.leads?.total === 4, adminDash.json.leads);
+    /*
+     * Six: Ravi's two, the two the incoming-call section created from one unknown number,
+     * and the two the call-record section needed — one to attach an ambiguous call to, one
+     * to prove a call cannot be moved onto it.
+     */
+    check('admin dashboard counts all leads', adminDash.json.leads?.total === 6, adminDash.json.leads);
     check('admin dashboard counts unassigned leads', adminDash.json.leads?.unassigned === 0, adminDash.json.leads);
     /*
      * Three incoming calls exist across both telecallers — two of Ravi's and one of
      * Mira's — and one of the three was answered, so two were not.
      */
+    /*
+     * Four incoming across both telecallers: the unknown caller, the ambiguous number,
+     * the one the call-record section logged, and Mira's. Three went unanswered.
+     */
     check(
       'admin dashboard separates the calls customers made to us',
-      adminDash.json.calls?.incoming === 3,
+      adminDash.json.calls?.incoming === 4,
       adminDash.json.calls,
     );
     check(
       'and counts the incoming ones nobody answered',
-      adminDash.json.calls?.incomingMissed === 2,
+      adminDash.json.calls?.incomingMissed === 3,
       adminDash.json.calls,
     );
     check(
@@ -776,13 +1015,21 @@ async function main(): Promise<void> {
     check('admin dashboard lists employee performance', Array.isArray(adminDash.json.employees), adminDash.json.employees);
 
     const raviRow = (adminDash.json.employees as Json[]).find((row) => row.name === 'Ravi Caller');
-    // Two outgoing and two incoming; the replayed import is deduplicated and is not one
+    // Two outgoing and three incoming; the replayed import is deduplicated and is not one
     // of them, which is the point of counting here rather than trusting the insert.
-    check('performance rows carry per-employee call counts', raviRow?.calls === 4, raviRow);
+    check('performance rows carry per-employee call counts', raviRow?.calls === 5, raviRow);
     // 214 from the connected outgoing call, 45 from the answered incoming one. The two
     // unanswered calls contribute nothing, because a ring is not talk time.
     check('performance rows carry talk time', raviRow?.talkTimeSeconds === 259, raviRow);
-    check('performance rows carry leads contacted', raviRow?.leadsContacted === 1, raviRow);
+    /*
+     * Two: the lead Ravi rang, and the one an incoming call was written up against.
+     *
+     * It was one until attaching a call to a lead started refreshing that lead's
+     * last-contacted timestamp — which is the point of doing so. A customer who rang in
+     * and was written up HAS been in contact, and a lead that still claimed otherwise
+     * would reappear under "Not yet called" on the dashboard.
+     */
+    check('performance rows carry leads contacted', raviRow?.leadsContacted === 2, raviRow);
 
     const telecallerOnAdmin = await ravi.get('/admin/telecalling/dashboard');
     check('a telecaller is refused the admin dashboard', telecallerOnAdmin.status === 403, telecallerOnAdmin.status);
@@ -791,7 +1038,7 @@ async function main(): Promise<void> {
     check('a telecaller is refused the recordings list', telecallerRecordings.status === 403);
 
     const adminLeads = await adminAsBearer.get('/admin/telecalling/leads');
-    check('an admin sees every lead regardless of owner', adminLeads.json.total === 4, adminLeads.json.total);
+    check('an admin sees every lead regardless of owner', adminLeads.json.total === 6, adminLeads.json.total);
 
     /*
      * The admin calls list can be narrowed to one direction.
@@ -803,7 +1050,7 @@ async function main(): Promise<void> {
     const adminIncoming = await adminAsBearer.get('/admin/telecalling/calls?direction=incoming');
     check(
       'an admin can narrow the call list to incoming calls',
-      adminIncoming.json.total === 3,
+      adminIncoming.json.total === 4,
       adminIncoming.json.total,
     );
     check(

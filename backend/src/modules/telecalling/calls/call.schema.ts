@@ -57,8 +57,13 @@ export const logCallSchema = z.object({
    * Status the telecaller chose in the post-call sheet. Applied to the lead in the same
    * transaction as the call, because "logged the call but lost the status" is the
    * failure that makes a telecaller stop trusting the app.
+   *
+   * `.nullish()` for the reason given on `recordCallSchema`: an unselected status is
+   * `null` in the app and `.optional()` rejects that. `PostCallGate` has been converting
+   * it to `undefined` on the way out to compensate, which worked only because there was
+   * exactly one caller — the second one hit the error.
    */
-  leadStatus: z.enum(LEAD_STATUSES).optional(),
+  leadStatus: z.enum(LEAD_STATUSES).nullish(),
 
   /** Follow-up booked from the post-call sheet. */
   followUpAt: z
@@ -142,3 +147,60 @@ export const attachRecordingSchema = z.object({
 });
 
 export type AttachRecordingInput = z.infer<typeof attachRecordingSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Writing up a call that already exists                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a telecaller adds to an incoming call the app detected on its own.
+ *
+ * Every field is optional, and that is the difference from `logCallSchema`. Logging a
+ * call asserts that it happened, so it needs the number, the outcome and the time.
+ * Writing one up only amends a row that already carries all three — so an employee who
+ * opens the sheet, changes nothing and saves has still done something meaningful: the
+ * call is confirmed and marked recorded.
+ */
+export const recordCallSchema = z.object({
+  /**
+   * The lead this call belongs to, for a caller the server could not place.
+   *
+   * Honoured only when the call has no lead yet; the service will not move a call between
+   * customers. Omitted for a call that already matched one, which is the common case.
+   */
+  leadId: z.coerce.number().int().positive().nullable().optional(),
+
+  /** The telecaller correcting what the call log reported. */
+  outcome: z.enum(CALL_OUTCOMES).optional(),
+  durationSeconds: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(28_800, 'That duration is implausible. Check the call log entry.')
+    .optional(),
+
+  note: optionalBlock(4000),
+  /**
+   * `.nullish()`, not `.optional()`.
+   *
+   * A client with no status to set says so with `null` — that is what an unselected chip
+   * is in the app's own state, and what JSON carries. `.optional()` accepts `undefined`
+   * and REJECTS `null`, so the natural request was answered with a validation error
+   * naming a field the telecaller never touched, and the whole write-up was lost.
+   *
+   * Both meanings are "leave the status alone", which is what the service does with a
+   * falsy value, so accepting both is not leniency — it is the schema describing the two
+   * ways callers already express the same thing.
+   */
+  leadStatus: z.enum(LEAD_STATUSES).nullish(),
+
+  followUpAt: z
+    .string()
+    .datetime({ offset: true })
+    .optional()
+    .nullable()
+    .transform((value) => (value ? new Date(value) : null)),
+  followUpNote: optionalLine(1000),
+});
+
+export type RecordCallInput = z.infer<typeof recordCallSchema>;

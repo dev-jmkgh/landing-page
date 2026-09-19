@@ -1,7 +1,7 @@
 import { withTransaction } from '../../../db/pool';
 import { badRequest, notFound } from '../../../utils/httpError';
 import { logger } from '../../../utils/logger';
-import { canActOnOwner, type Actor } from '../actor';
+import { canActOnOwner, ownershipScope, type Actor } from '../actor';
 import { recordActivityTx } from '../activity/activity.repository';
 import {
   findLeadOwner,
@@ -15,11 +15,12 @@ import { UNANSWERED_OUTCOMES, type CallOutcome } from '../shared.schema';
 import {
   findCall,
   findCallByClientUuid,
+  recordCallTx,
   insertCallTx,
   resolveEarlierMissedCallsTx,
   type CallRecord,
 } from './call.repository';
-import type { LogCallInput } from './call.schema';
+import type { LogCallInput, RecordCallInput } from './call.schema';
 
 /**
  * Call logging.
@@ -283,4 +284,185 @@ export async function logCallBatch(
   }
 
   return { accepted, duplicates, failures };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Writing up a call that already exists                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Records what happened on a call the system already knows about.
+ *
+ * WHY THIS IS NOT `logCall`
+ * -------------------------
+ * An outgoing call is created and written up in one movement: the telecaller dials, the
+ * sheet appears, they fill it in, and `logCall` inserts the whole thing. An incoming
+ * call arrives the other way round. It is read out of the handset's call log and saved
+ * before anybody has looked at it, so by the time the telecaller has something to say
+ * about it the row already exists — and `logCall` would either refuse it as a duplicate
+ * (the client id is derived from the log row, so it is stable) or, worse, insert a
+ * second row for the same physical call.
+ *
+ * So this fills in the parts only a person can supply — which customer it was, what was
+ * said, what to do next — against a row that is already there. There is exactly one row
+ * per physical call, before and after, which is what makes duplicate call records
+ * impossible rather than merely unlikely.
+ *
+ * WHAT IT WILL NOT DO
+ * -------------------
+ * Move a call between leads. `leadId` is honoured only when the call has none, so
+ * writing up a call cannot take a conversation out of one customer's history and put it
+ * in another's. Correcting a mis-attached call is a different operation and deliberately
+ * not this one.
+ */
+export async function recordCall(
+  callId: number,
+  input: RecordCallInput,
+  actor: Actor,
+): Promise<LogCallResult> {
+  const existing = await findCall(callId, ownershipScope(actor));
+  if (!existing) throw notFound('Call not found.');
+
+  /*
+   * Which lead this call belongs to, in order of authority: the one it already has, the
+   * one the telecaller picked, then the one its number matches.
+   *
+   * The phone fallback is what makes the common case one tap. An incoming call from a
+   * number that matches exactly one lead should not ask which customer it was — the
+   * server already knows, and `logCall` answers the same question the same way.
+   */
+  let leadId: number | null = existing.leadId;
+
+  if (leadId === null && input.leadId) {
+    const lead = await findLeadOwner(input.leadId);
+    if (!lead) throw notFound('Lead not found.');
+    if (!canActOnOwner(actor, lead.assignedTo)) throw notFound('Lead not found.');
+    leadId = lead.id;
+  }
+
+  if (leadId === null) {
+    const matches = await findLeadsByPhone(existing.phone, actor.id);
+    if (matches.length === 1) leadId = matches[0]!.id;
+  }
+
+  /*
+   * A note, a status or a follow-up with nobody to attach it to.
+   *
+   * Refused rather than silently dropped: all three live on the lead, and a telecaller
+   * who typed a paragraph about the conversation must not be told it was saved when it
+   * went nowhere. The app keeps these disabled until a lead is chosen, so reaching this
+   * means the client got ahead of itself.
+   */
+  if (leadId === null && (input.note || input.leadStatus || input.followUpAt)) {
+    throw badRequest(
+      'Choose a lead, or create one, before saving notes or a follow-up against this call.',
+    );
+  }
+
+  const outcome = input.outcome ?? existing.outcome;
+
+  /*
+   * Same rule as logging a fresh call: a duration on a call that never connected is
+   * ring time, and counting it inflates every talk-time average.
+   */
+  const durationSeconds = UNANSWERED_OUTCOMES.includes(outcome)
+    ? 0
+    : (input.durationSeconds ?? existing.durationSeconds);
+
+  const followUpId = await withTransaction(async (connection) => {
+    await recordCallTx(connection, callId, actor.id, {
+      leadId,
+      outcome,
+      durationSeconds,
+    });
+
+    if (leadId === null) return null;
+
+    /*
+     * The timeline entry is written here rather than when the call was imported.
+     *
+     * An imported call with no lead had no timeline to be written to, and one that did
+     * match a lead was logged by `logCall` on the way in. Either way this is the first
+     * moment a written-up call has both a lead and something worth saying about it.
+     */
+    await recordActivityTx(connection, {
+      leadId,
+      userId: actor.id,
+      type: 'call_logged',
+      summary: describeCall(actor.name, existing.direction, outcome, durationSeconds),
+      meta: {
+        callId,
+        direction: existing.direction,
+        outcome,
+        durationSeconds,
+        recordedFrom: 'incoming_list',
+      },
+    });
+
+    if (input.note) {
+      await insertNoteTx(connection, {
+        leadId,
+        userId: actor.id,
+        kind: 'call_note',
+        body: input.note,
+        callId,
+        clientUuid: null,
+      });
+
+      await recordActivityTx(connection, {
+        leadId,
+        userId: actor.id,
+        type: 'note_added',
+        summary: `${actor.name} wrote up this call`,
+        meta: { callId },
+      });
+    }
+
+    if (input.leadStatus) {
+      const before = await findLeadOwner(leadId);
+      if (before && before.status !== input.leadStatus) {
+        await updateLeadStatusTx(connection, leadId, input.leadStatus);
+        await recordActivityTx(connection, {
+          leadId,
+          userId: actor.id,
+          type: 'status_changed',
+        summary: `${actor.name} changed the status from ${before.status.replace(/_/g, ' ')} to ${input.leadStatus.replace(/_/g, ' ')}`,
+          meta: { from: before.status, to: input.leadStatus, callId },
+        });
+      }
+    }
+
+    let createdFollowUpId: number | null = null;
+
+    if (input.followUpAt) {
+      const [result] = await connection.execute(
+        `INSERT INTO follow_ups (lead_id, assigned_to, created_by, due_at, note)
+         VALUES (?, ?, ?, ?, ?)`,
+        [leadId, actor.id, actor.id, input.followUpAt, input.followUpNote],
+      );
+      createdFollowUpId = (result as { insertId: number }).insertId;
+
+      await recordActivityTx(connection, {
+        leadId,
+        userId: actor.id,
+        type: 'follow_up_created',
+        summary: `${actor.name} scheduled a follow-up`,
+        meta: { dueAt: input.followUpAt.toISOString(), followUpId: createdFollowUpId },
+      });
+    }
+
+    /*
+     * Attaching a call to a lead changes when that lead was last contacted, and the
+     * dashboard's "not yet called" tile reads that column. Without this the lead would
+     * keep claiming nobody had ever spoken to it.
+     */
+    await refreshLeadCachesTx(connection, leadId);
+
+    return createdFollowUpId;
+  });
+
+  const call = await findCall(callId, null);
+  if (!call) throw notFound('Call not found after recording.');
+
+  return { call, followUpId, deduplicated: false };
 }

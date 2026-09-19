@@ -15,6 +15,7 @@ import {
   type CallDirection,
   type CallOutcome,
   type CallSource,
+  type LeadStatus,
   type Paginated,
 } from '../shared.schema';
 import type { CallListQuery } from './call.schema';
@@ -37,6 +38,8 @@ export interface CallRow extends RowDataPacket {
   started_at: Date;
   ended_at: Date | null;
   followed_up: number;
+  recorded_at: Date | null;
+  lead_status: LeadStatus | null;
   recording_id: number | null;
   recording_duration: number | null;
   created_at: Date;
@@ -47,6 +50,11 @@ export type CallRecord = {
   leadId: number | null;
   leadReference: string | null;
   leadName: string | null;
+  /**
+   * The lead's current status, carried on the call so a list of calls can show it without
+   * a second request per row. Null when the call belongs to no lead.
+   */
+  leadStatus: LeadStatus | null;
   userId: number;
   userName: string | null;
   phone: string;
@@ -58,6 +66,14 @@ export type CallRecord = {
   startedAt: string;
   endedAt: string | null;
   followedUp: boolean;
+  /**
+   * When a telecaller wrote this call up, or null if nobody has.
+   *
+   * Not the same question as `followedUp`. An incoming call can be dealt with — called
+   * back, marked done — without anybody recording what was said, and a call can be
+   * written up in full and still need a callback. The Incoming list needs both.
+   */
+  recordedAt: string | null;
   /** Whether a recording exists. The storage key is never exposed to a client. */
   hasRecording: boolean;
   recordingId: number | null;
@@ -71,6 +87,7 @@ export function toCallRecord(row: CallRow): CallRecord {
     leadId: row.lead_id,
     leadReference: row.lead_reference,
     leadName: row.lead_name,
+    leadStatus: row.lead_status,
     userId: row.user_id,
     userName: row.user_name,
     phone: row.phone,
@@ -82,6 +99,7 @@ export function toCallRecord(row: CallRow): CallRecord {
     startedAt: new Date(row.started_at).toISOString(),
     endedAt: row.ended_at ? new Date(row.ended_at).toISOString() : null,
     followedUp: row.followed_up === 1,
+    recordedAt: row.recorded_at ? row.recorded_at.toISOString() : null,
     hasRecording: row.recording_id !== null,
     recordingId: row.recording_id,
     recordingDuration: row.recording_duration === null ? null : Number(row.recording_duration),
@@ -93,6 +111,7 @@ const CALL_SELECT = `
   SELECT c.id, c.lead_id, l.reference AS lead_reference, l.customer_name AS lead_name,
          c.user_id, u.name AS user_name, c.phone, c.direction, c.outcome, c.channel,
          c.source, c.duration_seconds, c.started_at, c.ended_at, c.followed_up,
+         c.recorded_at, l.status AS lead_status,
          r.id AS recording_id, r.duration_seconds AS recording_duration, c.created_at
     FROM calls c
     LEFT JOIN leads l ON l.id = c.lead_id
@@ -528,6 +547,57 @@ export async function findRecordingKey(
 }
 
 /**
+ * Writes up an existing call: links it to a lead, corrects what the log got wrong, and
+ * stamps it as recorded.
+ *
+ * Only ever touches columns the telecaller is entitled to change. `lead_id` moves only
+ * from NULL — a call already filed against a customer is never re-pointed by this — and
+ * the row is matched on `user_id` as well as `id`, so one telecaller cannot write up
+ * another's call.
+ */
+export async function recordCallTx(
+  connection: PoolConnection,
+  callId: number,
+  userId: number,
+  changes: {
+    leadId?: number | null;
+    outcome?: CallOutcome;
+    durationSeconds?: number;
+  },
+): Promise<void> {
+  const sets: string[] = ['recorded_at = CURRENT_TIMESTAMP', 'followed_up = 1'];
+  const params: SqlParam[] = [];
+
+  if (changes.leadId !== undefined && changes.leadId !== null) {
+    /*
+     * The guard is on the column, not in the WHERE clause.
+     *
+     * `AND lead_id IS NULL` there would drop the whole update — outcome, duration and
+     * the recorded stamp with it — whenever the call already had a lead. `IFNULL` keeps
+     * the rest of the write and makes re-attaching a no-op instead of a refusal.
+     */
+    sets.push('lead_id = IFNULL(lead_id, ?)');
+    params.push(changes.leadId);
+  }
+
+  if (changes.outcome !== undefined) {
+    sets.push('outcome = ?');
+    params.push(changes.outcome);
+  }
+
+  if (changes.durationSeconds !== undefined) {
+    sets.push('duration_seconds = ?');
+    params.push(changes.durationSeconds);
+  }
+
+  params.push(callId, userId);
+
+  await connection.execute(
+    `UPDATE calls SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`,
+    params,
+  );
+}
+/**
  * Attaches the actor's unattached calls from this number to a lead that has just been created.
  *
  * WHY THIS EXISTS
@@ -550,6 +620,12 @@ export async function findRecordingKey(
  * Matching is the trailing nine digits, the same key `resolveEarlierMissedCallsTx` and the
  * server's `phoneMatchKey` use: the call log writes `+919876543210` where the lead form
  * was given `9876543210`, and an exact comparison would find nothing in the common case.
+ *
+ * Adopted calls are stamped as recorded and followed up at the same time. Creating the
+ * lead IS the act of filing them: they are in a customer's history from this moment, and
+ * leaving them unrecorded would have the Incoming list go on asking the telecaller to
+ * write up calls it has just written up for them. The write-up sheet stays available on
+ * each one, so a note can still be added afterwards — being recorded is not being closed.
  *
  * Returns how many calls were adopted, so the caller can decide whether the lead's
  * timeline deserves a line about it.
@@ -580,7 +656,9 @@ export async function adoptOrphanCallsTx(
 
   const [result] = await connection.execute<ResultSetHeader>(
     `UPDATE calls
-        SET lead_id = ?
+        SET lead_id = ?,
+            followed_up = 1,
+            recorded_at = IFNULL(recorded_at, CURRENT_TIMESTAMP)
       WHERE user_id = ?
         AND lead_id IS NULL
         AND (${clause})`,

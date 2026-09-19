@@ -241,3 +241,20 @@ export type LeadListQuery = z.infer<typeof leadListQuerySchema>;
 export const leadLookupSchema = z.object({
   phone: z.string().trim().min(4).max(20),
 });
+
+/**
+ * Several numbers in one question.
+ *
+ * The Incoming calls screen has to know, for every row, whether that number already
+ * belongs to a customer — because offering "Create lead" for a number that does is how
+ * duplicate leads get made. Asking one number at a time would be a request per row on a
+ * screen that opens on every app resume, against a rate limit shared by the whole office.
+ *
+ * Capped at fifty, which is the screen's own page size. A larger request is a client bug,
+ * and answering it anyway would turn this into an export endpoint for the lead table.
+ */
+export const leadPhoneBatchSchema = z.object({
+  phones: z.array(z.string().min(3).max(32)).min(1).max(50),
+});
+
+export type LeadPhoneBatchInput = z.infer<typeof leadPhoneBatchSchema>;

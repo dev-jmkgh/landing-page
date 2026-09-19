@@ -28,10 +28,11 @@ import {
   callListQuerySchema,
   logCallBatchSchema,
   logCallSchema,
+  recordCallSchema,
   resolveMissedCallSchema,
   type CallListQuery,
 } from './calls/call.schema';
-import { logCall, logCallBatch } from './calls/call.service';
+import { logCall, logCallBatch, recordCall } from './calls/call.service';
 import { setCallFollowedUp } from './calls/call.repository';
 import { employeeActivitySummary, employeeDashboard } from './dashboard/dashboard.repository';
 import { findEmployee, setAvailability } from './employees/employee.repository';
@@ -65,6 +66,7 @@ import {
   leadListQuerySchema,
   leadLookupSchema,
   leadNoteSchema,
+  leadPhoneBatchSchema,
   leadStatusSchema,
   updateLeadSchema,
   type LeadListQuery,
@@ -279,6 +281,50 @@ mobileRouter.get(
   }),
 );
 
+/**
+ * The same question for a screenful of numbers at once.
+ *
+ * POST for a read, because the numbers go in a body: a query string of fifty `+91…`
+ * values runs into length limits and into `+` meaning a space, and getting that wrong
+ * silently returns "no match" — which on this screen means offering to create a lead that
+ * already exists.
+ *
+ * Answers with a map keyed by the string the caller sent, not by a normalised form, so
+ * the client can look its own rows up without reimplementing the matching rule. Matching
+ * stays here for the same reason it does everywhere else: it is ownership-scoped, and a
+ * second copy of that rule on the handset would be a weaker one.
+ */
+mobileRouter.post(
+  '/leads/lookup/by-phones',
+  validateBody(leadPhoneBatchSchema),
+  asyncHandler(async (request, response) => {
+    const { phones } = request.body as z.infer<typeof leadPhoneBatchSchema>;
+    const scope = ownershipScope(request.actor!);
+
+    /*
+     * De-duplicated before the lookups run. A burst of missed calls from one number is
+     * the normal shape of this screen's data, and it would otherwise be the same query
+     * repeated once per row.
+     */
+    const unique: string[] = [...new Set(phones)];
+    const found = await Promise.all(unique.map((phone) => findLeadsByPhone(phone, scope)));
+
+    const items: Record<string, { id: number; reference: string; name: string; status: string }[]> =
+      {};
+
+    unique.forEach((phone, index) => {
+      items[phone] = (found[index] ?? []).map((lead) => ({
+        id: lead.id,
+        reference: lead.reference,
+        name: lead.customerName,
+        status: lead.status,
+      }));
+    });
+
+    response.json({ success: true, items });
+  }),
+);
+
 /** Source options for the create-lead form, so the app never hard-codes them. */
 mobileRouter.get(
   '/lead-sources',
@@ -463,6 +509,28 @@ mobileRouter.patch(
     if (!updated) throw notFound('Call not found.');
 
     response.json({ success: true });
+  }),
+);
+
+/**
+ * Writes up a call the app detected on its own (spec: Incoming calls).
+ *
+ * Deliberately not `POST /calls`. That endpoint creates, and an incoming call already
+ * exists by the time anybody has something to say about it — the app read it out of the
+ * handset's log and saved it. Routing this through the create endpoint would either be
+ * rejected as a replay, because the client id is derived from the log row and therefore
+ * stable, or would insert a second row for one physical call. One row per call, before
+ * and after, is what makes a duplicate call record impossible here.
+ */
+mobileRouter.post(
+  '/calls/:id/record',
+  mobileSyncLimiter,
+  validateBody(recordCallSchema),
+  asyncHandler(async (request, response) => {
+    const id = parseId(request.params.id);
+    const result = await recordCall(id, request.body as z.infer<typeof recordCallSchema>, request.actor!);
+
+    response.json({ success: true, ...result });
   }),
 );
 
