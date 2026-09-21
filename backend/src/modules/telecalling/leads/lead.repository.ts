@@ -552,18 +552,35 @@ export async function findLeadOwner(
     : null;
 }
 
-/** Duplicate check before creating a lead. Matches on the trailing digits, as above. */
+/**
+ * The active lead already holding this number, if there is one.
+ *
+ * This is what enforces one lead per number — `createLead` and `editLead` refuse when it
+ * returns something — so it runs on every lead create and every phone edit. It used to
+ * compare with `LIKE '%<digits>'`, and a leading wildcard cannot use an index, so each
+ * check scanned the whole leads table.
+ *
+ * `phone_key` (migration 015) is the same trailing-nine-digit key computed once and
+ * stored, so this is now an index lookup. It is NULL for archived leads, which is how
+ * archiving releases a number: the retired record stops matching and the correct lead can
+ * be entered. That also means the `is_archived` filter is no longer needed — it is built
+ * into the column.
+ *
+ * Deliberately NOT scoped to the caller: a number taken by a colleague's lead is still
+ * taken, and scoping this would let two telecallers each create their own copy of one
+ * customer, which is the duplicate this exists to prevent.
+ *
+ * `ORDER BY created_at` on the off-chance the table still holds a pair from before the
+ * rule existed: the oldest is the one the others were duplicates OF, and naming it in the
+ * error is more use than naming whichever came last.
+ */
 export async function findDuplicateByPhone(phone: string): Promise<LeadRecord | null> {
   const key = phoneMatchKey(phone);
   if (key.length < 6) return null;
 
   const row = await queryOne<LeadRow>(
-    `${LEAD_SELECT}
-      WHERE REPLACE(REPLACE(REPLACE(REPLACE(l.phone, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?
-        AND l.is_archived = 0
-      ORDER BY l.created_at DESC
-      LIMIT 1`,
-    [`%${key}`],
+    `${LEAD_SELECT} WHERE l.phone_key = ? ORDER BY l.created_at LIMIT 1`,
+    [key],
   );
 
   return row ? toLeadRecord(row) : null;

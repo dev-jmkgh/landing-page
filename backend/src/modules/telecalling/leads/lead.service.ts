@@ -110,7 +110,32 @@ export async function createLead(
     logger.warn('Unknown lead source normalised to "other"', { requested: input.source });
   }
 
-  const possibleDuplicate = await findDuplicateByPhone(input.phone);
+  /**
+   * One active lead per number. A second is refused, not flagged.
+   *
+   * This used to create the lead anyway and report the clash as advice, on the reasoning
+   * that a household can share a handset. In practice the field never worked that way:
+   * the duplicate was created, both records accumulated half a history each, and calls
+   * from that number stopped attaching to either because the server will not guess
+   * between two matches. One customer ended up with two partial records and an Incoming
+   * list that could not place their calls.
+   *
+   * Matched on the trailing digits and only against ACTIVE leads, so archiving a record
+   * releases its number — see migration 015, which enforces the same rule in the schema
+   * for the two-requests-at-once case this check cannot see.
+   */
+  const existingForPhone = await findDuplicateByPhone(input.phone);
+
+  if (existingForPhone) {
+    throw badRequest(
+      `${existingForPhone.customerName} (${existingForPhone.reference}) already has this number.`,
+      {
+        // Named against the field so both the app and the admin form show it under the
+        // number rather than as a banner the telecaller has to interpret.
+        phone: `Already used by ${existingForPhone.customerName} (${existingForPhone.reference}).`,
+      },
+    );
+  }
 
   const leadId = await withTransaction(async (connection) => {
     const id = await insertLeadTx(connection, {
@@ -235,7 +260,13 @@ export async function createLead(
     });
   }
 
-  return { lead, possibleDuplicate, deduplicated: false };
+  /*
+   * `possibleDuplicate` is always null now and stays in the response on purpose: app
+   * builds already in employees' hands read the field, and a create that succeeds without
+   * it would be a shape they do not expect. A clash is a 4xx to those builds, which they
+   * already render as an error on the form.
+   */
+  return { lead, possibleDuplicate: null, deduplicated: false };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -249,6 +280,26 @@ export async function editLead(
 ): Promise<LeadRecord> {
   const before = await findLead(id, ownershipScope(actor));
   if (!before) throw notFound('Lead not found.');
+
+  /*
+   * Editing a number into one another lead already holds is the same duplicate by a
+   * slower route, so it is refused the same way.
+   *
+   * Compared on the trailing digits, which is what lets a telecaller tidy
+   * `9876543210` into `+91 98765 43210` on the lead that already owns it: the key does
+   * not change, `findDuplicateByPhone` returns this very lead, and the id check below
+   * lets it through. Only a move onto somebody ELSE's number is stopped.
+   */
+  if (input.phone !== undefined) {
+    const clash = await findDuplicateByPhone(input.phone);
+
+    if (clash && clash.id !== id) {
+      throw badRequest(
+        `${clash.customerName} (${clash.reference}) already has this number.`,
+        { phone: `Already used by ${clash.customerName} (${clash.reference}).` },
+      );
+    }
+  }
 
   const changed = await updateLeadFields(id, input);
   if (!changed) throw badRequest('Nothing to update.');

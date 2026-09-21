@@ -589,10 +589,9 @@ export const telecallingApi = {
    * on the one call with fourteen optional fields meant a misspelled key compiled fine
    * and was silently dropped by the server's Zod schema.
    *
-   * `possibleDuplicate` is advisory, not an error. Two leads can legitimately share a
-   * number and the server deliberately does not reject one — it returns the existing lead
-   * alongside the new one so the person who can see both decides. Show it; do not treat
-   * it as a failure.
+   * `possibleDuplicate` is always null and is kept only so older callers do not break on
+   * a missing field. One active lead may hold a number; a second create is refused with
+   * the clash named against `phone` in `fieldErrors`, which the form already renders.
    */
   createLead: (body: {
     customerName: string;

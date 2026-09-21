@@ -290,17 +290,65 @@ async function main(): Promise<void> {
     check('replaying the same clientUuid does not create a second lead', retry.status === 200 && retry.json.deduplicated === true, retry.json);
     check('the replay returns the original lead', retry.json.lead?.id === leadId);
 
+    /*
+     * One active lead per number.
+     *
+     * Asserted in the form the bug actually took: the number is sent written DIFFERENTLY
+     * from the way the first lead stored it. A constraint that compared the text would
+     * let this through and produce the duplicate it exists to prevent.
+     */
     const dup = await ravi.post('/mobile/leads', {
       customerName: 'Deepa N (second enquiry)',
       phone: '9876543210',
       source: 'referral',
     });
-    check('a duplicate number is allowed, not rejected', dup.status === 201, dup.json);
+    check('a second lead on the same number is refused', dup.status === 400, dup.status);
     check(
-      'the existing lead is reported as a possible duplicate',
-      dup.json.possibleDuplicate?.id === leadId,
-      dup.json.possibleDuplicate,
+      'and the refusal names the lead already holding it',
+      String(dup.json.message ?? '').includes('LD-'),
+      dup.json.message,
     );
+    check(
+      'and it is reported against the phone field, not as a bare banner',
+      typeof (dup.json.errors as Json)?.phone === 'string',
+      dup.json.errors,
+    );
+
+    const dupSpaced = await ravi.post('/mobile/leads', {
+      customerName: 'Deepa N (third try)',
+      phone: '+91 98765 43210',
+      source: 'referral',
+    });
+    check('the same number spaced and prefixed is refused too', dupSpaced.status === 400, dupSpaced.status);
+
+    const dupZero = await ravi.post('/mobile/leads', {
+      customerName: 'Deepa N (fourth try)',
+      phone: '09876543210',
+      source: 'referral',
+    });
+    check('and with a leading zero', dupZero.status === 400, dupZero.status);
+
+    /*
+     * Editing a number onto somebody else's lead is the same duplicate by a slower route.
+     */
+    const otherOwner = await ravi.post('/mobile/leads', {
+      customerName: 'Vinod Kumar',
+      phone: '+91 91111 22233',
+      source: 'manual',
+    });
+    const otherOwnerId = otherOwner.json.lead?.id as number;
+
+    const moveOnto = await ravi.patch(`/mobile/leads/${otherOwnerId}`, { phone: '9876543210' });
+    check("editing a lead onto another's number is refused", moveOnto.status === 400, moveOnto.status);
+
+    /*
+     * Reformatting the number on the lead that already owns it must still work — the key
+     * does not change, so the duplicate check finds this very lead and lets it through.
+     * Without the id comparison in `editLead` this would refuse and no number could ever
+     * be tidied up.
+     */
+    const reformat = await ravi.patch(`/mobile/leads/${leadId}`, { phone: '098765 43210' });
+    check('but reformatting a lead\'s own number is allowed', reformat.status === 200, reformat.json);
 
     /* ------------------------------------------------- ownership scoping */
     console.log('\nownership scoping');
@@ -530,8 +578,17 @@ async function main(): Promise<void> {
     const lookup = await ravi.get('/mobile/leads/lookup/by-phone?phone=09876543210');
     check(
       'lookup matches a differently formatted number',
-      lookup.json.items?.length === 2,
+      lookup.json.items?.length === 1,
       lookup.json.items?.length,
+    );
+    /*
+     * Exactly one, now that a number cannot be held twice. This is what lets an incoming
+     * call attach itself without asking: the server is never choosing between customers.
+     */
+    check(
+      'and it is unambiguous, so a call from it can attach on its own',
+      lookup.json.items?.[0]?.id === leadId,
+      lookup.json.items?.[0]?.id,
     );
 
     /* ------------------------------------------------ incoming calls */
@@ -703,17 +760,21 @@ async function main(): Promise<void> {
     });
     check('another telecaller logs a call from the same number', miraIncoming.status === 201, miraIncoming.json);
 
+    /*
+     * Creating a lead for the same caller twice is exactly the mistake the Incoming list
+     * used to invite, so it is refused here as well as on the Leads tab.
+     */
     const raviSecondLead = await ravi.post('/mobile/leads', {
       customerName: 'Priya Menon second enquiry',
       phone: strangerNumber,
       source: 'incoming_call',
       clientUuid: '88888888-8888-4888-8888-888888888888',
     });
-    check('a second lead on the same number is allowed', raviSecondLead.status === 201, raviSecondLead.json);
+    check('a second lead for the same caller is refused', raviSecondLead.status === 400, raviSecondLead.status);
 
     const miraCalls = await mira.get('/mobile/calls?direction=incoming');
     check(
-      'creating that lead did not adopt the other telecallers call',
+      "the other telecaller's call from that number is still hers and unattached",
       (miraCalls.json.items as Json[])[0]?.leadId === null,
       (miraCalls.json.items as Json[])[0],
     );
@@ -734,49 +795,32 @@ async function main(): Promise<void> {
      */
     console.log('\ncall records');
 
-    const unrecorded = (incomingList.json.items as Json[]).find(
+    const attached = (incomingList.json.items as Json[]).find(
       (row) => row.id === incomingKnown.json.call?.id,
     );
-    check(
-      'a detected call starts out not written up',
-      unrecorded?.recordedAt === null,
-      unrecorded?.recordedAt,
-    );
-    /*
-     * The number belongs to TWO leads — a household sharing a handset, seeded earlier in
-     * this file — so the server declined to guess and left the call unattached. That is
-     * correct, and it is also the exact situation that made the Incoming list offer
-     * "Create lead" for a number every telecaller would recognise: the screen was reading
-     * attachment as existence. These two assertions pin the difference.
-     */
-    check(
-      'a call from an ambiguous number is left unattached rather than guessed at',
-      unrecorded?.leadId === null,
-      unrecorded?.leadId,
-    );
-
-    const ambiguous = await ravi.post('/mobile/leads/lookup/by-phones', {
-      phones: [String(unrecorded?.phone)],
-    });
-    check(
-      'but the number is still recognised as belonging to existing leads',
-      ((ambiguous.json.items as Json)[String(unrecorded?.phone)] as Json[]).length === 2,
-      ambiguous.json.items,
-    );
-
-    const beforeRecord = await ravi.get('/mobile/calls?direction=incoming');
-    const countBefore = beforeRecord.json.total as number;
+    check('a detected call starts out not written up', attached?.recordedAt === null, attached?.recordedAt);
 
     /*
-     * The telecaller says which of the two it was. This is the only way a call gets a lead
-     * here, and it is why the write-up sheet has to accept one — an ambiguous number
-     * cannot be resolved by the server without picking a customer at random.
+     * It attached itself on the way in, with nobody asked.
      *
-     * A lead of its own, deliberately. An earlier draft wrote this up against the main
-     * lead and set its status to 'interested', which quietly undid the walked-in status a
-     * completely unrelated test had set forty lines earlier — the failure surfaced in the
-     * admin section and pointed nowhere near here.
+     * That is what one-lead-per-number buys. The server matches an incoming call to a
+     * lead by number and refuses to guess between several — and while two leads could
+     * hold one number there was often nothing to pick from, so calls from well-known
+     * customers arrived unattached and the app offered to create a lead that already
+     * existed. With the number unique the match is always certain or genuinely absent.
      */
+    check(
+      'and it attached itself to the lead that owns the number',
+      attached?.leadId === leadId,
+      { leadId: attached?.leadId, expected: leadId },
+    );
+    check(
+      'carrying the lead status, so a list of calls needs no second request',
+      typeof attached?.leadStatus === 'string',
+      attached?.leadStatus,
+    );
+
+    /* --- the full write-up, against a lead no other assertion depends on --- */
     const anita = await ravi.post('/mobile/leads', {
       customerName: 'Anita Rao',
       phone: '+91 90000 88822',
@@ -785,24 +829,31 @@ async function main(): Promise<void> {
     });
     const anitaLeadId = anita.json.lead?.id as number;
 
-    const recorded = await ravi.post('/mobile/calls/' + incomingKnown.json.call?.id + '/record', {
-      leadId: anitaLeadId,
+    const anitaCall = await ravi.post('/mobile/calls', {
+      phone: '+91 90000 88822',
+      direction: 'incoming',
+      outcome: 'answered',
+      source: 'call_log',
+      durationSeconds: 60,
+      startedAt: new Date(Date.now() - 1_200_000).toISOString(),
+      clientUuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    });
+    check(
+      'a call from a freshly created lead attaches on its own too',
+      anitaCall.json.call?.leadId === anitaLeadId,
+      anitaCall.json.call?.leadId,
+    );
+
+    const beforeRecord = await ravi.get('/mobile/calls?direction=incoming');
+    const countBefore = beforeRecord.json.total as number;
+
+    const recorded = await ravi.post('/mobile/calls/' + anitaCall.json.call?.id + '/record', {
       note: 'Asked about the evening batch. Sending fees.',
       leadStatus: 'interested',
       followUpAt: new Date(Date.now() + 172_800_000).toISOString(),
       followUpNote: 'Call after the fee structure lands.',
     });
     check('the call is written up', recorded.status === 200, recorded.json);
-    check(
-      'and naming the lead attached the call to it',
-      recorded.json.call?.leadId === anitaLeadId,
-      recorded.json.call?.leadId,
-    );
-    check(
-      'the attached call now carries the lead status for the list to render',
-      typeof recorded.json.call?.leadStatus === 'string',
-      recorded.json.call?.leadStatus,
-    );
     check('it is stamped as recorded', recorded.json.call?.recordedAt !== null, recorded.json.call);
     check(
       'writing it up also clears it from the unhandled list',
@@ -826,7 +877,7 @@ async function main(): Promise<void> {
     check(
       'the note lands in the lead history against that call',
       (recordedLead.json.notes as Json[]).some(
-        (note) => note.callId === incomingKnown.json.call?.id && note.kind === 'call_note',
+        (note) => note.callId === anitaCall.json.call?.id && note.kind === 'call_note',
       ),
       (recordedLead.json.notes as Json[]).map((n) => n.callId),
     );
@@ -837,7 +888,7 @@ async function main(): Promise<void> {
     );
 
     /* --- writing up twice amends, it does not duplicate --- */
-    const recordedAgain = await ravi.post('/mobile/calls/' + incomingKnown.json.call?.id + '/record', {
+    const recordedAgain = await ravi.post('/mobile/calls/' + anitaCall.json.call?.id + '/record', {
       note: 'Correction: morning batch, not evening.',
     });
     check('the same call can be written up again', recordedAgain.status === 200, recordedAgain.json);
@@ -849,7 +900,7 @@ async function main(): Promise<void> {
       { before: countBefore, after: afterSecond.json.total },
     );
 
-    /* --- writing up an unknown caller needs a lead for the parts that need one --- */
+    /* --- a caller nobody has a lead for --- */
     const strangerCall = await ravi.post('/mobile/calls', {
       phone: '+91 90000 77744',
       direction: 'incoming',
@@ -884,6 +935,20 @@ async function main(): Promise<void> {
       outcomeOnly.json.call,
     );
 
+    /*
+     * The telecaller recognises the caller and names the lead themselves. This is the
+     * remaining reason `record` accepts a `leadId`: the number belongs to nobody, so no
+     * amount of matching would have found it.
+     */
+    const namedLead = await ravi.post('/mobile/calls/' + orphan?.id + '/record', {
+      leadId: anitaLeadId,
+    });
+    check(
+      'naming a lead attaches an unattached call to it',
+      namedLead.json.call?.leadId === anitaLeadId,
+      namedLead.json.call?.leadId,
+    );
+
     /* --- a call cannot be moved between customers --- */
     const otherLead = await ravi.post('/mobile/leads', {
       customerName: 'Somebody Else',
@@ -891,7 +956,7 @@ async function main(): Promise<void> {
       source: 'manual',
       clientUuid: '99999999-9999-4999-8999-999999999999',
     });
-    const hijack = await ravi.post('/mobile/calls/' + incomingKnown.json.call?.id + '/record', {
+    const hijack = await ravi.post('/mobile/calls/' + anitaCall.json.call?.id + '/record', {
       leadId: otherLead.json.lead?.id,
       note: 'Should not move this call.',
     });
@@ -903,7 +968,7 @@ async function main(): Promise<void> {
     );
 
     /* --- one telecaller cannot write up another's call --- */
-    const foreign = await mira.post('/mobile/calls/' + incomingKnown.json.call?.id + '/record', {
+    const foreign = await mira.post('/mobile/calls/' + anitaCall.json.call?.id + '/record', {
       outcome: 'answered',
     });
     check(
@@ -933,6 +998,13 @@ async function main(): Promise<void> {
       'an unknown number matches nothing',
       ((batch.json.items as Json)['+91 90000 99999'] as Json[]).length === 0,
       (batch.json.items as Json)['+91 90000 99999'],
+    );
+    check(
+      'a known number matches exactly one lead, never several',
+      ['+91 98765 43210', '09876543210', '9876543210'].every(
+        (phone) => ((batch.json.items as Json)[phone] as Json[]).length === 1,
+      ),
+      batch.json.items,
     );
     check(
       'matches carry the name and status the list needs to render',
@@ -1013,7 +1085,12 @@ async function main(): Promise<void> {
      * and the two the call-record section needed — one to attach an ambiguous call to, one
      * to prove a call cannot be moved onto it.
      */
-    check('admin dashboard counts all leads', adminDash.json.leads?.total === 6, adminDash.json.leads);
+    /*
+     * Five: Deepa, Vinod, Priya (created from an unknown caller), Anita, Somebody Else.
+     * It was six until one number could only be held once — the duplicates the earlier
+     * sections used to create are now refused.
+     */
+    check('admin dashboard counts all leads', adminDash.json.leads?.total === 5, adminDash.json.leads);
     check('admin dashboard counts unassigned leads', adminDash.json.leads?.unassigned === 0, adminDash.json.leads);
     /*
      * Three incoming calls exist across both telecallers — two of Ravi's and one of
@@ -1025,7 +1102,7 @@ async function main(): Promise<void> {
      */
     check(
       'admin dashboard separates the calls customers made to us',
-      adminDash.json.calls?.incoming === 4,
+      adminDash.json.calls?.incoming === 5,
       adminDash.json.calls,
     );
     check(
@@ -1043,10 +1120,10 @@ async function main(): Promise<void> {
     const raviRow = (adminDash.json.employees as Json[]).find((row) => row.name === 'Ravi Caller');
     // Two outgoing and three incoming; the replayed import is deduplicated and is not one
     // of them, which is the point of counting here rather than trusting the insert.
-    check('performance rows carry per-employee call counts', raviRow?.calls === 5, raviRow);
+    check('performance rows carry per-employee call counts', raviRow?.calls === 6, raviRow);
     // 214 from the connected outgoing call, 45 from the answered incoming one. The two
     // unanswered calls contribute nothing, because a ring is not talk time.
-    check('performance rows carry talk time', raviRow?.talkTimeSeconds === 259, raviRow);
+    check('performance rows carry talk time', raviRow?.talkTimeSeconds === 319, raviRow);
     /*
      * Two: the lead Ravi rang, and the one an incoming call was written up against.
      *
@@ -1064,7 +1141,7 @@ async function main(): Promise<void> {
     check('a telecaller is refused the recordings list', telecallerRecordings.status === 403);
 
     const adminLeads = await adminAsBearer.get('/admin/telecalling/leads');
-    check('an admin sees every lead regardless of owner', adminLeads.json.total === 6, adminLeads.json.total);
+    check('an admin sees every lead regardless of owner', adminLeads.json.total === 5, adminLeads.json.total);
 
     /*
      * The admin calls list can be narrowed to one direction.
@@ -1076,7 +1153,7 @@ async function main(): Promise<void> {
     const adminIncoming = await adminAsBearer.get('/admin/telecalling/calls?direction=incoming');
     check(
       'an admin can narrow the call list to incoming calls',
-      adminIncoming.json.total === 4,
+      adminIncoming.json.total === 5,
       adminIncoming.json.total,
     );
     check(
@@ -1084,6 +1161,86 @@ async function main(): Promise<void> {
       new Set((adminIncoming.json.items as Json[]).map((row) => row.userId)).size === 2,
       (adminIncoming.json.items as Json[]).map((row) => row.userId),
     );
+
+
+    /* ------------------- what the rule does and does not cover ------------- */
+    /*
+     * The rule is enforced in the service, not by a unique index, because the index
+     * could not be added to a table that already holds duplicate numbers — and those
+     * are grandfathered in deliberately. So this pins the boundary rather than
+     * pretending it is not there: a row inserted straight into the table, bypassing
+     * `createLead`, is NOT refused.
+     *
+     * That is the two-requests-in-one-instant window, written down so nobody later reads
+     * "one lead per number" as a schema guarantee and builds on it.
+     */
+    let rawInsertRefused = false;
+    try {
+      await db.query(
+        `INSERT INTO leads (reference, customer_name, phone, source, status, assigned_to, created_by)
+         VALUES ('LD-RACE0001', 'Race Condition', '+91 98765 43210', 'manual', 'new', 2, 2)`,
+      );
+    } catch {
+      rawInsertRefused = true;
+    }
+    check(
+      'the rule lives in the service: a raw insert is not stopped by the schema',
+      rawInsertRefused === false,
+      rawInsertRefused ? 'a constraint refused it — the migration added a UNIQUE index' : undefined,
+    );
+
+    // Cleaned up so it cannot skew the counts the admin section asserts on.
+    await db.query("DELETE FROM leads WHERE reference = 'LD-RACE0001'");
+
+    /*
+     * The indexed key the check now uses. If this column stopped being generated the
+     * duplicate check would silently match nothing and every duplicate would be allowed
+     * through — a failure with no symptom, so it is worth one assertion.
+     */
+    const [keyRows] = await db.query(
+      "SELECT phone_key FROM leads WHERE reference = ?",
+      [String((await ravi.get('/mobile/leads/' + leadId)).json.lead?.reference)],
+    );
+    check(
+      'the stored phone key is the trailing digits, whatever was typed',
+      (keyRows as { phone_key: string }[])[0]?.phone_key === '876543210',
+      (keyRows as { phone_key: string }[])[0]?.phone_key,
+    );
+
+    /*
+     * Archiving releases the number.
+     *
+     * The generated key is NULL for an archived lead and MySQL allows many NULLs in a
+     * unique index, which is what makes this work. It matters: archiving is how a lead
+     * entered against the wrong customer is retired, and a constraint that kept holding
+     * the number afterwards would leave no way to enter the right one.
+     */
+    const toRetire = await ravi.post('/mobile/leads', {
+      customerName: 'Wrong Entry',
+      phone: '+91 93333 44455',
+      source: 'manual',
+    });
+    check('a lead is created to be retired', toRetire.status === 201, toRetire.json);
+
+    const blockedWhileActive = await ravi.post('/mobile/leads', {
+      customerName: 'Correct Entry',
+      phone: '+91 93333 44455',
+      source: 'manual',
+    });
+    check('its number is taken while it is active', blockedWhileActive.status === 400, blockedWhileActive.status);
+
+    const archived = await adminAsBearer.post(
+      '/admin/telecalling/leads/' + toRetire.json.lead?.id + '/archive',
+      { archived: true },
+    );
+    check('an admin archives it', archived.status === 200, archived.json);
+
+    const reusable = await ravi.post('/mobile/leads', {
+      customerName: 'Correct Entry',
+      phone: '+91 93333 44455',
+      source: 'manual',
+    });
+    check('archiving frees the number for the correct lead', reusable.status === 201, reusable.json);
 
     const perf = await adminAsBearer.get('/admin/telecalling/reports/performance');
     check('the performance report responds', perf.status === 200 && Array.isArray(perf.json.items));
@@ -1121,7 +1278,7 @@ async function main(): Promise<void> {
     check('the previous owner can no longer read it', noLongerRavis.status === 404);
 
     const bulk = await adminAsBearer.post('/admin/telecalling/leads/bulk-assign', {
-      leadIds: [leadId, dup.json.lead.id, 99999],
+      leadIds: [leadId, otherOwnerId, 99999],
       assignedTo: 2,
     });
     // One lead genuinely moves; the second is already owned by the target and is a

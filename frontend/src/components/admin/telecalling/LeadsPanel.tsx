@@ -289,15 +289,13 @@ export function LeadsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
         : ' Left unassigned.';
 
       /*
-       * A duplicate phone is reported, not treated as a failure. The server returns the
-       * existing lead alongside the new one precisely so the decision belongs to whoever
-       * can see both — so the lead IS created and the warning names the other reference.
+       * Nothing here reports a duplicate any more.
+       *
+       * A number can belong to only one active lead, so a clash never reaches this point:
+       * the server refuses the create and the error lands on the Phone field, naming the
+       * lead that already holds it. Reaching here means the lead was created outright.
        */
-      const duplicate = result.possibleDuplicate
-        ? ` Note: ${result.possibleDuplicate.reference} (${result.possibleDuplicate.customerName}) already has this number.`
-        : '';
-
-      setNotice(`Lead ${result.lead.reference} created for ${result.lead.customerName}.${owner}${duplicate}`);
+      setNotice(`Lead ${result.lead.reference} created for ${result.lead.customerName}.${owner}`);
 
       // Keep the source and the assignee: entering a stack of paper leads from the same
       // batch means the next one almost always shares both.
