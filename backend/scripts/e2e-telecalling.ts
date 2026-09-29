@@ -1056,7 +1056,14 @@ async function main(): Promise<void> {
     );
     check(
       'and the walked-in lead is in that result',
-      (walkedInFilter.json.items as Json[] | undefined)?.some((row) => Number(row.id) === leadId),
+      /*
+       * `?? false`, because the optional chain yields `boolean | undefined` and an absent
+       * `items` must read as a FAILED assertion rather than as an untyped pass. Without it
+       * this file does not typecheck, and `npm run typecheck` is the gate for the repo.
+       */
+      (walkedInFilter.json.items as Json[] | undefined)?.some(
+        (row) => Number(row.id) === leadId,
+      ) ?? false,
       walkedInFilter.json.items,
     );
 
