@@ -24,7 +24,7 @@ import { Icon, type IconName } from '@/components/ui/Icon';
  * HTML file, so there is no way to make the second case cheap — but there is also no
  * reason to make the first case expensive, which is why this is not simply nine links.
  */
-export type AdminArea = 'records' | 'telecalling';
+export type AdminArea = 'records' | 'telecalling' | 'hr';
 
 type NavItem = {
   key: string;
@@ -67,6 +67,22 @@ export const AREAS: NavGroup[] = [
       { key: 'reports', label: 'Reports', icon: 'ledger', param: 'section' },
       { key: 'settings', label: 'Settings', icon: 'shield', param: 'section' },
     ],
+  },
+  /*
+   * HR is its own area, not a section of Telecalling.
+   *
+   * The two products have separate account tables, so the people listed here are not the
+   * people listed under Telecalling → Employees, even where they are the same human.
+   * Nesting HR inside Telecalling would imply one roster behind both screens, and an
+   * administrator who approved somebody in one place would reasonably expect them to be
+   * able to sign in to the other.
+   */
+  {
+    area: 'hr',
+    title: 'HR',
+    path: '/admin/hr/',
+    param: 'section',
+    items: [{ key: 'people', label: 'Employees', icon: 'award', param: 'section' }],
   },
 ];
 
