@@ -11,6 +11,8 @@ import { diagnosticsRouter } from './modules/diagnostics/diagnostics.routes';
 import { enquiryRouter } from './modules/enquiries/enquiry.routes';
 import { hrAdminRouter } from './modules/hr/hrAdmin.routes';
 import { hrAuthRouter } from './modules/hr/hrAuth.routes';
+import { hrAttendanceRouter } from './modules/hr/attendance/attendance.routes';
+import { hrAttendanceAdminRouter } from './modules/hr/attendance/attendanceAdmin.routes';
 import { telecallingAdminRouter } from './modules/telecalling/admin.routes';
 import { mobileRouter } from './modules/telecalling/mobile.routes';
 import { logger } from './utils/logger';
@@ -92,7 +94,17 @@ export function createApp(): Express {
    * that direction of access was never what the separation forbade.
    */
   app.use('/api/hr/auth', hrAuthRouter);
+  app.use('/api/hr/attendance', hrAttendanceRouter);
+
+  /*
+   * Two routers at one prefix, in declaration order. Express tries each in turn, so
+   * `hrAdminRouter` answers the account routes and anything it does not match falls
+   * through to the attendance one. Splitting by subject keeps each file about one
+   * thing; sharing the prefix keeps the URL space describing the product rather than
+   * the file layout.
+   */
   app.use('/api/admin/hr', hrAdminRouter);
+  app.use('/api/admin/hr', hrAttendanceAdminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

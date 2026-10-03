@@ -1,25 +1,25 @@
 'use client';
 
-import { AdminShell } from '@/components/admin/AdminShell';
+import { useCallback, useEffect, useState } from 'react';
 import { AREAS } from '@/components/admin/AdminNav';
+import { AdminShell } from '@/components/admin/AdminShell';
 import { useAdminSession } from '@/components/admin/useAdminSession';
 import { FormAlert } from '@/components/forms/Fields';
+import { HrAttendancePanel } from './HrAttendancePanel';
+import { HrCorrectionsPanel } from './HrCorrectionsPanel';
 import { HrEmployeesPanel } from './HrEmployeesPanel';
+import { HrWorkplacesPanel } from './HrWorkplacesPanel';
 
 /**
  * The HR admin application.
  *
- * One section today — the employee list and the approval queue — so this shell is
- * thinner than `TelecallingApp` and deliberately does not carry its `useSection`
- * machinery. Pushing a `?section=` parameter into history to address the only section
- * there is would be ceremony with no behaviour behind it.
+ * One route with internal sections, matching `TelecallingApp` and for the same reason:
+ * under a static export each route is a separate document, so four routes would mean
+ * four full page loads and four session checks to move between them.
  *
- * The shell, sidebar and session gate are shared with the other two admin areas rather
- * than duplicated. That sharing is the point: an administrator signs in once and can see
- * that all three areas exist.
- *
- * When a second HR section lands, lift `useSection` out of `TelecallingApp` into a shared
- * hook rather than copying it here.
+ * The section list lives in `AdminNav`, which renders the sidebar for every admin area.
+ * Declaring it twice would let the sidebar and the panel switch disagree, and the
+ * sidebar is the half that has to match reality.
  */
 
 const HR = AREAS.find((group) => group.area === 'hr');
@@ -28,8 +28,52 @@ if (!HR) {
   throw new Error('AdminNav has no hr area — the sidebar and this shell disagree.');
 }
 
+const SECTIONS = HR.items;
+
+type Section = 'people' | 'attendance' | 'corrections' | 'workplaces';
+
+function isSection(value: string | null): value is Section {
+  return value !== null && SECTIONS.some((section) => section.key === value);
+}
+
+/**
+ * Keeps the visible section in the URL.
+ *
+ * There is no router to lean on: the page is a static document and Next's router would
+ * trigger a navigation. `history.pushState` plus a `popstate` listener gives shareable
+ * links and a working Back button without one.
+ */
+function useSection(): [Section, (next: Section) => void] {
+  const [section, setSection] = useState<Section>('people');
+
+  // Read on mount rather than during render — `window` does not exist while the page
+  // is prerendered at build time.
+  useEffect(() => {
+    const initial = new URLSearchParams(window.location.search).get('section');
+    if (isSection(initial)) setSection(initial);
+
+    const onPop = () => {
+      const value = new URLSearchParams(window.location.search).get('section');
+      setSection(isSection(value) ? value : 'people');
+    };
+
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const go = useCallback((next: Section) => {
+    setSection(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set('section', next);
+    window.history.pushState({ section: next }, '', url);
+  }, []);
+
+  return [section, go];
+}
+
 export function HrApp() {
   const { status, email, configError, handleUnauthorized, signOut } = useAdminSession();
+  const [section, setSection] = useSection();
 
   if (status === 'checking') {
     return (
@@ -61,20 +105,33 @@ export function HrApp() {
   // rather than flashing an empty screen on the way out.
   if (status !== 'signedIn') return null;
 
+  const label = SECTIONS.find((item) => item.key === section)?.label ?? 'HR';
+
   return (
     <AdminShell
       area="hr"
-      activeKey="people"
-      /*
-        Within this area there is nowhere else to go, so navigation is a no-op. Moving to
-        another AREA is a `next/link` inside AdminNav and does not come through here.
-      */
-      onNavigate={() => {}}
-      title="HR employees"
+      activeKey={section}
+      onNavigate={(key) => {
+        if (isSection(key)) setSection(key);
+      }}
+      title={label}
       email={email}
       onSignOut={() => void signOut()}
     >
-      <HrEmployeesPanel onUnauthorized={handleUnauthorized} />
+      {/*
+        Each panel is mounted only while visible and unmounts on switch, so its
+        in-flight requests are aborted and it refetches on return.
+      */}
+      {section === 'people' ? <HrEmployeesPanel onUnauthorized={handleUnauthorized} /> : null}
+      {section === 'attendance' ? (
+        <HrAttendancePanel onUnauthorized={handleUnauthorized} />
+      ) : null}
+      {section === 'corrections' ? (
+        <HrCorrectionsPanel onUnauthorized={handleUnauthorized} />
+      ) : null}
+      {section === 'workplaces' ? (
+        <HrWorkplacesPanel onUnauthorized={handleUnauthorized} />
+      ) : null}
     </AdminShell>
   );
 }

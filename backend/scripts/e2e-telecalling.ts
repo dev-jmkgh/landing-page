@@ -1681,6 +1681,447 @@ async function main(): Promise<void> {
       hrAfterDeactivation.json,
     );
 
+    /* ============================================ attendance (phase 2–3) */
+    /*
+     * The attendance module end to end: a geofenced site, a shift, punches, breaks,
+     * the arithmetic they add up to, and a correction for a day somebody missed.
+     *
+     * The timezone assertion below is the one that matters most. The pool pins MySQL
+     * to UTC, so CURDATE() is the UTC date — and IST is UTC+5:30, which means a punch
+     * before 05:30 local would be filed against YESTERDAY if work_date were taken from
+     * CURDATE(). That bug is invisible for nineteen hours a day.
+     */
+    console.log('\nhr attendance');
+
+    /* --- a site, and a shift to be late against --- */
+    const site = await adminAsBearer.post('/admin/hr/locations', {
+      name: 'Kochi HQ',
+      address: 'Test site',
+      latitude: 10.0,
+      longitude: 76.0,
+      radiusMetres: 150,
+    });
+    check('an admin creates a work location', site.status === 201, site.json);
+    const siteId = site.json.location?.id as number;
+
+    const tooTight = await adminAsBearer.post('/admin/hr/locations', {
+      name: 'Pinhole',
+      latitude: 10,
+      longitude: 76,
+      radiusMetres: 5,
+    });
+    check(
+      'a radius tighter than GPS accuracy is refused',
+      tooTight.status === 422,
+      tooTight.status,
+    );
+
+    const shifts = await adminAsBearer.get('/admin/hr/shifts');
+    check('the seeded shift exists', (shifts.json.items as Json[]).length >= 1, shifts.json);
+    const shiftId = (shifts.json.items as Json[])[0]?.id as number;
+
+    /* --- an office worker must have a site --- */
+    const meeraId = (
+      (
+        (await db.query(
+          "SELECT id FROM hr_users WHERE email = 'meera.hr@example.test'",
+        )) as [Json[], unknown]
+      )[0] as Json[]
+    )[0]?.id as number;
+
+    const badAssign = await adminAsBearer.call(
+      'PATCH',
+      `/admin/hr/users/${meeraId}/assignment`,
+      { workMode: 'office', shiftId },
+    );
+    check(
+      'an office worker cannot be assigned without a site',
+      badAssign.status === 400,
+      badAssign.json,
+    );
+
+    const assignmentSet = await adminAsBearer.call(
+      'PATCH',
+      `/admin/hr/users/${meeraId}/assignment`,
+      { workMode: 'office', workLocationId: siteId, shiftId },
+    );
+    check('an admin assigns site, shift and mode', assignmentSet.status === 200, assignmentSet.json);
+
+    /* --- today, before any punch --- */
+    const before = await meera.get('/hr/attendance/today');
+    check('the app reads today', before.status === 200, before.json);
+    check('with no punch yet', before.json.day === null, before.json.day);
+    check(
+      'and is told the geofence applies',
+      before.json.assignment?.geofenced === true,
+      before.json.assignment,
+    );
+
+    /* --- the geofence refuses --- */
+    const noCoords = await meera.post('/hr/attendance/check-in', {});
+    check(
+      'a geofenced check-in without location is refused',
+      noCoords.status === 422 && noCoords.json.code === 'location_required',
+      noCoords.json,
+    );
+
+    const farAway = await meera.post('/hr/attendance/check-in', {
+      coordinate: { latitude: 10.02, longitude: 76.0, accuracyMetres: 10 },
+    });
+    check(
+      'a check-in far from the site is refused',
+      farAway.status === 422 && farAway.json.code === 'outside_geofence',
+      farAway.json,
+    );
+    check(
+      'and the refusal says how far away they are',
+      /\d+m/.test(String(farAway.json.message)),
+      farAway.json.message,
+    );
+
+    /*
+     * A poor fix is forgiven. 10.001 is ~111m out, outside a 150m radius only once the
+     * reported accuracy is small — with a 300m accuracy estimate it is "somewhere near
+     * the office", which is what a phone indoors actually reports.
+     */
+    const poorFix = await meera.post('/hr/attendance/check-in', {
+      coordinate: { latitude: 10.0016, longitude: 76.0, accuracyMetres: 300 },
+    });
+    check('a poor GPS fix near the site is accepted', poorFix.status === 201, poorFix.json);
+
+    /* --- THE TIMEZONE ASSERTION --- */
+    /*
+     * `UTC_TIMESTAMP()`, not `NOW()`.
+     *
+     * The APP's pool pins each session to UTC, so inside the application `NOW()` is
+     * already UTC. This harness opens its OWN connection, which does not — its session
+     * zone is the server's (IST). `CONVERT_TZ(NOW(), '+00:00', '+05:30')` there adds
+     * five and a half hours to a clock that is already local, and the doubled value
+     * crosses midnight every evening after 18:30 — so this assertion passed all morning
+     * and failed after dinner, against an application that was correct the whole time.
+     *
+     * `UTC_TIMESTAMP()` is UTC whatever the session zone, so the comparison means the
+     * same thing at every hour of the day.
+     */
+    const [tzRows] = (await db.query(
+      "SELECT DATE_FORMAT(a.work_date, '%Y-%m-%d') AS wd," +
+        " DATE_FORMAT(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+05:30'), '%Y-%m-%d') AS ist," +
+        ' DATE_FORMAT(CURDATE(), \'%Y-%m-%d\') AS utc' +
+        ' FROM hr_attendance a WHERE a.user_id = ' +
+        String(meeraId),
+    )) as [Json[], unknown];
+    const tz = (tzRows as Json[])[0] as Json;
+    check(
+      'work_date is the COMPANY date, not the UTC date',
+      tz?.wd === tz?.ist,
+      { workDate: tz?.wd, ist: tz?.ist, utc: tz?.utc },
+    );
+
+    /* --- a repeat punch is idempotent, not an error --- */
+    const again = await meera.post('/hr/attendance/check-in', {
+      coordinate: { latitude: 10.0, longitude: 76.0, accuracyMetres: 10 },
+    });
+    check(
+      'checking in twice succeeds rather than erroring',
+      again.status === 200 && again.json.alreadyCheckedIn === true,
+      again.json,
+    );
+
+    const [dayCount] = (await db.query(
+      'SELECT COUNT(*) AS c FROM hr_attendance WHERE user_id = ' + String(meeraId),
+    )) as [Json[], unknown];
+    check(
+      'and leaves exactly one row for the day',
+      Number((dayCount as Json[])[0]?.c) === 1,
+      (dayCount as Json[])[0],
+    );
+
+    /* --- a day is MANY sessions --- */
+    /*
+     * The shape the business actually works: in, out for lunch, back in, out again.
+     * Under the old single-pair model the 13:00 check-out closed the day and the
+     * 14:00 check-in had nowhere to go, which is why migration 019 exists.
+     */
+    const reIn = await meera.post('/hr/attendance/check-in', {
+      coordinate: { latitude: 10.0, longitude: 76.0, accuracyMetres: 10 },
+    });
+    check(
+      'checking in while already checked in is reported, not duplicated',
+      reIn.status === 200 && reIn.json.alreadyCheckedIn === true,
+      reIn.json,
+    );
+
+    const firstOut = await meera.post('/hr/attendance/check-out', {
+      coordinate: { latitude: 10.0, longitude: 76.0, accuracyMetres: 10 },
+    });
+    check('the first session can be closed', firstOut.status === 200, firstOut.json);
+    check(
+      'and the day reports one completed session',
+      firstOut.json.day?.completedSessions === 1,
+      firstOut.json.day,
+    );
+    check(
+      'with no session currently open',
+      firstOut.json.day?.openSessionStartedAt === null,
+      firstOut.json.day,
+    );
+
+    /* --- back from lunch: a SECOND session on the same day --- */
+    const secondIn = await meera.post('/hr/attendance/check-in', {
+      coordinate: { latitude: 10.0, longitude: 76.0, accuracyMetres: 10 },
+    });
+    check(
+      'the same employee can check in again on the same day',
+      secondIn.status === 201,
+      secondIn.json,
+    );
+    check(
+      'and the day is open again',
+      secondIn.json.day?.openSessionStartedAt !== null,
+      secondIn.json.day,
+    );
+    check(
+      'while the first session stays completed',
+      secondIn.json.day?.completedSessions === 1,
+      secondIn.json.day,
+    );
+
+    const [openRows] = (await db.query(
+      'SELECT COUNT(*) AS c FROM hr_attendance_sessions WHERE user_id = ' +
+        String(meeraId) +
+        ' AND ended_at IS NULL',
+    )) as [Json[], unknown];
+    check(
+      'exactly one session is open in the database',
+      Number((openRows as Json[])[0]?.c) === 1,
+      (openRows as Json[])[0],
+    );
+
+    const secondOut = await meera.post('/hr/attendance/check-out', {
+      coordinate: { latitude: 10.0, longitude: 76.0, accuracyMetres: 10 },
+    });
+    check('the second session can be closed', secondOut.status === 200, secondOut.json);
+    check(
+      'and the day now reports two completed sessions',
+      secondOut.json.day?.completedSessions === 2,
+      secondOut.json.day,
+    );
+    check(
+      'both sessions are returned with the day',
+      Array.isArray(secondOut.json.day?.sessions) &&
+        (secondOut.json.day.sessions as Json[]).length === 2,
+      secondOut.json.day?.sessions,
+    );
+    check(
+      'and every returned session is closed',
+      (secondOut.json.day.sessions as Json[]).every((x) => x.endedAt !== null),
+      secondOut.json.day?.sessions,
+    );
+
+    /*
+     * The day's total is the SUM of its sessions. Asserted against SQL rather than
+     * against the response, so a roll-up that drifts from the rows it is derived from
+     * is caught rather than echoed back.
+     */
+    const [rollup] = (await db.query(
+      'SELECT a.worked_minutes AS worked, a.break_minutes AS brk,' +
+        ' (SELECT SUM(s.minutes) FROM hr_attendance_sessions s' +
+        '   WHERE s.attendance_id = a.id AND s.ended_at IS NOT NULL) AS session_sum,' +
+        ' (SELECT COUNT(*) FROM hr_attendance_sessions s WHERE s.attendance_id = a.id) AS n' +
+        ' FROM hr_attendance a WHERE a.user_id = ' +
+        String(meeraId),
+    )) as [Json[], unknown];
+    const roll = (rollup as Json[])[0] as Json;
+    check(
+      "the day's worked total equals the sum of its sessions",
+      Number(roll?.worked) === Number(roll?.session_sum),
+      roll,
+    );
+    check('and the day holds exactly two session rows', Number(roll?.n) === 2, roll);
+    check('the derived break total is never negative', Number(roll?.brk) >= 0, roll);
+
+    const outAgain = await meera.post('/hr/attendance/check-out', {
+      coordinate: { latitude: 10.0, longitude: 76.0, accuracyMetres: 10 },
+    });
+    check(
+      'checking out twice is reported, not an error',
+      outAgain.status === 200 && outAgain.json.alreadyCheckedOut === true,
+      outAgain.json,
+    );
+
+
+    /* --- history --- */
+    const history = await meera.get('/hr/attendance/history');
+    check('history responds', history.status === 200, history.json);
+    check('and contains today', (history.json.days as Json[]).length >= 1, history.json.days);
+    check(
+      'with a summary over the range',
+      typeof history.json.summary?.daysPresent === 'number',
+      history.json.summary,
+    );
+
+    /* --- a remote worker is not fenced --- */
+    const remoteSignup = await makeClient(base).post('/hr/auth/signup', {
+      name: 'Remote Riya',
+      email: 'riya.remote@example.test',
+      password: 'correct-horse-battery',
+    });
+    check('a second HR employee registers', remoteSignup.status === 201, remoteSignup.json);
+
+    await db.query(
+      "UPDATE hr_users SET is_active = 1, approval_status = 'approved', email_verified_at = NOW()," +
+        " work_mode = 'remote' WHERE email = 'riya.remote@example.test'",
+    );
+
+    const riya = makeClient(base);
+    const riyaLogin = await riya.post('/hr/auth/login', {
+      email: 'riya.remote@example.test',
+      password: 'correct-horse-battery',
+    });
+    riya.setToken(riyaLogin.json.accessToken as string);
+
+    const riyaToday = await riya.get('/hr/attendance/today');
+    check(
+      'a remote worker is not geofenced',
+      riyaToday.json.assignment?.geofenced === false,
+      riyaToday.json.assignment,
+    );
+
+    const riyaIn = await riya.post('/hr/attendance/check-in', {});
+    check(
+      'and can check in with no location at all',
+      riyaIn.status === 201,
+      riyaIn.json,
+    );
+    check(
+      'which opens a session like any other',
+      riyaIn.json.day?.openSessionStartedAt !== null,
+      riyaIn.json.day,
+    );
+
+    /* --- regularisation --- */
+    const future = await riya.post('/hr/attendance/regularisations', {
+      workDate: '2099-01-01',
+      checkInAt: '09:00',
+      reason: 'Travelling, forgot to punch in',
+    });
+    check('a correction cannot be dated in the future', future.status === 400, future.json);
+
+    const ancient = await riya.post('/hr/attendance/regularisations', {
+      workDate: '2020-01-01',
+      checkInAt: '09:00',
+      reason: 'Travelling, forgot to punch in',
+    });
+    check('nor far in the past', ancient.status === 400, ancient.json);
+
+    const emptyReq = await riya.post('/hr/attendance/regularisations', {
+      workDate: '2026-09-15',
+      reason: 'Forgot entirely',
+    });
+    check(
+      'a correction asking for neither punch is refused',
+      emptyReq.status === 422,
+      emptyReq.status,
+    );
+
+    /*
+     * A date inside the 30-day window, computed from the company's clock rather than
+     * hard-coded, so the suite does not start failing a month from now.
+     */
+    const [agoRows] = (await db.query(
+      "SELECT DATE_FORMAT(DATE_SUB(DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','+05:30')), INTERVAL 3 DAY), '%Y-%m-%d') AS d",
+    )) as [Json[], unknown];
+    const missedDay = String((agoRows as Json[])[0]?.d);
+
+    const raised = await riya.post('/hr/attendance/regularisations', {
+      workDate: missedDay,
+      checkInAt: '09:00',
+      checkOutAt: '18:00',
+      reason: 'Laptop was flat, could not punch in or out',
+    });
+    check('a correction can be raised', raised.status === 201, raised.json);
+    const regId = raised.json.request?.id as number;
+
+    const duplicate = await riya.post('/hr/attendance/regularisations', {
+      workDate: missedDay,
+      checkInAt: '09:30',
+      reason: 'Second attempt',
+    });
+    check('a second open request for the same day is refused', duplicate.status === 400, duplicate.json);
+
+    const regQueue = await adminAsBearer.get('/admin/hr/regularisations?status=pending');
+    check(
+      'the correction reaches the admin queue',
+      (regQueue.json.items as Json[]).some((r) => r.id === regId),
+      regQueue.json.items,
+    );
+
+    const approvedReg = await adminAsBearer.post(
+      `/admin/hr/regularisations/${regId}/approve`,
+      { note: 'Confirmed with the team lead' },
+    );
+    check('an admin approves it', approvedReg.status === 200, approvedReg.json);
+
+    const [corrected] = (await db.query(
+      "SELECT DATE_FORMAT(work_date,'%Y-%m-%d') AS wd, checked_in_at, checked_out_at," +
+        " worked_minutes, source FROM hr_attendance WHERE work_date = '" +
+        missedDay +
+        "' AND user_id = (SELECT id FROM hr_users WHERE email = 'riya.remote@example.test')",
+    )) as [Json[], unknown];
+    const fixed = (corrected as Json[])[0] as Json;
+    check('and the attendance day is written', Boolean(fixed), corrected);
+    check(
+      'marked as a correction, not as a real punch',
+      fixed?.source === 'regularisation',
+      fixed?.source,
+    );
+    check(
+      'with the hours recomputed from the corrected pair',
+      Number(fixed?.worked_minutes) === 540,
+      fixed?.worked_minutes,
+    );
+
+    const [corrSessions] = (await db.query(
+      "SELECT COUNT(*) AS c, SUM(minutes) AS m FROM hr_attendance_sessions" +
+        " WHERE attendance_id = (SELECT id FROM hr_attendance WHERE work_date = '" +
+        missedDay +
+        "' AND user_id = (SELECT id FROM hr_users WHERE email = 'riya.remote@example.test'))",
+    )) as [Json[], unknown];
+    const cs = (corrSessions as Json[])[0] as Json;
+    check(
+      'a corrected day is written as a SESSION, not just day columns',
+      Number(cs?.c) === 1,
+      cs,
+    );
+    check('and that session carries the corrected hours', Number(cs?.m) === 540, cs);
+
+    const approveTwiceReg = await adminAsBearer.post(
+      `/admin/hr/regularisations/${regId}/approve`,
+      {},
+    );
+    check(
+      'approving the same correction twice is refused',
+      approveTwiceReg.status === 400,
+      approveTwiceReg.status,
+    );
+
+    /* --- the register shows who did NOT come in --- */
+    const register = await adminAsBearer.get('/admin/hr/attendance');
+    check('the day register responds', register.status === 200, register.json);
+    check(
+      'and lists employees with no punch as absent',
+      (register.json.items as Json[]).every((r) => typeof r.status === 'string'),
+      (register.json.items as Json[]).map((r) => `${r.employeeCode}:${r.status}`),
+    );
+
+    /* --- an HR token cannot reach the admin attendance surface --- */
+    const meeraAdmin = await meera.get('/admin/hr/attendance');
+    check(
+      'an HR employee cannot read the whole register',
+      meeraAdmin.status === 401 || meeraAdmin.status === 403,
+      meeraAdmin.status,
+    );
+
     /* --------------------------------------------------- audit and settings */
     console.log('\naudit log and settings');
 

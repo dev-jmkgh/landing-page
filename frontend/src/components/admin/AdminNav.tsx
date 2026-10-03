@@ -82,7 +82,12 @@ export const AREAS: NavGroup[] = [
     title: 'HR',
     path: '/admin/hr/',
     param: 'section',
-    items: [{ key: 'people', label: 'Employees', icon: 'award', param: 'section' }],
+    items: [
+      { key: 'people', label: 'Employees', icon: 'award', param: 'section' },
+      { key: 'attendance', label: 'Attendance', icon: 'clock', param: 'section' },
+      { key: 'corrections', label: 'Corrections', icon: 'file', param: 'section' },
+      { key: 'workplaces', label: 'Workplaces', icon: 'pin', param: 'section' },
+    ],
   },
 ];
 

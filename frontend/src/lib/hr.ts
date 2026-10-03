@@ -142,3 +142,161 @@ export const hrApi = {
       body: { active },
     }).then((r) => r.employee),
 };
+
+/* -------------------------------------------------------------------------- */
+/* Attendance                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export const WORK_MODES = ['office', 'remote', 'field'] as const;
+export type WorkMode = (typeof WORK_MODES)[number];
+
+export const WORK_MODE_LABELS: Record<WorkMode, string> = {
+  office: 'Office',
+  remote: 'Remote',
+  field: 'Field',
+};
+
+export type AttendanceStatus = 'present' | 'late' | 'half_day' | 'absent' | 'on_leave';
+
+export type WorkLocation = {
+  id: number;
+  name: string;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  radiusMetres: number;
+  isActive: boolean;
+};
+
+export type Shift = {
+  id: number;
+  name: string;
+  startsAt: string;
+  endsAt: string;
+  breakMinutes: number;
+  graceMinutes: number;
+  halfDayMinutes: number;
+  isActive: boolean;
+};
+
+/** One line of the day register. Everyone approved appears, present or not. */
+export type RegisterEntry = {
+  userId: number;
+  name: string;
+  employeeCode: string;
+  workMode: WorkMode;
+  workDate: string | null;
+  checkedInAt: string | null;
+  checkedOutAt: string | null;
+  workedMinutes: number | null;
+  breakMinutes: number | null;
+  lateMinutes: number | null;
+  status: AttendanceStatus;
+  source: 'app' | 'regularisation' | 'admin' | null;
+  locationName: string | null;
+  /** How far from the site the check-in was, as the server measured it. */
+  distanceMetres: number | null;
+  /** How many check-in/check-out pairs have closed today. */
+  completedSessions: number;
+  /** True while they are mid-session, i.e. in the building right now. */
+  currentlyIn: boolean;
+};
+
+export type Regularisation = {
+  id: number;
+  userId: number;
+  employeeName?: string;
+  employeeCode?: string;
+  workDate: string;
+  requestedCheckInAt: string | null;
+  requestedCheckOutAt: string | null;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  createdAt: string;
+};
+
+export const attendanceAdminApi = {
+  /* ---- work locations ---- */
+  listLocations: (signal?: AbortSignal) =>
+    adminRequest<{ items: WorkLocation[] }>(`${BASE}/locations`, { signal }).then((r) => r.items),
+
+  createLocation: (body: {
+    name: string;
+    address: string | null;
+    latitude: number;
+    longitude: number;
+    radiusMetres: number;
+  }) =>
+    adminRequest<{ location: WorkLocation }>(`${BASE}/locations`, {
+      method: 'POST',
+      body,
+    }).then((r) => r.location),
+
+  updateLocation: (id: number, body: Partial<Omit<WorkLocation, 'id'>>) =>
+    adminRequest<{ location: WorkLocation }>(`${BASE}/locations/${id}`, {
+      method: 'PATCH',
+      body,
+    }).then((r) => r.location),
+
+  /* ---- shifts ---- */
+  listShifts: (signal?: AbortSignal) =>
+    adminRequest<{ items: Shift[] }>(`${BASE}/shifts`, { signal }).then((r) => r.items),
+
+  createShift: (body: Omit<Shift, 'id' | 'isActive'>) =>
+    adminRequest<{ shift: Shift }>(`${BASE}/shifts`, { method: 'POST', body }).then(
+      (r) => r.shift,
+    ),
+
+  /* ---- assignment ---- */
+  assign: (
+    userId: number,
+    body: { workLocationId: number | null; shiftId: number | null; workMode: WorkMode },
+  ) =>
+    adminRequest<{ success: true }>(`${BASE}/users/${userId}/assignment`, {
+      method: 'PATCH',
+      body,
+    }),
+
+  /* ---- the register ---- */
+  register: (query: { date?: string; userId?: number }, signal?: AbortSignal) =>
+    adminRequest<{ date: string | null; items: RegisterEntry[] }>(
+      `${BASE}/attendance${qs(query)}`,
+      { signal },
+    ),
+
+  /* ---- corrections ---- */
+  listRegularisations: (status: 'pending' | 'approved' | 'rejected' | 'all', signal?: AbortSignal) =>
+    adminRequest<{ items: Regularisation[] }>(`${BASE}/regularisations${qs({ status })}`, {
+      signal,
+    }).then((r) => r.items),
+
+  regularisationCount: (signal?: AbortSignal) =>
+    adminRequest<{ pending: number }>(`${BASE}/regularisations/count`, { signal }).then(
+      (r) => r.pending,
+    ),
+
+  approveRegularisation: (id: number, note: string | null) =>
+    adminRequest<{ request: Regularisation }>(`${BASE}/regularisations/${id}/approve`, {
+      method: 'POST',
+      body: { note },
+    }).then((r) => r.request),
+
+  rejectRegularisation: (id: number, note: string | null) =>
+    adminRequest<{ request: Regularisation }>(`${BASE}/regularisations/${id}/reject`, {
+      method: 'POST',
+      body: { note },
+    }).then((r) => r.request),
+};
+
+/** Minutes as "7h 20m". Durations always arrive from the server already reduced. */
+export function minutesAsHours(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined) return '—';
+  const whole = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(whole / 60);
+  const rest = whole % 60;
+  if (hours === 0) return `${rest}m`;
+  if (rest === 0) return `${hours}h`;
+  return `${hours}h ${rest}m`;
+}
