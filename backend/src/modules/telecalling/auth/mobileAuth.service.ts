@@ -278,20 +278,36 @@ function isDuplicateKey(error: unknown): boolean {
 }
 
 /**
- * Next free TC-#### code.
+ * The telecalling staff-code series.
+ *
+ * HR accounts count their own EMP- series in `hr_users`, so the same person can hold
+ * TC-0007 and EMP-0003 at once — the codes identify an account in a product, not a
+ * person. This function knows only about its own table.
+ */
+const CODE_PREFIX = 'TC-';
+
+/**
+ * Next free code in the series.
  *
  * Duplicated from employee.repository rather than imported, to keep the auth module free
  * of a dependency on the employee module — importing it the other way round already
  * happens and a cycle would be easy to create here.
+ *
+ * The offset is derived from the prefix with `LENGTH()` rather than hard-coded: a
+ * literal is correct only for one prefix length, and the failure mode is handing every
+ * registration the same code until the unique index rejects it three times and signup
+ * fails. The REGEXP keeps the series counting only its own rows.
  */
 async function nextEmployeeCode(): Promise<string> {
   const row = await queryOne<RowDataPacket & { highest: number | null }>(
-    `SELECT MAX(CAST(SUBSTRING(employee_code, 4) AS UNSIGNED)) AS highest
+    `SELECT MAX(CAST(SUBSTRING(employee_code, LENGTH(?) + 1) AS UNSIGNED)) AS highest
        FROM telecaller_users
-      WHERE employee_code REGEXP '^TC-[0-9]+$'`,
+      WHERE employee_code REGEXP ?`,
+    [CODE_PREFIX, `^${CODE_PREFIX}[0-9]+$`],
   );
+
   const next = Number(row?.highest ?? 0) + 1;
-  return `TC-${String(next).padStart(4, '0')}`;
+  return `${CODE_PREFIX}${String(next).padStart(4, '0')}`;
 }
 
 /* -------------------------------------------------------------------------- */

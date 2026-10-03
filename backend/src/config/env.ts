@@ -186,6 +186,19 @@ const schema = z.object({
   GLOBAL_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().positive().default(60),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
 
+  /**
+   * Self-registrations per IP per window.
+   *
+   * Five, which is the right ceiling in production: a whole office shares one address
+   * and nobody legitimately registers six accounts in a quarter of an hour.
+   *
+   * Configurable because the e2e harness needs it raised. It was hard-coded, and the
+   * harness had to be rationed against it — tests written to fit a budget rather than to
+   * cover the behaviour, which is the limiter shaping the suite instead of the suite
+   * testing the product. Nothing asserts on this limiter, so lifting it there removes
+   * false failures without removing coverage.
+   */
+  SIGNUP_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
   FORM_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
 
@@ -483,6 +496,7 @@ export const config = {
     /** The API-wide capacity guard's own window, independent of the one above. */
     globalWindowMs: raw.GLOBAL_RATE_LIMIT_WINDOW_SECONDS * 1000,
     max: raw.RATE_LIMIT_MAX_REQUESTS,
+    signupMax: raw.SIGNUP_RATE_LIMIT_MAX,
     formMax: raw.FORM_RATE_LIMIT_MAX,
     loginMax: raw.LOGIN_RATE_LIMIT_MAX,
   },

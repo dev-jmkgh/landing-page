@@ -56,10 +56,37 @@ process.env.LOG_LEVEL = 'error';
  * has to run in a process where the ceiling has NOT been raised, which is why it is a
  * separate script rather than a section here.
  *
- * The per-endpoint limiters — login, signup, password change — are NOT touched, because
- * those protect specific behaviours this suite does exercise.
+ * The password-change limiter is NOT touched: it is keyed per actor rather than per IP,
+ * so the suite cannot exhaust it by accident, and one section does exercise it.
  */
 process.env.RATE_LIMIT_MAX_REQUESTS = '100000';
+
+/**
+ * And the signup limiter, for the same reason.
+ *
+ * Five registrations per window is correct in production and far too few for a suite
+ * that exercises the whole registration lifecycle twice over — telecaller and HR. The
+ * harness was rationed against it instead, which is how a section that needed two
+ * signups silently starved the duplicate-email assertion three hundred lines later.
+ *
+ * Nothing here asserts on this limiter. Its configuration is a deployment concern,
+ * checked by reading the environment file.
+ */
+process.env.SIGNUP_RATE_LIMIT_MAX = '100000';
+
+/**
+ * And the mobile sign-in limiter, for the same reason again.
+ *
+ * It is keyed per IP, and the whole suite arrives from one address. The HR separation
+ * section has to sign the SAME person in to both apps and prove each password works
+ * only in its own — which is several sign-ins for one assertion — and the lifecycle
+ * section below signs accounts in as they are approved, rejected and deactivated.
+ * Together they crossed the ceiling, and the failures landed on unrelated assertions
+ * further down as a 429 that read like a broken sign-in.
+ *
+ * Nothing here asserts on this limiter. Its configuration is a deployment concern.
+ */
+process.env.MOBILE_LOGIN_RATE_LIMIT_MAX = '100000';
 
 let passed = 0;
 let failed = 0;
@@ -182,6 +209,20 @@ async function main(): Promise<void> {
   const db = await setupDatabase();
   console.log(`scratch database ready: ${SCRATCH_DB}\n`);
 
+  /*
+   * Dynamic, and it has to be.
+   *
+   * A static `import` is hoisted above the `process.env` assignments at the top of this
+   * file, so pulling in anything that reaches `config/env.ts` freezes the config with the
+   * REAL database name and JWT secret instead of the scratch ones. The symptom is not an
+   * import error: the app boots fine, against the developer's own database, and every
+   * sign-in fails because the seeded users are not in it.
+   *
+   * `shared.schema` is safe to import statically because it reaches no config;
+   * `mobileAuth.routes` is not.
+   */
+  const { signupSchema } = await import('../src/modules/telecalling/auth/mobileAuth.routes');
+  const { hrSignupSchema } = await import('../src/modules/hr/hrAuth.routes');
   const { createApp } = await import('../src/app');
   const app = createApp();
 
@@ -1027,6 +1068,215 @@ async function main(): Promise<void> {
       miraBatch.json.items,
     );
 
+    /* ------------------- HR app: a separate product, separate accounts ---- */
+    /*
+     * The HR app and the telecaller app serve overlapping PEOPLE and must share
+     * nothing else. Everything below asserts that independence directly, because it is
+     * a property no single piece of code states — it emerges from the tables, the
+     * routers and the token audiences agreeing, and any one of them regressing alone
+     * would silently re-couple the two products.
+     *
+     * The headline case is the one that was impossible before migration 017: the SAME
+     * email address holding an account in both apps at once.
+     */
+    console.log('\nhr app — separation from telecalling');
+
+    const hrSignup = await makeClient(base).post('/hr/auth/signup', {
+      name: 'Meera HR',
+      email: 'meera.hr@example.test',
+      phone: null,
+      password: 'correct-horse-battery',
+    });
+    check('an employee can self-register in the HR app', hrSignup.status === 201, hrSignup.json);
+    check(
+      'and is issued an EMP- code, not a telecalling one',
+      /^EMP-\d{4}$/.test(String(hrSignup.json.employeeCode)),
+      hrSignup.json.employeeCode,
+    );
+    check(
+      'and is pending, like any registration',
+      hrSignup.json.approvalStatus === 'pending',
+      hrSignup.json.approvalStatus,
+    );
+
+    /* --- the row lands in hr_users, and NOWHERE near telecaller_users --- */
+    const [hrRows] = (await db.query(
+      "SELECT id, role, is_active, approval_status FROM hr_users WHERE email = 'meera.hr@example.test'",
+    )) as [Json[], unknown];
+    const hrUser = (hrRows as Json[])[0] as Json;
+    check('the row is created in hr_users', Boolean(hrUser), hrUser);
+    check('with the employee role', hrUser?.role === 'employee', hrUser?.role);
+    check('and inactive until approved', Number(hrUser?.is_active) === 0, hrUser?.is_active);
+
+    const [leakRows] = (await db.query(
+      "SELECT id FROM telecaller_users WHERE email = 'meera.hr@example.test'",
+    )) as [Json[], unknown];
+    check(
+      'an HR registration writes NOTHING to telecaller_users',
+      (leakRows as Json[]).length === 0,
+      leakRows,
+    );
+
+    /*
+     * THE CASE THAT USED TO BE IMPOSSIBLE.
+     *
+     * `telecaller_users.email` is unique and so is `hr_users.email`, but they are
+     * different indexes on different tables — so one person can be a telecaller AND an
+     * HR employee. While the two products shared a table, the second registration was
+     * refused with "that address is already taken" and there was no way to hold both.
+     *
+     * Ravi is a seeded, working telecaller. Registering him in the HR app must succeed
+     * and must leave his telecalling account untouched.
+     */
+    const raviBefore = (
+      (
+        (await db.query(
+          "SELECT password_hash, is_active, approval_status FROM telecaller_users WHERE email = 'ravi@example.test'",
+        )) as [Json[], unknown]
+      )[0] as Json[]
+    )[0] as Json;
+
+    const dualSignup = await makeClient(base).post('/hr/auth/signup', {
+      name: 'Ravi Telecaller',
+      email: 'ravi@example.test',
+      password: 'a-different-hr-password',
+    });
+    check(
+      'a serving telecaller can ALSO register in the HR app on the same address',
+      dualSignup.status === 201,
+      dualSignup.json,
+    );
+
+    const raviAfter = (
+      (
+        (await db.query(
+          "SELECT password_hash, is_active, approval_status FROM telecaller_users WHERE email = 'ravi@example.test'",
+        )) as [Json[], unknown]
+      )[0] as Json[]
+    )[0] as Json;
+    check(
+      "and his telecalling password is untouched by it",
+      raviAfter?.password_hash === raviBefore?.password_hash,
+      { before: Boolean(raviBefore), same: raviAfter?.password_hash === raviBefore?.password_hash },
+    );
+    check(
+      'and his telecalling account is still active and approved',
+      Number(raviAfter?.is_active) === 1 && raviAfter?.approval_status === 'approved',
+      raviAfter,
+    );
+
+    /* --- his telecalling sign-in still works, with his ORIGINAL password --- */
+    const raviStillWorks = await makeClient(base).post('/mobile/auth/login', {
+      email: 'ravi@example.test',
+      password: 'correct-horse-battery',
+    });
+    check(
+      'and he can still sign in to the telecaller app as before',
+      raviStillWorks.status === 200,
+      raviStillWorks.status,
+    );
+
+    /* --- the EMP series counts on its own, in its own table --- */
+    check(
+      'the EMP series increments independently of TC-',
+      dualSignup.json.employeeCode === 'EMP-0002',
+      dualSignup.json.employeeCode,
+    );
+
+    /*
+     * TOKENS DO NOT CROSS.
+     *
+     * All three token families are signed with the same secret and separated only by
+     * the `audience` claim, so this is the assertion that the claim is actually pinned
+     * on both sides. Without it an HR employee's token would be accepted on every
+     * telecalling lead endpoint — `mobileRouter` applies `requireActor` and no role
+     * gate — and a telecaller's token would read HR records.
+     *
+     * `ravi` here is the telecalling client, already holding a live mobile token.
+     */
+    const hrWithTelecallerToken = await ravi.get('/hr/auth/me');
+    check(
+      'a telecalling access token is REFUSED by the HR API',
+      hrWithTelecallerToken.status === 401,
+      hrWithTelecallerToken.status,
+    );
+
+    /* Approve and verify Meera so there is a real HR token to test the other way. */
+    await db.query(
+      "UPDATE hr_users SET is_active = 1, approval_status = 'approved', email_verified_at = NOW() WHERE email = 'meera.hr@example.test'",
+    );
+
+    const meera = makeClient(base);
+    const meeraLogin = await meera.post('/hr/auth/login', {
+      email: 'meera.hr@example.test',
+      password: 'correct-horse-battery',
+    });
+    check('an approved HR employee can sign in', meeraLogin.status === 200, meeraLogin.json);
+    meera.setToken(meeraLogin.json.accessToken as string);
+
+    const meeraSelf = await meera.get('/hr/auth/me');
+    check('and reads her own profile', meeraSelf.status === 200, meeraSelf.json);
+
+    const leadsWithHrToken = await meera.get('/mobile/leads');
+    check(
+      'an HR access token is REFUSED by the telecalling API',
+      leadsWithHrToken.status === 401,
+      leadsWithHrToken.status,
+    );
+
+    const hrAdminWithHrToken = await meera.get('/admin/hr/registrations');
+    check(
+      'and an HR employee cannot reach the HR approvals queue either',
+      hrAdminWithHrToken.status === 401 || hrAdminWithHrToken.status === 403,
+      hrAdminWithHrToken.status,
+    );
+
+    /* The lead-assignment picker is checked in the admin section below, where the
+     * admin client exists — it asserts Meera is absent from it. */
+
+    /*
+     * Self-registration must not become self-promotion, in either app.
+     *
+     * Asserted against the exported schemas rather than over HTTP. These are the real
+     * objects the routes validate with, so there is no copy to drift; and a rejected
+     * field is easier to prove here than through a 201 whose body would not show
+     * whether the key was stripped or merely ignored downstream.
+     */
+    for (const requested of ['admin', 'manager', 'supervisor'] as const) {
+      const parsed = signupSchema.safeParse({
+        name: 'Sneaky Admin',
+        email: 'sneaky.admin@example.test',
+        password: 'correct-horse-battery',
+        requestedRole: requested,
+      });
+      check(
+        `a telecalling signup cannot request the ${requested} role`,
+        parsed.success && !('requestedRole' in parsed.data),
+        parsed.success ? parsed.data : parsed.error.issues[0]?.message,
+      );
+    }
+
+    /*
+     * The HR schema has no role field AT ALL — not even a narrowed one — so there is
+     * nothing to widen by accident. Zod strips unknown keys, which is what makes
+     * sending the column name directly a no-op rather than a privilege escalation.
+     */
+    for (const sneaky of [{ role: 'hr_admin' }, { requestedRole: 'hr_admin' }] as const) {
+      const parsed = hrSignupSchema.safeParse({
+        name: 'Sneaky HR',
+        email: 'sneaky.hr@example.test',
+        password: 'correct-horse-battery',
+        ...sneaky,
+      });
+      check(
+        `an HR signup strips ${Object.keys(sneaky)[0]}`,
+        parsed.success &&
+          !('role' in parsed.data) &&
+          !('requestedRole' in parsed.data),
+        parsed.success ? parsed.data : parsed.error.issues[0]?.message,
+      );
+    }
+
     /* ---------------------------------------------- notifications */
     const notifications = await ravi.get('/mobile/notifications');
     check('notifications endpoint responds', notifications.status === 200, notifications.json);
@@ -1249,6 +1499,29 @@ async function main(): Promise<void> {
     });
     check('archiving frees the number for the correct lead', reusable.status === 201, reusable.json);
 
+    /*
+     * HR staff cannot reach the assignment picker, and the reason is now structural
+     * rather than a filter.
+     *
+     * Meera was approved and activated earlier in this run, so by the test the picker
+     * applies — active and approved — she would qualify if she were in this table at
+     * all. She is not: HR accounts live in `hr_users`, and this query reads
+     * `telecaller_users`. An earlier design put both workforces in one table and kept
+     * them apart with `AND role <> 'employee'`, which is one forgotten clause away from
+     * offering an accountant as somebody to hand a customer to.
+     */
+    const picker = await adminAsBearer.get('/admin/telecalling/employees/assignable');
+    check(
+      'an approved HR employee is NOT offered as somebody to assign a lead to',
+      !(picker.json.items as Json[]).some((row) => row.email === 'meera.hr@example.test'),
+      (picker.json.items as Json[]).map((row) => row.email),
+    );
+    check(
+      'while telecallers still are',
+      (picker.json.items as Json[]).some((row) => row.email === 'ravi@example.test'),
+      (picker.json.items as Json[]).map((row) => row.email),
+    );
+
     const perf = await adminAsBearer.get('/admin/telecalling/reports/performance');
     check('the performance report responds', perf.status === 200 && Array.isArray(perf.json.items));
 
@@ -1293,6 +1566,120 @@ async function main(): Promise<void> {
     check('bulk assign counts only the leads that moved', bulk.json.assigned === 1, bulk.json);
     check('bulk assign counts an already-correct lead as skipped', bulk.json.skipped === 1, bulk.json);
     check('bulk assign names the id it could not find', bulk.json.failedIds?.includes(99999), bulk.json);
+
+    /* ------------------------------------------- HR approvals, admin side */
+    /*
+     * The approvals queue is the one direction that DOES cross: one set of
+     * administrators manages both products. What must not cross is the HR app reaching
+     * telecalling, which is asserted earlier in this run.
+     */
+    console.log('\nhr approvals (admin side)');
+
+    const hrQueue = await adminAsBearer.get('/admin/hr/registrations?approval=pending');
+    check('the HR approvals queue responds', hrQueue.status === 200, hrQueue.json);
+
+    /* Ravi's HR registration from earlier is still pending and still unverified. */
+    const pendingRavi = (hrQueue.json.items as Json[]).find(
+      (row) => row.email === 'ravi@example.test',
+    );
+    check('and lists the pending HR registration', Boolean(pendingRavi), hrQueue.json.items);
+
+    /*
+     * An unconfirmed address cannot be approved.
+     *
+     * This is the check that stops email verification being defeated with one click,
+     * and it is enforced twice — here for the message, and in the UPDATE's WHERE clause
+     * for the guarantee.
+     */
+    const hrEarlyApprove = await adminAsBearer.post(
+      `/admin/hr/registrations/${pendingRavi?.id}/approve`,
+    );
+    check(
+      'an HR registration cannot be approved before the email is confirmed',
+      hrEarlyApprove.status === 400,
+      hrEarlyApprove.json,
+    );
+
+    await db.query(
+      "UPDATE hr_users SET email_verified_at = NOW() WHERE email = 'ravi@example.test'",
+    );
+
+    const hrApproved = await adminAsBearer.post(
+      `/admin/hr/registrations/${pendingRavi?.id}/approve`,
+    );
+    check('a confirmed HR registration can be approved', hrApproved.status === 200, hrApproved.json);
+    check(
+      'and the account comes back active and approved',
+      hrApproved.json.employee?.isActive === true &&
+        hrApproved.json.employee?.approvalStatus === 'approved',
+      hrApproved.json.employee,
+    );
+
+    const hrApproveTwice = await adminAsBearer.post(
+      `/admin/hr/registrations/${pendingRavi?.id}/approve`,
+    );
+    check(
+      'approving the same registration twice is refused',
+      hrApproveTwice.status === 400,
+      hrApproveTwice.status,
+    );
+
+    /*
+     * Ravi now holds BOTH accounts, approved, with different passwords. This is the
+     * end state the whole separation exists to make possible — and each password works
+     * only in its own app.
+     */
+    const raviHr = makeClient(base);
+    const raviHrLogin = await raviHr.post('/hr/auth/login', {
+      email: 'ravi@example.test',
+      password: 'a-different-hr-password',
+    });
+    check(
+      'he signs in to the HR app with his HR password',
+      raviHrLogin.status === 200,
+      raviHrLogin.status,
+    );
+
+    const crossPassword = await makeClient(base).post('/mobile/auth/login', {
+      email: 'ravi@example.test',
+      password: 'a-different-hr-password',
+    });
+    check(
+      'but his HR password does NOT work on the telecaller app',
+      crossPassword.status === 401,
+      crossPassword.status,
+    );
+
+    /*
+     * Deactivating the HR account must not touch the telecalling one. This is the
+     * offboarding case that a shared row would have got wrong.
+     */
+    const deactivated = await adminAsBearer.post(
+      `/admin/hr/users/${pendingRavi?.id}/active`,
+      { active: false },
+    );
+    check('an HR account can be deactivated', deactivated.status === 200, deactivated.json);
+
+    const telecallingUnaffected = await makeClient(base).post('/mobile/auth/login', {
+      email: 'ravi@example.test',
+      password: 'correct-horse-battery',
+    });
+    check(
+      'and his telecalling sign-in STILL works afterwards',
+      telecallingUnaffected.status === 200,
+      telecallingUnaffected.status,
+    );
+
+    const hrAfterDeactivation = await makeClient(base).post('/hr/auth/login', {
+      email: 'ravi@example.test',
+      password: 'a-different-hr-password',
+    });
+    check(
+      'while his HR sign-in is refused',
+      hrAfterDeactivation.status === 403 &&
+        hrAfterDeactivation.json.code === 'account_deactivated',
+      hrAfterDeactivation.json,
+    );
 
     /* --------------------------------------------------- audit and settings */
     console.log('\naudit log and settings');

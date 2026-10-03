@@ -171,11 +171,18 @@ export async function listEmployees(
 }
 
 /**
- * Every active telecaller, unpaginated.
+ * Every active employee who can be given a lead, unpaginated.
  *
  * Feeds assignment pickers, which need the whole list at once — a paginated dropdown is
  * a worse experience than a long one. Safe to leave unbounded: this is a staff table,
  * not a data table.
+ *
+ * No role filter is needed, and that is a property of the schema rather than an
+ * oversight. Every row in this table is a telecalling account; HR staff register into
+ * `hr_users` and cannot appear here at all (migration 017). An earlier version carried
+ * `AND role <> 'employee'` to keep HR self-registrations out of the assignment
+ * dropdown — once the two tables were separated, that clause had nothing left to
+ * exclude and the enum value it tested no longer exists.
  */
 export async function listAssignableEmployees(): Promise<EmployeeRecord[]> {
   const rows = await query<EmployeeRow>(

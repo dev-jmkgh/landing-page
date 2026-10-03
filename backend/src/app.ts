@@ -9,6 +9,8 @@ import { adminRouter } from './modules/admin/admin.routes';
 import { applicationRouter } from './modules/applications/application.routes';
 import { diagnosticsRouter } from './modules/diagnostics/diagnostics.routes';
 import { enquiryRouter } from './modules/enquiries/enquiry.routes';
+import { hrAdminRouter } from './modules/hr/hrAdmin.routes';
+import { hrAuthRouter } from './modules/hr/hrAuth.routes';
 import { telecallingAdminRouter } from './modules/telecalling/admin.routes';
 import { mobileRouter } from './modules/telecalling/mobile.routes';
 import { logger } from './utils/logger';
@@ -75,6 +77,22 @@ export function createApp(): Express {
    */
   app.use('/api/mobile', mobileRouter);
   app.use('/api/admin/telecalling', telecallingAdminRouter);
+
+  /**
+   * HR.
+   *
+   * A THIRD product, not a section of telecalling. It has its own account table, its
+   * own sessions, its own email-verification codes and its own JWT audience — see
+   * migration 017. The two apps serve overlapping PEOPLE, so a telecaller who also
+   * needs payslips holds a row in each table; what they must not share is a password,
+   * an approval decision or an active flag.
+   *
+   * `/api/hr` is the app, Bearer-only. `/api/admin/hr` is the approvals queue, and sits
+   * under the admin prefix because one set of administrators manages both products —
+   * that direction of access was never what the separation forbade.
+   */
+  app.use('/api/hr/auth', hrAuthRouter);
+  app.use('/api/admin/hr', hrAdminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

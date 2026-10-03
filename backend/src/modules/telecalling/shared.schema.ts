@@ -134,6 +134,17 @@ export type FollowUpScope = (typeof FOLLOW_UP_SCOPES)[number];
 /* People                                                                      */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The access ladder for the TELECALLING product.
+ *
+ * Note what is absent: there is no role here for staff who are not on the call floor.
+ * An `employee` role was added for a short while so the HR app could register through
+ * this signup, and migration 017 took it back out — HR accounts live in `hr_users` with
+ * their own role set, because the two products answer different questions about a
+ * person and a shared ladder forced one enum to mean both.
+ *
+ * The authority order lives in `RANK` in actor.ts, not in this tuple's order.
+ */
 export const EMPLOYEE_ROLES = ['admin', 'manager', 'supervisor', 'telecaller'] as const;
 export type EmployeeRole = (typeof EMPLOYEE_ROLES)[number];
 

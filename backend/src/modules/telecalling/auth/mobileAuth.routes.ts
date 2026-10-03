@@ -166,7 +166,15 @@ function refusalToError(refusal: SignInRefusal): HttpError {
 /* Self-registration                                                           */
 /* -------------------------------------------------------------------------- */
 
-const signupSchema = z.object({
+/**
+ * Exported so the e2e harness can assert against the real rule rather than a copy.
+ *
+ * What this schema REFUSES is the security boundary, and `signupLimiter` allows only
+ * five registrations per window — so probing it over HTTP would spend the budget the
+ * rest of the suite needs. A copied schema in the test would pass while this one
+ * regressed.
+ */
+export const signupSchema = z.object({
   name: z
     .string({ required_error: 'Enter your full name.' })
     .transform((value) => value.replace(/\s+/g, ' ').trim())

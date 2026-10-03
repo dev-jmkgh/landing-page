@@ -126,7 +126,7 @@ export const mobileLoginLimiter = build({
 export const signupLimiter = build({
   name: 'mobile-signup',
   windowMs: config.rateLimit.windowMs,
-  max: 5,
+  max: config.rateLimit.signupMax,
   message:
     'Too many registration attempts from this network. Please wait a few minutes, or ask your administrator to create the account for you.',
 });
@@ -188,6 +188,67 @@ export const changePasswordLimiter = build({
   max: 5,
   keyBy: (request) =>
     request.actor ? `actor:${request.actor.id}` : `ip:${request.ip ?? 'unknown'}`,
+  message: 'Too many password change attempts. Please wait before trying again.',
+});
+
+/* -------------------------------------------------------------------------- */
+/* HR app                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The HR app gets its OWN counters, not a share of the telecalling ones.
+ *
+ * The limiters above are keyed by IP, and the two workforces sit behind the same office
+ * address. Reusing them would mean a morning of HR registrations exhausted the budget
+ * the telecalling app needs to sign its floor in — which is precisely the cross-app
+ * interference the separate account tables in migration 017 exist to prevent, arriving
+ * through the rate limiter instead of the database.
+ *
+ * Separate instances mean separate counters even where the numbers happen to match.
+ */
+export const hrLoginLimiter = build({
+  name: 'hr-login',
+  windowMs: config.rateLimit.windowMs,
+  max: config.mobileAuth.loginMax,
+  message: 'Too many sign-in attempts. Please wait before trying again.',
+});
+
+export const hrSignupLimiter = build({
+  name: 'hr-signup',
+  windowMs: config.rateLimit.windowMs,
+  max: config.rateLimit.signupMax,
+  message:
+    'Too many registration attempts from this network. Please wait a few minutes, or ask your administrator to create the account for you.',
+});
+
+export const hrEmailVerificationLimiter = build({
+  name: 'hr-email-verification',
+  windowMs: config.rateLimit.windowMs,
+  max: 20,
+  message:
+    'Too many verification attempts from this network. Please wait a few minutes and try again.',
+});
+
+export const hrRefreshLimiter = build({
+  name: 'hr-refresh',
+  windowMs: 5 * 60 * 1000,
+  max: 60,
+  message: 'Too many refresh attempts. Please wait a moment.',
+});
+
+/**
+ * Keyed on the authenticated HR employee, for the same reason as its telecalling twin:
+ * an IP key would let one person's attempts lock out a whole office.
+ *
+ * `hrActor`, not `actor` — the two are different identity slots over different id
+ * spaces, and keying on the wrong one would silently merge the two apps' counters.
+ */
+export const hrChangePasswordLimiter = build({
+  name: 'hr-change-password',
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyBy: (request) =>
+    request.hrActor ? `hr:${request.hrActor.id}` : `ip:${request.ip ?? 'unknown'}`,
   message: 'Too many password change attempts. Please wait before trying again.',
 });
 
