@@ -14,6 +14,8 @@ import {
   type HrPaginated,
 } from '@/lib/hr';
 import { EmptyPanel, Pager, Tag, TableSkeleton } from '../telecalling/shared';
+import { WORK_MODE_LABELS } from '@/lib/hr';
+import { AssignmentDialog } from './AssignmentDialog';
 
 /**
  * HR employees, and the queue of people waiting to be let in.
@@ -90,6 +92,8 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  /** The employee whose attendance rule is being edited, if any. */
+  const [assigning, setAssigning] = useState<HrEmployee | null>(null);
 
   const abort = useRef<AbortController | null>(null);
 
@@ -325,6 +329,19 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
       {error ? <FormAlert variant="error">{error}</FormAlert> : null}
       {notice ? <FormAlert variant="success">{notice}</FormAlert> : null}
 
+      {assigning ? (
+        <AssignmentDialog
+          employee={assigning}
+          onUnauthorized={onUnauthorized}
+          onClose={() => setAssigning(null)}
+          onSaved={(message) => {
+            setAssigning(null);
+            setNotice(message);
+            void load();
+          }}
+        />
+      ) : null}
+
       {loading && !data ? (
         <TableSkeleton />
       ) : !data || data.items.length === 0 ? (
@@ -484,7 +501,7 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
           rows={data.items}
           rowKey={(employee) => employee.id}
           rowBusy={(employee) => busyId === employee.id}
-          minWidth="62rem"
+          minWidth="76rem"
           caption="HR app employees"
           columns={[
             {
@@ -509,6 +526,29 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
               width: '10rem',
               nowrap: true,
               render: (employee) => HR_ROLE_LABELS[employee.role] ?? employee.role,
+            },
+            {
+              key: 'rule',
+              header: 'Attendance rule',
+              width: '15rem',
+              render: (employee) => (
+                <CellStack
+                  primary={WORK_MODE_LABELS[employee.workMode] ?? employee.workMode}
+                  /*
+                    An office worker with no site cannot check in at all, so that gap
+                    is called out here rather than left as a blank cell — this column
+                    is the only place an administrator would notice it before the
+                    employee does.
+                  */
+                  secondary={
+                    employee.workMode === 'office'
+                      ? (employee.workLocationName ?? 'no site — cannot check in')
+                      : 'no location check'
+                  }
+                >
+                  <span className="tc-muted">{employee.shiftName ?? 'no shift'}</span>
+                </CellStack>
+              ),
             },
             {
               key: 'state',
@@ -542,10 +582,19 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
               key: 'actions',
               header: 'Actions',
               align: 'end',
-              width: '10rem',
+              width: '14rem',
               nowrap: true,
               render: (employee) => (
                 <CellActions>
+                  <button
+                    type="button"
+                    className="btn btn--outline btn--sm"
+                    disabled={busyId === employee.id}
+                    onClick={() => setAssigning(employee)}
+                  >
+                    <Icon name="pin" size={14} />
+                    Rule
+                  </button>
                   <button
                     type="button"
                     className="btn btn--ghost btn--sm"

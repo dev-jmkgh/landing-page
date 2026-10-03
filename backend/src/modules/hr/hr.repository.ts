@@ -10,6 +10,15 @@ import type { HrApprovalStatus, HrEmployeeProfile, HrRole } from './hr.schema';
  * reintroduce the coupling the two tables exist to prevent.
  */
 
+/** The assignment columns, joined onto the list query only. */
+export interface HrAssignmentColumns {
+  work_mode: 'office' | 'remote' | 'field';
+  work_location_id: number | null;
+  work_location_name: string | null;
+  shift_id: number | null;
+  shift_name: string | null;
+}
+
 export interface HrUserRow extends RowDataPacket {
   id: number;
   employee_code: string;
@@ -31,6 +40,15 @@ const HR_USER_COLUMNS = `
   id, employee_code, name, email, email_verified_at, phone, role,
   is_active, approval_status, rejection_reason, registered_at,
   approved_at, last_login_at, created_at
+`;
+
+/* The same columns prefixed for the join below, plus the assignment. */
+const HR_USER_LIST_COLUMNS = `
+  u.id, u.employee_code, u.name, u.email, u.email_verified_at, u.phone, u.role,
+  u.is_active, u.approval_status, u.rejection_reason, u.registered_at,
+  u.approved_at, u.last_login_at, u.created_at,
+  u.work_mode, u.work_location_id, u.shift_id,
+  l.name AS work_location_name, s.name AS shift_name
 `;
 
 function iso(value: Date | string | null | undefined): string | null {
@@ -83,7 +101,22 @@ export type HrRegistrationFilters = {
   pageSize: number;
 };
 
-export type HrRegistrationRow = HrEmployeeProfile;
+/**
+ * An employee as the ADMIN list shows them: the profile, plus what they are assigned
+ * to work.
+ *
+ * The assignment is not on `HrEmployeeProfile` because that shape is what `/hr/auth/me`
+ * returns to the employee's own app, and the app already reads its assignment from
+ * `/hr/attendance/today` — where it arrives alongside the geofence flag the server
+ * derived from it. Two sources for the same fact is how they come to disagree.
+ */
+export type HrRegistrationRow = HrEmployeeProfile & {
+  workMode: 'office' | 'remote' | 'field';
+  workLocationId: number | null;
+  workLocationName: string | null;
+  shiftId: number | null;
+  shiftName: string | null;
+};
 
 export async function listHrUsers(
   filters: HrRegistrationFilters,
@@ -92,12 +125,12 @@ export async function listHrUsers(
   const params: Array<string | number> = [];
 
   if (filters.approval) {
-    conditions.push('approval_status = ?');
+    conditions.push('u.approval_status = ?');
     params.push(filters.approval);
   }
 
   if (filters.q) {
-    conditions.push('(name LIKE ? OR email LIKE ? OR employee_code LIKE ? OR phone LIKE ?)');
+    conditions.push('(u.name LIKE ? OR u.email LIKE ? OR u.employee_code LIKE ? OR u.phone LIKE ?)');
     const term = `%${filters.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
     params.push(term, term, term, term);
   }
@@ -105,7 +138,7 @@ export async function listHrUsers(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const countRow = await queryOne<RowDataPacket & { total: number }>(
-    `SELECT COUNT(*) AS total FROM hr_users ${where}`,
+    `SELECT COUNT(*) AS total FROM hr_users u ${where}`,
     params,
   );
   const total = Number(countRow?.total ?? 0);
@@ -121,21 +154,30 @@ export async function listHrUsers(
    * `int().positive()` with pageSize capped at 100, so neither can carry SQL. Every
    * other paginated query in this codebase does the same.
    */
-  const rows = await query<HrUserRow>(
-    `SELECT ${HR_USER_COLUMNS}
-       FROM hr_users
+  const rows = await query<HrUserRow & HrAssignmentColumns>(
+    `SELECT ${HR_USER_LIST_COLUMNS}
+       FROM hr_users u
+       LEFT JOIN hr_work_locations l ON l.id = u.work_location_id
+       LEFT JOIN hr_shifts s         ON s.id = u.shift_id
        ${where}
       ORDER BY
         /* Pending first: the queue exists to be emptied, not browsed. */
-        CASE approval_status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END,
-        registered_at DESC,
-        id DESC
+        CASE u.approval_status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END,
+        u.registered_at DESC,
+        u.id DESC
       LIMIT ${filters.pageSize} OFFSET ${offset}`,
     params,
   );
 
   return {
-    items: rows.map(toHrProfile),
+    items: rows.map((row) => ({
+      ...toHrProfile(row),
+      workMode: row.work_mode,
+      workLocationId: row.work_location_id,
+      workLocationName: row.work_location_name,
+      shiftId: row.shift_id,
+      shiftName: row.shift_name,
+    })),
     total,
     page: filters.page,
     pageSize: filters.pageSize,

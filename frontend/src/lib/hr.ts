@@ -43,7 +43,13 @@ export const HR_ROLE_LABELS: Record<HrRole, string> = {
 export const HR_APPROVAL_STATUSES = ['pending', 'approved', 'rejected'] as const;
 export type HrApprovalStatus = (typeof HR_APPROVAL_STATUSES)[number];
 
-/** Exactly what `GET /api/admin/hr/registrations` returns per row. */
+/**
+ * Exactly what `GET /api/admin/hr/registrations` returns per row.
+ *
+ * The assignment fields are admin-only: the employee's own app reads its assignment
+ * from `/hr/attendance/today`, where it arrives alongside the geofence flag the server
+ * derived from it.
+ */
 export type HrEmployee = {
   id: number;
   employeeCode: string;
@@ -60,6 +66,13 @@ export type HrEmployee = {
   approvedAt: string | null;
   lastLoginAt: string | null;
   createdAt: string | null;
+
+  /* ---- what they are assigned to work ---- */
+  workMode: 'office' | 'remote' | 'field';
+  workLocationId: number | null;
+  workLocationName: string | null;
+  shiftId: number | null;
+  shiftName: string | null;
 };
 
 export type HrPaginated<T> = {
