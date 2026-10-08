@@ -16,7 +16,7 @@
 -- The call list's Notes column reads the notes for one page of calls in a single
 -- query (WHERE call_id IN the page ids). lead_notes has never been indexed on
 -- call_id, so without this that query scans the whole table on every page.
-CREATE INDEX idx_lead_notes_call ON lead_notes (call_id, created_at);
+ALTER TABLE lead_notes ADD INDEX idx_lead_notes_call (call_id, created_at);
 
 -- The call a follow-up was booked from.
 --
@@ -42,10 +42,10 @@ ALTER TABLE follow_ups
 -- were never written up through a keyed request are unaffected.
 ALTER TABLE calls ADD COLUMN record_client_uuid CHAR(36) NULL DEFAULT NULL AFTER recorded_at;
 
-CREATE UNIQUE INDEX uq_calls_record_client_uuid ON calls (record_client_uuid);
+ALTER TABLE calls ADD UNIQUE INDEX uq_calls_record_client_uuid (record_client_uuid);
 
 -- My Activity: one employee's calls in one direction, newest first, paged by a
 -- (started_at, id) keyset. InnoDB appends the primary key to a secondary index,
 -- so the keyset tie-break is served too. idx_calls_user_started already covers
 -- the unfiltered list.
-CREATE INDEX idx_calls_user_direction_started ON calls (user_id, direction, started_at);
+ALTER TABLE calls ADD INDEX idx_calls_user_direction_started (user_id, direction, started_at);

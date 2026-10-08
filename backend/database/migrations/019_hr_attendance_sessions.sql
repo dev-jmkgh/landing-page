@@ -12,14 +12,16 @@
 --
 -- WHY BREAKS GO AWAY
 --
--- `hr_attendance_breaks` is dropped rather than kept alongside. With sessions, a
--- break IS the gap between one ending and the next beginning — so keeping both
+-- `hr_attendance_breaks` is retired rather than kept in use. With sessions, a
+-- break IS the gap between one ending and the next beginning — so recording both
 -- would give an employee two different ways to record the same hour, and the two
 -- could disagree. The break total is now DERIVED from the gaps, so nothing is
 -- lost from the day summary; only the second button is gone.
 --
--- Dropping it is safe here: 018 has not been deployed to production, and the
--- table holds only development test rows.
+-- The table itself is LEFT IN PLACE, unused. Migrations run as the application's
+-- own database user, and in production that user has no DROP privilege (the first
+-- revision of this file ended with a DROP TABLE and failed there). No code reads or
+-- writes the table any more, and a database administrator may drop it by hand.
 --
 -- WHAT hr_attendance STILL DOES
 --
@@ -159,4 +161,7 @@ UPDATE hr_attendance a
 -- -----------------------------------------------------------------------------
 -- The break table is superseded
 -- -----------------------------------------------------------------------------
-DROP TABLE IF EXISTS hr_attendance_breaks;
+--
+-- Deliberately not dropped (see the header): the application's database user
+-- cannot DROP. Every statement above is safe to run again, so a database where
+-- the first revision stopped at its DROP finishes this file cleanly.

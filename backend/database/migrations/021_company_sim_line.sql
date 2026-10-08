@@ -48,7 +48,7 @@ ALTER TABLE telecaller_users
   ADD COLUMN company_sim_device VARCHAR(120) NULL AFTER company_sim_slot,
   ADD COLUMN company_sim_at DATETIME NULL AFTER company_sim_device;
 
-CREATE UNIQUE INDEX uq_telecaller_users_company_phone ON telecaller_users (company_phone_claim);
+ALTER TABLE telecaller_users ADD UNIQUE INDEX uq_telecaller_users_company_phone (company_phone_claim);
 
 -- Which line received each call.
 --
@@ -76,4 +76,4 @@ ALTER TABLE calls
 
 -- The admin Incoming view filters on direction and sorts by started_at across
 -- every employee. idx_calls_started has no direction, so that list scanned it.
-CREATE INDEX idx_calls_direction_started ON calls (direction, started_at);
+ALTER TABLE calls ADD INDEX idx_calls_direction_started (direction, started_at);

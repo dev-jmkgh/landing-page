@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { SqlParam } from '../../src/db/pool';
@@ -1089,6 +1091,50 @@ export async function run(ctx: E2EContext): Promise<void> {
   check(
     'the database allows one scheduled report run per date and any number of manual ones',
     secondScheduledRefused,
+  );
+
+  /* ------------------------------------- migrations run as the app's own user */
+  /*
+   * Production has one database and one user, and the migrations run as that user. It
+   * has no DROP privilege and may have no INDEX privilege, so a statement needing either
+   * fails there part-way through a file — 019 once ended with a DROP TABLE and did. This
+   * harness applies migrations as an administrator, so only a check on the files catches
+   * it. Comment lines are skipped exactly as the runner skips them; DROP COLUMN, DROP
+   * INDEX and RENAME COLUMN inside an ALTER TABLE need only ALTER and are allowed.
+   */
+  console.log('\nfoundation — migrations need no privilege the application user lacks');
+
+  const PRIVILEGED_STATEMENTS: RegExp[] = [
+    /^DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|INDEX|TRIGGER|PROCEDURE|FUNCTION|EVENT)\b/i,
+    /^TRUNCATE\b/i,
+    /^RENAME\s+TABLE\b/i,
+    /^ALTER\s+TABLE\s+\S+\s+RENAME\s+(TO|AS)\b/i,
+    /^CREATE\s+(UNIQUE\s+|FULLTEXT\s+|SPATIAL\s+)?INDEX\b/i,
+    /^CREATE\s+(OR\s+REPLACE\s+)?(DEFINER\s*=\s*\S+\s+)?(VIEW|TRIGGER|PROCEDURE|FUNCTION|EVENT)\b/i,
+    /^(GRANT|REVOKE|LOCK\s+TABLES|SET\s+GLOBAL)\b/i,
+  ];
+  const migrationsDir = path.resolve(__dirname, '../../database/migrations');
+  const migrationFiles = fs.readdirSync(migrationsDir).filter((name) => name.endsWith('.sql')).sort();
+  const privileged: string[] = [];
+  for (const file of migrationFiles) {
+    const statements = fs
+      .readFileSync(path.join(migrationsDir, file), 'utf8')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('--'))
+      .join('\n')
+      .split(';')
+      .map((statement) => statement.trim())
+      .filter((statement) => statement.length > 0);
+    for (const statement of statements) {
+      if (PRIVILEGED_STATEMENTS.some((pattern) => pattern.test(statement))) {
+        privileged.push(`${file}: ${statement.slice(0, 80).replace(/\s+/g, ' ')}`);
+      }
+    }
+  }
+  check(
+    `none of the ${migrationFiles.length} migrations needs DROP, INDEX or another privilege the application user lacks`,
+    migrationFiles.length > 0 && privileged.length === 0,
+    privileged,
   );
 
   /* ------------------------------------------------------------ tidy up */

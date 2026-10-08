@@ -34,4 +34,4 @@ ALTER TABLE leads
 
 -- Not UNIQUE, for the reason above. Existing duplicates stay; new ones are refused by
 -- the service before they reach the table.
-CREATE INDEX idx_leads_phone_key ON leads (phone_key);
+ALTER TABLE leads ADD INDEX idx_leads_phone_key (phone_key);

@@ -23,4 +23,4 @@ ALTER TABLE calls
 -- Finding the calls still waiting to be written up is the Incoming list's default view,
 -- and it is asked on every app resume. Narrow deliberately: the query is always scoped to
 -- one telecaller's own incoming calls.
-CREATE INDEX idx_calls_unrecorded ON calls (user_id, direction, recorded_at);
+ALTER TABLE calls ADD INDEX idx_calls_unrecorded (user_id, direction, recorded_at);
