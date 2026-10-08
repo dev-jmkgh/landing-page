@@ -92,7 +92,23 @@ fi
 
 log "Building the API"
 # One full install: the build needs typescript, which lives in devDependencies.
-as_app npm --prefix backend ci
+#
+# `npm install --no-save`, not `npm ci`.
+#
+# `npm ci` refuses outright when package-lock.json and package.json disagree, and that
+# happens for a reason nobody on this box can see: `npm install` run on a Windows
+# machine prunes lockfile entries that only a wasm32 optional package needs, so a lock
+# that is healthy locally is rejected here. A deploy stopping dead over a transitive
+# optional dependency is the worse failure.
+#
+# `--no-save` is what keeps this honest. Without it npm rewrites package-lock.json on
+# the server, leaving the checkout dirty for the next `git reset --hard` and letting the
+# deployed dependency tree drift from the committed one with no record of it.
+#
+# The trade, stated plainly: the lock becomes advisory rather than binding, so a
+# transitive dependency CAN move between deploys without a commit. CI still runs
+# `npm ci` on every push to main, which is where a genuinely broken lock is caught.
+as_app npm --prefix backend install --no-save
 as_app npm --prefix backend run build
 [[ -f backend/dist/server.js ]] || fail "backend build produced no dist/server.js"
 # Drop the dev tree afterwards so the running service has only what it needs.
@@ -114,7 +130,7 @@ log "Building the website"
 # `next build` sets NODE_ENV=production itself, which is what makes Next read
 # frontend/.env.production. It is passed explicitly anyway so the value does not
 # depend on how this script was invoked.
-as_app npm --prefix frontend ci
+as_app npm --prefix frontend install --no-save
 as_app env NODE_ENV=production npm --prefix frontend run build
 [[ -f frontend/out/index.html ]] || fail "frontend build produced no out/index.html"
 
