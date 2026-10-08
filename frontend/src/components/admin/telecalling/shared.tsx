@@ -1,11 +1,14 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import {
   LEAD_STATUS_LABELS,
   LEAD_STATUS_TONE,
   daysAgoIso,
+  formatDate,
+  formatDateRange,
+  formatTime,
   todayIso,
   type DateRange,
   type LeadStatus,
@@ -29,6 +32,8 @@ export function StatCard({
   tone = 'default',
   hint,
   icon,
+  href,
+  onClick,
 }: {
   value: number | string;
   label: string;
@@ -46,9 +51,18 @@ export function StatCard({
    * sits in its own row above the number rather than beside it.
    */
   icon?: IconName;
+  /**
+   * Makes the tile a link to the list behind its number.
+   *
+   * A real anchor rather than a clickable div: Tab reaches it, Enter follows it, and a
+   * Ctrl- or middle-click opens the same filtered list in a new tab. Pass `onClick` too
+   * to keep a plain click inside the page — `linkProps` from nav.tsx gives both.
+   */
+  href?: string;
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
-  return (
-    <div className={`tc-stat tc-stat--${tone} tc-reveal`}>
+  const content = (
+    <>
       {icon ? (
         <span className="tc-stat__icon" aria-hidden="true">
           <Icon name={icon} size={16} />
@@ -57,8 +71,18 @@ export function StatCard({
       <span className="tc-stat__value">{value}</span>
       <span className="tc-stat__label">{label}</span>
       {hint ? <span className="tc-stat__hint">{hint}</span> : null}
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <a className={`tc-stat tc-stat--${tone} tc-stat--link tc-reveal`} href={href} onClick={onClick}>
+        {content}
+      </a>
+    );
+  }
+
+  return <div className={`tc-stat tc-stat--${tone} tc-reveal`}>{content}</div>;
 }
 
 /**
@@ -100,9 +124,33 @@ export function Tag({
   tone = 'neutral',
 }: {
   children: ReactNode;
-  tone?: 'neutral' | 'progress' | 'good' | 'bad';
+  /** `warn` is for "needs a look, not wrong": a skipped row, a SIM not set up yet. */
+  tone?: 'neutral' | 'progress' | 'good' | 'warn' | 'bad';
 }) {
   return <span className={`tc-badge tc-badge--${tone}`}>{children}</span>;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Table cells                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A date and time for a narrow table column: the IST day, with the time beneath it.
+ *
+ * "07 Oct 2026, 04:55 pm" on one line needs about 12.5rem and cannot wrap without
+ * splitting the value, so a table with several such columns overflowed the widths it
+ * declared and crushed its other columns instead — customer names and phone numbers broke
+ * across lines and selects cut names short. Two short lines fit 7.5rem.
+ */
+export function DateTimeCell({ value, tone }: { value: string | null; tone?: 'bad' }) {
+  if (!value) return <span className="tc-muted">—</span>;
+
+  return (
+    <span className={`tc-datetime${tone === 'bad' ? ' tc-cell-bad' : ''}`}>
+      <span>{formatDate(value)}</span>
+      <span className="tc-datetime__time">{formatTime(value)}</span>
+    </span>
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -138,23 +186,57 @@ export function rangeFor(preset: RangePreset): DateRange {
 export function RangePicker({
   value,
   onChange,
+  custom,
+  onClearCustom,
+  label = 'Date range',
 }: {
   value: RangePreset;
   onChange: (next: RangePreset) => void;
+  /**
+   * An explicit range standing in for the preset — a chart bucket or a dashboard tile
+   * opened onto exactly the days it counted — shown as a chip after the presets.
+   *
+   * While it is set no preset is pressed, because none is in force. Choosing a preset is
+   * how a person replaces it, so a caller's `onChange` should clear it as well.
+   */
+  custom?: DateRange | null;
+  /** Gives the chip a remove button, which should drop back to the preset. */
+  onClearCustom?: () => void;
+  /** The group's accessible name, for a screen with more than one date filter. */
+  label?: string;
 }) {
+  const customText = custom && (custom.from || custom.to) ? formatDateRange(custom) : null;
+
   return (
-    <div className="tc-segmented" role="group" aria-label="Date range">
+    <div className="tc-segmented" role="group" aria-label={label}>
       {RANGE_PRESETS.map((preset) => (
         <button
           key={preset.key}
           type="button"
           className="tc-segmented__button"
-          aria-pressed={value === preset.key}
+          aria-pressed={customText === null && value === preset.key}
           onClick={() => onChange(preset.key)}
         >
           {preset.label}
         </button>
       ))}
+
+      {customText !== null ? (
+        <span className="tc-segmented__chip">
+          <span className="sr-only">Showing </span>
+          {customText}
+          {onClearCustom ? (
+            <button
+              type="button"
+              className="tc-segmented__clear"
+              onClick={onClearCustom}
+              aria-label={`Remove the range ${customText}`}
+            >
+              <Icon name="close" size={12} />
+            </button>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -271,11 +353,16 @@ export type BarDatum = { label: string; value: number; secondary?: number };
 /**
  * A horizontal bar chart, as plain HTML.
  *
- * No charting library. Every chart this system needs is a ranked comparison of one
- * measure across a handful of categories, and that is a div with a width — which reads
- * correctly in a screen reader, prints, and adds nothing to the bundle. A static export
- * has no cheap way to bundle a chart library, and the CDN route would put a
- * render-blocking request on the marketing site's stylesheet chain too.
+ * For ranked comparisons of one measure across a handful of categories, which is what
+ * Reports shows: a div with a width reads correctly in a screen reader, prints, and adds
+ * nothing to the bundle. Keep using it for those.
+ *
+ * The dashboard's trend charts are the exception. A time axis, stacked segments and a
+ * donut are not a div with a width, so they use ApexCharts, through a wrapper that loads
+ * the library with a dynamic `import()` only when a chart is on screen — never in this
+ * route's main bundle, and never during the static export, where the library cannot run.
+ * A CDN script is still not the answer: it would put a render-blocking request on the
+ * marketing site's stylesheet chain.
  *
  * `secondary` draws a second, inset bar — used for "converted, out of total".
  */
@@ -354,6 +441,12 @@ export function BarChart({
  * Every field is quoted and internal quotes doubled. A customer note containing a comma
  * or a newline is normal, and unquoted output would silently corrupt the column
  * alignment for every row after it.
+ *
+ * Text that starts with = + - @, a tab or a carriage return gets a leading apostrophe.
+ * Excel strips the quotes and still runs such a cell as a formula, and notes and names
+ * are typed by employees and customers — `=HYPERLINK(...)` in a call note would send the
+ * neighbouring phone numbers to whoever wrote it. The same rule as the API's own CSV
+ * (`csvCell` in the lead import). Numbers stay numbers.
  */
 export function downloadCsv(
   filename: string,
@@ -362,7 +455,8 @@ export function downloadCsv(
 ): void {
   const escape = (value: string | number | null): string => {
     const text = value === null || value === undefined ? '' : String(value);
-    return `"${text.replace(/"/g, '""')}"`;
+    const safe = typeof value === 'string' && /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+    return `"${safe.replace(/"/g, '""')}"`;
   };
 
   const csv = [headers.map(escape).join(','), ...rows.map((row) => row.map(escape).join(','))].join(

@@ -36,7 +36,13 @@ const corsOptions: CorsOptions = {
     return callback(forbidden('Origin not allowed.'));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+  /*
+   * Every method a route actually uses. PUT and DELETE were missing, so a browser on the
+   * admin origin had its preflight refused for saving settings, saving a lead source and
+   * deleting a lead — the request never reached the route, and the screen reported a
+   * network failure for an action the API would have allowed.
+   */
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Accept', 'X-CSRF-Token'],
   exposedHeaders: ['Content-Disposition'],
   maxAge: 600,

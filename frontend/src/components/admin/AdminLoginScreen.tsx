@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AdminLogin } from '@/components/admin/AdminLogin';
+import { AdminSessionLoader } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { adminApi } from '@/lib/api';
 import { BASE_PATH } from '@/lib/paths';
@@ -88,15 +89,7 @@ export function AdminLoginScreen() {
   }, []);
 
   if (checking) {
-    return (
-      <div className="admin-login">
-        <div className="admin-login__card" aria-busy="true">
-          <div className="skeleton" style={{ height: '1.5rem', width: '60%' }} />
-          <div className="skeleton" style={{ height: '1rem', width: '85%', marginTop: '1rem' }} />
-          <div className="skeleton" style={{ height: '2.75rem', marginTop: '1.5rem' }} />
-        </div>
-      </div>
-    );
+    return <AdminSessionLoader />;
   }
 
   return (

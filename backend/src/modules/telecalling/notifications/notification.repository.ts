@@ -1,4 +1,12 @@
-import { execute, query, queryOne, type RowDataPacket, type SqlParam } from '../../../db/pool';
+import type { PoolConnection } from 'mysql2/promise';
+import {
+  execute,
+  query,
+  queryOne,
+  type ResultSetHeader,
+  type RowDataPacket,
+  type SqlParam,
+} from '../../../db/pool';
 import { describeError, logger } from '../../../utils/logger';
 import { resolvePage, type Paginated, type Pagination } from '../shared.schema';
 
@@ -190,6 +198,45 @@ export async function markAllRead(userId: number): Promise<number> {
   const result = await execute(
     'UPDATE notifications SET read_at = NOW() WHERE user_id = ? AND read_at IS NULL',
     [userId],
+  );
+  return result.affectedRows;
+}
+
+/**
+ * Points every notification about a follow-up at the lead it now belongs to, inside the
+ * move's transaction.
+ *
+ * A notification deep-links to its lead, so after a follow-up moves to another lead the
+ * old notification would open the wrong customer. Titles and bodies are left as they
+ * were: a notification records what was said at the time.
+ */
+export async function retargetFollowUpNotificationsTx(
+  connection: PoolConnection,
+  followUpId: number,
+  leadId: number,
+): Promise<number> {
+  const [result] = await connection.execute<ResultSetHeader>(
+    'UPDATE notifications SET lead_id = ? WHERE follow_up_id = ?',
+    [leadId, followUpId],
+  );
+  return result.affectedRows;
+}
+
+/**
+ * Marks one employee's unread notifications about a follow-up as read, inside the
+ * transaction that takes the follow-up away from them — so their badge stops counting
+ * work that is no longer theirs to do.
+ */
+export async function markFollowUpNotificationsReadTx(
+  connection: PoolConnection,
+  followUpId: number,
+  userId: number,
+): Promise<number> {
+  const [result] = await connection.execute<ResultSetHeader>(
+    `UPDATE notifications
+        SET read_at = NOW()
+      WHERE follow_up_id = ? AND user_id = ? AND read_at IS NULL`,
+    [followUpId, userId],
   );
   return result.affectedRows;
 }

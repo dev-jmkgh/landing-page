@@ -265,3 +265,35 @@ export const mobileSyncLimiter = build({
   max: 240,
   message: 'Too many updates at once. They will be retried automatically.',
 });
+
+/**
+ * How many spreadsheets one person may have checked per window. `LEAD_IMPORT_RATE_LIMIT_MAX`
+ * overrides the default of 30; anything that is not a positive whole number falls back to
+ * it rather than switching the limit off.
+ *
+ * Read from the environment here rather than through `config/env.ts` so the import feature
+ * stays within its own files.
+ */
+function leadImportMax(): number {
+  const configured = Number(process.env.LEAD_IMPORT_RATE_LIMIT_MAX);
+  return Number.isInteger(configured) && configured > 0 ? configured : 30;
+}
+
+/**
+ * Lead import previews — the multipart upload that parses a spreadsheet.
+ *
+ * Each one buffers up to 5 MB and spends real CPU in a parse worker, so it gets its own
+ * budget: thirty files per ten minutes, which a manager fixing and re-checking a file
+ * will not reach. Keyed on the authenticated employee, like the password-change limiter,
+ * so one person's retries cannot lock out a colleague behind the same office address.
+ * The commit batches are not counted here: they are small JSON requests the import
+ * screen sends in a loop.
+ */
+export const leadImportLimiter = build({
+  name: 'lead-import',
+  windowMs: 10 * 60 * 1000,
+  max: leadImportMax(),
+  keyBy: (request) =>
+    request.actor ? `actor:${request.actor.id}` : `ip:${request.ip ?? 'unknown'}`,
+  message: 'Too many files checked. Please wait a few minutes.',
+});

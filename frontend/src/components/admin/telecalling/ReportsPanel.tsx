@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CellStack, DataTable } from '@/components/admin/DataTable';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -35,6 +35,8 @@ type Dimension = 'status' | 'source' | 'employee';
 type ReportData = {
   performance: EmployeePerformance[];
   trend: { period: string; calls: number; answered: number; missed: number; talkTimeSeconds: number }[];
+  /** True when the period held more buckets than the API returns; it kept the newest. */
+  trendTruncated: boolean;
   breakdown: { key: string; total: number; converted: number; conversionRate: number }[];
   followUps: {
     created: number;
@@ -57,12 +59,15 @@ export function ReportsPanel({ onUnauthorized }: { onUnauthorized: () => void })
   const [error, setError] = useState<string | null>(null);
 
   const abort = useRef<AbortController | null>(null);
-  const range = useMemo(() => rangeFor(preset), [preset]);
 
   const load = useCallback(async () => {
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
+
+    // Worked out on every load, not memoised on the preset: a screen left open past IST
+    // midnight would otherwise keep asking for yesterday's window.
+    const range = rangeFor(preset);
 
     setLoading(true);
     setError(null);
@@ -82,7 +87,13 @@ export function ReportsPanel({ onUnauthorized }: { onUnauthorized: () => void })
         telecallingApi.followUpReport({ ...range }, controller.signal),
       ]);
 
-      setData({ performance, trend: trend.items, breakdown: breakdown.items, followUps });
+      setData({
+        performance,
+        trend: trend.items,
+        trendTruncated: trend.truncated === true,
+        breakdown: breakdown.items,
+        followUps,
+      });
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return;
       if (caught instanceof ApiError && caught.status === 401) {
@@ -93,7 +104,7 @@ export function ReportsPanel({ onUnauthorized }: { onUnauthorized: () => void })
     } finally {
       setLoading(false);
     }
-  }, [range, granularity, dimension, onUnauthorized]);
+  }, [preset, granularity, dimension, onUnauthorized]);
 
   useEffect(() => {
     void load();
@@ -222,6 +233,12 @@ export function ReportsPanel({ onUnauthorized }: { onUnauthorized: () => void })
               primaryLabel="Calls"
               secondaryLabel="Answered"
             />
+            {data.trendTruncated ? (
+              <p className="tc-muted">
+                Showing the most recent 400 {granularity === 'day' ? 'days' : granularity === 'week' ? 'weeks' : 'months'}.
+                Group by a longer period to see further back.
+              </p>
+            ) : null}
           </div>
 
           <div className="tc-panel-head">

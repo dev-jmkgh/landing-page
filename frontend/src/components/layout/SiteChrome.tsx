@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Analytics } from '@/components/analytics/Analytics';
 import { EnquiryProvider } from '@/components/enquiry/EnquiryProvider';
 import { FloatingEnquiryButton } from '@/components/enquiry/EnquiryTrigger';
 import { SiteFooter } from '@/components/layout/SiteFooter';
@@ -11,10 +12,16 @@ import { organizationJsonLd, webSiteJsonLd } from '@/lib/seo';
  * Public site chrome: header, footer, the shared enquiry modal and the persistent
  * floating "Enquire Now" button. Used by the public route group and the 404 page —
  * the admin area deliberately does not use it.
+ *
+ * The measurement scripts live here too, not in the root layout, so they load on the
+ * public site only. Admin screens show customers' names and phone numbers, keep their
+ * filters (search text included) in the address, and are noindex — none of that should
+ * reach Google Analytics page views or Clarity session recordings.
  */
 export function SiteChrome({ children }: { children: ReactNode }) {
   return (
     <>
+      <Analytics />
       <JsonLd data={[organizationJsonLd(), webSiteJsonLd()]} />
       <a className="skip-link" href="#main-content">
         Skip to main content

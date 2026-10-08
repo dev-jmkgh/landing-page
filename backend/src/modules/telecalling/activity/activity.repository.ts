@@ -2,10 +2,13 @@ import type { PoolConnection } from 'mysql2/promise';
 import { execute, query, queryOne, type RowDataPacket, type SqlParam } from '../../../db/pool';
 import { describeError, logger } from '../../../utils/logger';
 import { actorLabel, type Actor } from '../actor';
+import { companyRangeConditions } from '../companyTime';
 import {
+  LEAD_STATUSES,
   likeTerm,
   resolvePage,
   type ActivityType,
+  type LeadStatus,
   type Paginated,
   type Pagination,
 } from '../shared.schema';
@@ -153,6 +156,74 @@ export async function listLeadActivity(
   return rows.map(toActivityRecord);
 }
 
+/** The status change made on a call, read back from the lead's timeline. */
+export type CallStatusChange = {
+  from: LeadStatus;
+  to: LeadStatus;
+  at: string;
+  userName: string | null;
+};
+
+function isLeadStatus(value: unknown): value is LeadStatus {
+  return typeof value === 'string' && (LEAD_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * The status change made on each of a page of one lead's calls, keyed by call id.
+ *
+ * A status chosen on the post-call sheet is written as a `status_changed` timeline row
+ * whose `meta.callId` names the call (logCall, recordCall). This reads those back for the
+ * Lead View's per-call history, in ONE query for the page and only for the page's calls —
+ * the match on the id is made in SQL, so the read is bounded by the calls asked about,
+ * not by how long the lead's history has grown.
+ *
+ * `CAST(JSON_UNQUOTE(JSON_EXTRACT(...)) AS UNSIGNED)` because the column is JSON on MySQL
+ * and LONGTEXT on MariaDB, where JSON_EXTRACT hands back text; the cast compares an id
+ * the same way on both. The rows are re-checked here as well — a row whose meta does not
+ * name two real statuses is skipped rather than rendered as a blank change.
+ *
+ * A call written up more than once can carry more than one change; the FIRST is the one
+ * returned — the change made on the call itself. An empty page costs no query.
+ */
+export async function listCallStatusChanges(
+  leadId: number,
+  callIds: number[],
+): Promise<Map<number, CallStatusChange>> {
+  const changes = new Map<number, CallStatusChange>();
+  const unique = [...new Set(callIds)].filter((id) => Number.isSafeInteger(id) && id > 0);
+  if (unique.length === 0) return changes;
+
+  const rows = await query<ActivityRow>(
+    `${ACTIVITY_SELECT}
+      WHERE a.lead_id = ?
+        AND a.type = 'status_changed'
+        AND CAST(JSON_UNQUOTE(JSON_EXTRACT(a.meta, '$.callId')) AS UNSIGNED) IN (${unique.map(() => '?').join(', ')})
+      ORDER BY a.created_at ASC, a.id ASC`,
+    [leadId, ...unique],
+  );
+
+  const wanted = new Set(unique);
+
+  for (const row of rows) {
+    const meta = parseMeta(row.meta);
+    const callId = Number(meta?.callId);
+    if (!wanted.has(callId) || changes.has(callId)) continue;
+
+    const from = meta?.from;
+    const to = meta?.to;
+    if (!isLeadStatus(from) || !isLeadStatus(to)) continue;
+
+    changes.set(callId, {
+      from,
+      to,
+      at: new Date(row.created_at).toISOString(),
+      userName: row.user_name,
+    });
+  }
+
+  return changes;
+}
+
 /** One employee's recent activity, for the admin employee-detail screen. */
 export async function listEmployeeActivity(
   userId: number,
@@ -267,6 +338,7 @@ export type AuditFilters = Pagination & {
   entityType?: string;
   actorId?: number;
   q?: string;
+  /** Inclusive IST calendar days on `created_at`. */
   from?: string;
   to?: string;
 };
@@ -287,14 +359,8 @@ export async function listAuditLogs(filters: AuditFilters): Promise<Paginated<Au
     conditions.push('actor_id = ?');
     params.push(filters.actorId);
   }
-  if (filters.from) {
-    conditions.push('created_at >= ?');
-    params.push(`${filters.from} 00:00:00`);
-  }
-  if (filters.to) {
-    conditions.push('created_at <= ?');
-    params.push(`${filters.to} 23:59:59`);
-  }
+  // The IST day, as every telecalling date filter means it (see companyTime.ts).
+  conditions.push(...companyRangeConditions('created_at', filters, params));
   if (filters.q) {
     conditions.push('(summary LIKE ? OR actor_label LIKE ?)');
     const term = likeTerm(filters.q);

@@ -1,6 +1,7 @@
 import type { PoolConnection } from 'mysql2/promise';
 import { execute, query, queryOne, type RowDataPacket, type SqlParam } from '../../../db/pool';
 import type { OwnershipScope } from '../actor';
+import { companyRangeConditions } from '../companyTime';
 import {
   likeTerm,
   phoneMatchKey,
@@ -113,13 +114,21 @@ export function toLeadRecord(row: LeadRow): LeadRecord {
   };
 }
 
-const LEAD_SELECT = `
-  SELECT l.id, l.reference, l.customer_name, l.phone, l.alternate_phone, l.email,
+/**
+ * The columns `toLeadRecord` maps, `u` being the owner's row. One list shared by every
+ * select that produces a LeadRecord, so a column added for the mapper cannot be missing
+ * from one of them.
+ */
+const LEAD_COLUMNS = `
+         l.id, l.reference, l.customer_name, l.phone, l.alternate_phone, l.email,
          l.address, l.city, l.source, l.product_interest, l.status,
          l.assigned_to, u.name AS assigned_to_name, l.assigned_at, l.created_by,
          l.enquiry_id, l.attachment_key, l.attachment_mime, l.summary_note,
          l.last_contacted_at, l.next_follow_up_at, l.converted_at, l.is_archived,
-         l.created_at, l.updated_at
+         l.created_at, l.updated_at`;
+
+const LEAD_SELECT = `
+  SELECT ${LEAD_COLUMNS}
     FROM leads l
     LEFT JOIN telecaller_users u ON u.id = l.assigned_to
 `;
@@ -147,6 +156,66 @@ export async function findLead(id: number, scope: OwnershipScope): Promise<LeadR
 
   const row = await queryOne<LeadRow>(`${LEAD_SELECT} ${where} LIMIT 1`, params);
   return row ? toLeadRecord(row) : null;
+}
+
+interface LeadDetailRow extends LeadRow {
+  assigned_by: number | null;
+  assigned_by_name: string | null;
+  created_by_name: string | null;
+}
+
+/**
+ * A lead as the admin Lead View shows it: the record, plus the names of who created it
+ * and who made the current assignment.
+ *
+ * Kept apart from `LeadRecord` rather than widening it, because every lead list and
+ * every write response in both clients is built from that record, and two more joins on
+ * each of those reads would buy nothing — only this one screen prints the names.
+ */
+export type LeadDetailRecord = LeadRecord & {
+  createdByName: string | null;
+  /**
+   * Who last changed the lead's owner — including returning it to the unassigned pool,
+   * so read it together with `assignedTo`. Null for a lead created without an owner and
+   * never assigned since.
+   */
+  assignedBy: number | null;
+  assignedByName: string | null;
+};
+
+/** `findLead` with the creator's and assigner's names. Same ownership rule, same 404 semantics. */
+export async function findLeadDetail(
+  id: number,
+  scope: OwnershipScope,
+): Promise<LeadDetailRecord | null> {
+  const params: SqlParam[] = [id];
+  let where = 'WHERE l.id = ?';
+
+  if (scope !== null) {
+    where += ' AND l.assigned_to = ?';
+    params.push(scope);
+  }
+
+  const row = await queryOne<LeadDetailRow>(
+    `SELECT ${LEAD_COLUMNS},
+            l.assigned_by, ab.name AS assigned_by_name, cu.name AS created_by_name
+       FROM leads l
+       LEFT JOIN telecaller_users u ON u.id = l.assigned_to
+       LEFT JOIN telecaller_users ab ON ab.id = l.assigned_by
+       LEFT JOIN telecaller_users cu ON cu.id = l.created_by
+      ${where}
+      LIMIT 1`,
+    params,
+  );
+
+  return row
+    ? {
+        ...toLeadRecord(row),
+        createdByName: row.created_by_name,
+        assignedBy: row.assigned_by,
+        assignedByName: row.assigned_by_name,
+      }
+    : null;
 }
 
 /** The attachment key, for the authenticated download route only. */
@@ -202,6 +271,10 @@ function buildLeadFilters(
     params.push(scope);
   } else if (filters.assignedTo === 'unassigned') {
     conditions.push('l.assigned_to IS NULL');
+  } else if (filters.assignedTo === 'assigned') {
+    // The dashboard's Assigned card: anyone at all. After the scope branch, so it can
+    // never widen what a telecaller sees.
+    conditions.push('l.assigned_to IS NOT NULL');
   } else if (typeof filters.assignedTo === 'number') {
     conditions.push('l.assigned_to = ?');
     params.push(filters.assignedTo);
@@ -225,14 +298,31 @@ function buildLeadFilters(
     conditions.push('l.last_contacted_at IS NOT NULL');
   }
 
-  if (filters.from) {
-    conditions.push('l.created_at >= ?');
-    params.push(`${filters.from} 00:00:00`);
-  }
+  /*
+   * IST calendar days, as half-open instant bounds. Appending ' 00:00:00' to the date —
+   * as this did — read the range against the UTC wall clock the column holds, so a lead
+   * created at 01:00 IST belonged to the previous day here and to the right one on the
+   * dashboard card that opened this list.
+   */
+  conditions.push(
+    ...companyRangeConditions('l.created_at', { from: filters.from, to: filters.to }, params),
+  );
 
-  if (filters.to) {
-    conditions.push('l.created_at <= ?');
-    params.push(`${filters.to} 23:59:59`);
+  /*
+   * Converted inside the range, by the predicate the dashboard's conversions series
+   * counts: currently converted AND `converted_at` in range. `converted_at` is cleared
+   * when a lead leaves `converted`, so the status check changes nothing for consistent
+   * rows; it is here so the list and the chart cannot disagree about one that is not.
+   */
+  if (filters.convertedFrom || filters.convertedTo) {
+    conditions.push("l.status = 'converted'");
+    conditions.push(
+      ...companyRangeConditions(
+        'l.converted_at',
+        { from: filters.convertedFrom, to: filters.convertedTo },
+        params,
+      ),
+    );
   }
 
   if (filters.q) {
@@ -355,8 +445,8 @@ const INSERT_LEAD = `
   INSERT INTO leads
     (reference, customer_name, phone, alternate_phone, email, address, city, source,
      product_interest, status, assigned_to, assigned_at, assigned_by, created_by,
-     enquiry_id, attachment_key, attachment_mime, summary_note)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     enquiry_id, attachment_key, attachment_mime, summary_note, converted_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 function insertLeadParams(data: InsertLeadData): SqlParam[] {
@@ -381,6 +471,13 @@ function insertLeadParams(data: InsertLeadData): SqlParam[] {
     data.attachmentKey,
     data.attachmentMime,
     data.summaryNote,
+    /*
+     * A lead entered as already converted was converted now, as far as the system can
+     * know. Left NULL — as it was until migration 025 — the lead counted as converted in
+     * every status figure and in no conversion-by-date figure. Mirrors what
+     * `updateLeadStatusTx` sets on the way in.
+     */
+    data.status === 'converted' ? new Date() : null,
   ];
 }
 
@@ -553,6 +650,87 @@ export async function findLeadOwner(
 }
 
 /**
+ * `findLeadOwner` on the caller's transaction connection.
+ *
+ * Inside `withTransaction` never reach for the pool helpers: the transaction already holds
+ * one connection, and a second acquire waits in the pool's queue. With every connection
+ * held by a transaction waiting for another, none is ever released and every request
+ * hangs — a burst of phones draining their queues at once is enough.
+ */
+export async function findLeadOwnerTx(
+  connection: PoolConnection,
+  id: number,
+): Promise<{ id: number; assignedTo: number | null; reference: string; status: LeadStatus } | null> {
+  const [rows] = await connection.execute<
+    (RowDataPacket & {
+      id: number;
+      assigned_to: number | null;
+      reference: string;
+      status: LeadStatus;
+    })[]
+  >('SELECT id, assigned_to, reference, status FROM leads WHERE id = ? LIMIT 1', [id]);
+
+  const row = rows[0];
+  return row
+    ? { id: row.id, assignedTo: row.assigned_to, reference: row.reference, status: row.status }
+    : null;
+}
+
+/** A lead row read under an exclusive lock, with what an ownership change needs. */
+export type LockedLead = {
+  id: number;
+  reference: string;
+  customerName: string;
+  assignedTo: number | null;
+  isArchived: boolean;
+  status: LeadStatus;
+};
+
+/**
+ * Exclusive locks on lead rows, in ascending id order, inside the caller's transaction.
+ *
+ * The second step of the lock order in `resolveFollowUpAssigneeTx` (employees, then
+ * leads, then follow-ups). Sorted here rather than trusted from the caller, so two moves
+ * between the same pair of leads in opposite directions lock them in the same order
+ * instead of each holding one and waiting on the other. Returns the rows found, in id
+ * order; a missing id is simply absent.
+ */
+export async function lockLeadsForUpdateTx(
+  connection: PoolConnection,
+  ids: number[],
+): Promise<LockedLead[]> {
+  const unique = [...new Set(ids)].sort((a, b) => a - b);
+  if (unique.length === 0) return [];
+
+  const [rows] = await connection.execute<
+    (RowDataPacket & {
+      id: number;
+      reference: string;
+      customer_name: string;
+      assigned_to: number | null;
+      is_archived: number;
+      status: LeadStatus;
+    })[]
+  >(
+    `SELECT id, reference, customer_name, assigned_to, is_archived, status
+       FROM leads
+      WHERE id IN (${unique.map(() => '?').join(', ')})
+      ORDER BY id
+        FOR UPDATE`,
+    unique,
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    reference: row.reference,
+    customerName: row.customer_name,
+    assignedTo: row.assigned_to,
+    isArchived: Number(row.is_archived) === 1,
+    status: row.status,
+  }));
+}
+
+/**
  * The active lead already holding this number, if there is one.
  *
  * This is what enforces one lead per number — `createLead` and `editLead` refuse when it
@@ -637,6 +815,169 @@ export async function listLeadNotes(leadId: number, limit = 200): Promise<LeadNo
     [leadId],
   );
   return rows.map(toNoteRecord);
+}
+
+/**
+ * One page of a lead's notes, newest first, every kind — system notes included, so the
+ * page total is the whole history and nothing is skipped silently; the screen mutes
+ * them. The ordering is `listLeadNotes`', which is also the "latest note" rule below, so
+ * the first row here is the note the lead list shows.
+ */
+export async function listLeadNotesPage(
+  leadId: number,
+  page: number,
+  pageSize: number,
+): Promise<Paginated<LeadNoteRecord>> {
+  const countRow = await queryOne<RowDataPacket & { total: number }>(
+    'SELECT COUNT(*) AS total FROM lead_notes WHERE lead_id = ?',
+    [leadId],
+  );
+  const total = Number(countRow?.total ?? 0);
+  const resolved = resolvePage({ page, pageSize }, total);
+
+  const rows = await query<LeadNoteRow>(
+    `SELECT n.id, n.lead_id, n.user_id, u.name AS user_name, n.kind, n.body, n.call_id, n.created_at
+       FROM lead_notes n
+       LEFT JOIN telecaller_users u ON u.id = n.user_id
+      WHERE n.lead_id = ?
+      ORDER BY n.created_at DESC, n.id DESC
+      LIMIT ${resolved.pageSize} OFFSET ${resolved.offset}`,
+    [leadId],
+  );
+
+  return {
+    items: rows.map(toNoteRecord),
+    page: resolved.page,
+    pageSize: resolved.pageSize,
+    total,
+    totalPages: resolved.totalPages,
+  };
+}
+
+/**
+ * The notes written against each of a page of one lead's calls, keyed by call id,
+ * oldest first — a call written up twice reads in the order it was written.
+ *
+ * One query for the page, never one per call, and an empty page costs none. The same
+ * rule as the call list's note count (`callNoteCondition` in the calls module): the
+ * note's lead is the call's lead — so a note that names a call in some other lead's
+ * history cannot surface here — and system notes, which are never about a call, are
+ * left out. A call's "2 notes" on the Calls screen is the two listed here.
+ */
+export async function listLeadCallNotes(
+  leadId: number,
+  callIds: number[],
+): Promise<Map<number, LeadNoteRecord[]>> {
+  const byCall = new Map<number, LeadNoteRecord[]>();
+  const unique = [...new Set(callIds)];
+  if (unique.length === 0) return byCall;
+
+  const rows = await query<LeadNoteRow>(
+    `SELECT n.id, n.lead_id, n.user_id, u.name AS user_name, n.kind, n.body, n.call_id, n.created_at
+       FROM lead_notes n
+       LEFT JOIN telecaller_users u ON u.id = n.user_id
+      WHERE n.lead_id = ?
+        AND n.call_id IN (${unique.map(() => '?').join(', ')})
+        AND n.kind <> 'system'
+      ORDER BY n.created_at ASC, n.id ASC`,
+    [leadId, ...unique],
+  );
+
+  for (const row of rows) {
+    if (row.call_id === null) continue;
+    const list = byCall.get(row.call_id);
+    if (list) list.push(toNoteRecord(row));
+    else byCall.set(row.call_id, [toNoteRecord(row)]);
+  }
+
+  return byCall;
+}
+
+/** How long a lead-list note preview may be, in characters. */
+export const LATEST_NOTE_PREVIEW_LENGTH = 300;
+
+/**
+ * The newest thing written about a lead, for the admin lead list's "Notes / remarks"
+ * column.
+ *
+ * `source: 'note'` is the newest note that is not a system note. A lead nobody has
+ * written a note on falls back to its own summary (`source: 'summary'`), which has no
+ * id, kind, author or time. `body` is a preview of at most 300 characters — counted as
+ * characters on both paths, so the cut and `truncated` agree on emoji and Indic text —
+ * and the whole note is one click away in the Lead View.
+ */
+export type LatestLeadNote = {
+  source: 'note' | 'summary';
+  noteId: number | null;
+  kind: 'note' | 'requirement' | 'call_note' | null;
+  body: string;
+  truncated: boolean;
+  userName: string | null;
+  callId: number | null;
+  createdAt: string | null;
+};
+
+/**
+ * The newest non-system note of each lead on a page, keyed by lead id. Leads with none
+ * are absent; the caller decides what stands in for them.
+ *
+ * Run for the page's ids only — one indexed probe per lead, walking `(lead_id,
+ * created_at)` backwards — rather than as a subquery in the list's own SELECT, which
+ * would run for every row a filesort considers and would change the list the mobile
+ * app shares. `created_at DESC, id DESC` is `listLeadNotes`' order, so the Lead View's
+ * first note is the one this returns; the id settles notes written in the same second.
+ *
+ * The preview is cut in SQL so a 4,000-character note does not cross the wire to be
+ * thrown away.
+ */
+export async function listLatestLeadNotes(leadIds: number[]): Promise<Map<number, LatestLeadNote>> {
+  const latest = new Map<number, LatestLeadNote>();
+  const unique = [...new Set(leadIds)];
+  if (unique.length === 0) return latest;
+
+  const rows = await query<
+    RowDataPacket & {
+      lead_id: number;
+      id: number;
+      kind: 'note' | 'requirement' | 'call_note';
+      preview: string;
+      truncated: number | string;
+      call_id: number | null;
+      created_at: Date;
+      user_name: string | null;
+    }
+  >(
+    `SELECT n.lead_id, n.id, n.kind,
+            LEFT(n.body, ${LATEST_NOTE_PREVIEW_LENGTH}) AS preview,
+            CHAR_LENGTH(n.body) > ${LATEST_NOTE_PREVIEW_LENGTH} AS truncated,
+            n.call_id, n.created_at, u.name AS user_name
+       FROM (SELECT l.id AS lead_id,
+                    (SELECT n2.id
+                       FROM lead_notes n2
+                      WHERE n2.lead_id = l.id AND n2.kind <> 'system'
+                      ORDER BY n2.created_at DESC, n2.id DESC
+                      LIMIT 1) AS note_id
+               FROM leads l
+              WHERE l.id IN (${unique.map(() => '?').join(', ')})) latest
+       JOIN lead_notes n ON n.id = latest.note_id
+       LEFT JOIN telecaller_users u ON u.id = n.user_id`,
+    unique,
+  );
+
+  for (const row of rows) {
+    latest.set(row.lead_id, {
+      source: 'note',
+      noteId: row.id,
+      kind: row.kind,
+      body: row.preview,
+      truncated: Number(row.truncated) === 1,
+      userName: row.user_name,
+      callId: row.call_id,
+      createdAt: new Date(row.created_at).toISOString(),
+    });
+  }
+
+  return latest;
 }
 
 export type InsertNoteData = {

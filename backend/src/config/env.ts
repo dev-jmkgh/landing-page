@@ -39,6 +39,30 @@ const booleanish = z
   .string()
   .transform((value) => ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase()));
 
+/**
+ * An on/off switch whose ABSENCE means something: `undefined` hands the decision to a
+ * default computed below, and a blank value counts as absent.
+ *
+ * Stricter than `booleanish` on purpose. That one reads any unrecognised word as "off",
+ * which is harmless for a proxy flag and wrong for a switch that decides whether a
+ * production server emails the administrators every morning — `TELECALLING_REPORT_SCHEDULER=of`
+ * must stop the server starting, not silently flip it to the default.
+ */
+const optionalSwitch = z
+  .string()
+  .optional()
+  .transform((value, context) => {
+    const normalised = (value ?? '').trim().toLowerCase();
+    if (normalised === '') return undefined;
+    if (['1', 'true', 'yes', 'on'].includes(normalised)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalised)) return false;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Use 1 or 0 (or true/false, yes/no, on/off), or leave it unset for the default.',
+    });
+    return z.NEVER;
+  });
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(5000),
@@ -97,10 +121,22 @@ const schema = z.object({
 
   /**
    * The single source of truth for administrative notification recipients — website
-   * enquiries and career applications alike. Comma-separated; every address receives
-   * every notification. No address is hard-coded as a default.
+   * enquiries, career applications and the daily telecalling report alike.
+   * Comma-separated; every address receives every notification. No address is
+   * hard-coded as a default.
    */
   ADMIN_EMAILS: z.string().default(''),
+
+  /**
+   * Whether THIS process runs the clock that sends the daily telecalling report.
+   *
+   * Unset means on under NODE_ENV=production and off everywhere else, so `npm run dev` on
+   * a laptop whose .env holds real SMTP credentials never mails the administrators on a
+   * timer. Set it to 0 on a staging server or any copy of production data: the database
+   * claim stops two processes sharing one database from sending twice, but it cannot
+   * stop a second database from sending its own copy.
+   */
+  TELECALLING_REPORT_SCHEDULER: optionalSwitch,
 
   /**
    * Sign-in identity for the fallback admin account. This is a *credential*, not a
@@ -262,15 +298,18 @@ if (isProduction && !raw.ADMIN_PASSWORD_HASH && !raw.DATABASE_URL && !raw.DB_PAS
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
 
 /**
- * Parses ADMIN_EMAILS into the list of administrative notification recipients.
+ * Parses a comma-separated recipient list (ADMIN_EMAILS).
  *
  * Recipients are deliberately never hard-coded: an address baked into the source would
  * silently keep delivering to the wrong inbox after the business changes it. Invalid
  * entries are dropped with a warning rather than failing startup, so one typo in a list
- * of four cannot take the whole API down — but an empty result is reported loudly,
- * because it means notifications will be skipped.
+ * of four cannot take the whole API down — but an empty result is reported loudly by the
+ * caller, because it means notifications will be skipped.
+ *
+ * `variable` names the setting in the warning, so the ADMIN_EMAILS text is exactly what
+ * it always was.
  */
-function parseAdminEmails(value: string): string[] {
+function parseEmailList(value: string, variable: string): string[] {
   const seen = new Set<string>();
   const valid: string[] = [];
 
@@ -279,7 +318,7 @@ function parseAdminEmails(value: string): string[] {
     if (!address) continue;
 
     if (!EMAIL_PATTERN.test(address)) {
-      console.warn(`[config] ADMIN_EMAILS contains an invalid address and it was ignored: ${address}`);
+      console.warn(`[config] ${variable} contains an invalid address and it was ignored: ${address}`);
       continue;
     }
 
@@ -313,7 +352,7 @@ const DEFAULT_FROM_EMAIL = 'no-reply@jmkglobalholdings.com';
 const isGmailAccount =
   raw.MAIL_PROVIDER === 'smtp' && raw.SMTP_HOST.trim().toLowerCase() === 'smtp.gmail.com';
 
-const adminEmails = parseAdminEmails(raw.ADMIN_EMAILS);
+const adminEmails = parseEmailList(raw.ADMIN_EMAILS, 'ADMIN_EMAILS');
 
 if (adminEmails.length === 0) {
   console.error(
@@ -327,8 +366,17 @@ if (adminEmails.length === 0) {
  * These configured recipients were replaced by the single ADMIN_EMAILS list. A
  * deployment still carrying them would otherwise lose notifications with no clue why,
  * so name them explicitly instead of ignoring them in silence.
+ *
+ * TELECALLING_REPORT_EMAILS used to divert the daily telecalling report away from
+ * ADMIN_EMAILS. The report now goes to ADMIN_EMAILS like every other administrative
+ * email, so a leftover line must not look as if it still decides anything.
  */
-for (const legacy of ['ENQUIRY_RECEIVER_EMAIL', 'CONTACT_EMAIL', 'CAREERS_EMAIL'] as const) {
+for (const legacy of [
+  'ENQUIRY_RECEIVER_EMAIL',
+  'CONTACT_EMAIL',
+  'CAREERS_EMAIL',
+  'TELECALLING_REPORT_EMAILS',
+] as const) {
   if ((process.env[legacy] ?? '').trim()) {
     console.error(
       `[config] ${legacy} is no longer used and its value is being ignored. ` +
@@ -437,10 +485,23 @@ export const config = {
 
   mail: {
     /**
-     * Everyone who receives administrative notifications — enquiries and career
-     * applications both. This is the only recipient configuration in the project.
+     * Everyone who receives administrative notifications — enquiries, career
+     * applications and the daily telecalling report (`telecallingReport.recipients`
+     * below is this same list).
      */
     adminRecipients: adminEmails,
+  },
+
+  /**
+   * The daily telecalling report email.
+   *
+   * `schedulerEnabled` is per process: it decides whether `server.ts` starts the clock in
+   * this process. The database decides whether a given day's report has been sent, so
+   * several processes with it on still send once. It is sent to ADMIN_EMAILS.
+   */
+  telecallingReport: {
+    schedulerEnabled: raw.TELECALLING_REPORT_SCHEDULER ?? isProduction,
+    recipients: adminEmails,
   },
 
   admin: {

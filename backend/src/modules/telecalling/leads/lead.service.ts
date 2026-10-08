@@ -1,38 +1,96 @@
+import type { PoolConnection } from 'mysql2/promise';
 import { withTransaction } from '../../../db/pool';
 import { badRequest, forbidden, notFound } from '../../../utils/httpError';
 import { logger } from '../../../utils/logger';
 import { createReference } from '../../../utils/text';
-import { canActOnOwner, hasRole, ownershipScope, type Actor } from '../actor';
-import { recordActivity, recordActivityTx, recordAudit } from '../activity/activity.repository';
-import { adoptOrphanCallsTx } from '../calls/call.repository';
-import { findEmployee } from '../employees/employee.repository';
+import {
+  canActOnOwner,
+  hasRole,
+  ownershipScope,
+  type Actor,
+  type OwnershipScope,
+} from '../actor';
+import {
+  listCallStatusChanges,
+  recordActivity,
+  recordActivityTx,
+  recordAudit,
+  type ActivityRecord,
+  type CallStatusChange,
+} from '../activity/activity.repository';
+import {
+  adoptOrphanCallsTx,
+  findCall,
+  leadCallSummary,
+  listLeadCallsPage,
+  type CallRecord,
+  type LeadCallSummary,
+} from '../calls/call.repository';
+import {
+  findEmployee,
+  findEmployeeNameTx,
+  lockAssignableEmployeeTx,
+} from '../employees/employee.repository';
+import {
+  insertFollowUpTx,
+  listCallFollowUps,
+  reassignLeadPendingFollowUpsTx,
+  type FollowUpRecord,
+} from '../followups/followUp.repository';
+import {
+  followUpScheduledSummary,
+  resolveFollowUpAssigneeTx,
+} from '../followups/followUp.service';
 import { queueNotification } from '../notifications/notification.repository';
-import { CLOSED_LEAD_STATUSES, type LeadStatus } from '../shared.schema';
+import {
+  CLOSED_LEAD_STATUSES,
+  type EmployeeRole,
+  type LeadStatus,
+  type Paginated,
+} from '../shared.schema';
 import {
   archiveLead,
   assignLeadTx,
   findDuplicateByPhone,
   findLead,
   findLeadByClientUuid,
+  findLeadDetail,
   findLeadOwner,
   findNoteByClientUuid,
   insertLeadTx,
   insertNoteTx,
+  LATEST_NOTE_PREVIEW_LENGTH,
   leadSourceExists,
+  listLeadCallNotes,
+  listLatestLeadNotes,
   listLeadNotes,
+  listLeadNotesPage,
+  listLeads,
+  lockLeadsForUpdateTx,
   refreshLeadCachesTx,
   updateLeadFields,
   updateLeadStatusTx,
+  type LatestLeadNote,
+  type LeadDetailRecord,
   type LeadNoteRecord,
   type LeadRecord,
 } from './lead.repository';
-import type {
-  BulkAssignInput,
-  CreateLeadInput,
-  LeadNoteInput,
-  LeadStatusInput,
-  UpdateLeadInput,
+import {
+  LEAD_VIEW_PAGE_SIZE,
+  type BulkAssignInput,
+  type CreateLeadInput,
+  type LeadListQuery,
+  type LeadNoteInput,
+  type LeadStatusInput,
+  type UpdateLeadInput,
 } from './lead.schema';
+import {
+  countLeadHistory,
+  listLeadActivityPage,
+  listLeadClosedFollowUpsPage,
+  listLeadPendingFollowUps,
+  type LeadHistoryCounts,
+} from './leadView.repository';
 
 /**
  * Lead business rules.
@@ -56,19 +114,76 @@ export type CreateLeadResult = {
 };
 
 /**
+ * Where a new lead came from. `direct` is a person filling in the form in either app;
+ * `import` is one row of a spreadsheet, named so its timeline can say so and the import
+ * can be traced from the lead.
+ */
+export type CreateLeadOrigin =
+  | { kind: 'direct' }
+  | { kind: 'import'; importId: number; sheetRow: number };
+
+/**
+ * How `createLead` reports what it did. Every default is the behaviour of a single
+ * create, so the routes pass nothing.
+ *
+ * A spreadsheet import creates up to two thousand leads through this same function —
+ * every rule (ownership, active owner, the one-lead-per-number refusal, call adoption,
+ * activity in the same transaction) stays identical — but it reports once for the whole
+ * file: one audit row and one notification per assignee, sent by the import, instead of
+ * two thousand of each.
+ */
+export type CreateLeadOptions = {
+  origin?: CreateLeadOrigin;
+  /** Notify a new owner who is not the creator. Default true. */
+  notifyAssignee?: boolean;
+  /** Write the per-lead `lead_created` audit row. Default true. */
+  audit?: boolean;
+};
+
+/**
+ * The refusal for a number another active lead already holds.
+ *
+ * It names that lead only to someone allowed to see it. A telecaller who enters a
+ * colleague's customer's number is told the number is taken and nothing more: the name
+ * and reference would reveal a record outside their ownership scope, and repeated tries
+ * would turn this endpoint into a lookup of who the company's customers are. The check
+ * itself stays global — a scoped lookup would let a second lead be made for a
+ * colleague's customer, which is exactly what it exists to stop.
+ */
+function duplicateNumber(
+  existing: { customerName: string; reference: string; assignedTo: number | null },
+  actor: Actor,
+) {
+  if (!canActOnOwner(actor, existing.assignedTo)) {
+    return badRequest('This number is already on another lead.', {
+      phone: 'Already on another lead. Ask your supervisor if this customer should be yours.',
+    });
+  }
+
+  return badRequest(`${existing.customerName} (${existing.reference}) already has this number.`, {
+    // Named against the field so both the app and the admin form show it under the
+    // number rather than as a banner the telecaller has to interpret.
+    phone: `Already used by ${existing.customerName} (${existing.reference}).`,
+  });
+}
+
+/**
  * Creates a lead.
  *
- * A duplicate phone number does **not** reject the request. Two leads can legitimately
- * share a number, and a telecaller with a paper lead in hand and a customer waiting
- * cannot be told to go and reconcile the database first. The existing lead is returned
- * alongside the new one so the app can offer to open it instead — the decision belongs
- * to the person who can see both.
+ * A number another active lead already holds is refused (see the check below and
+ * `duplicateNumber`): one customer with two half-histories was worse than asking the
+ * employee to open the existing lead.
  */
 export async function createLead(
   input: CreateLeadInput,
   actor: Actor,
   ipAddress: string | null,
+  options: CreateLeadOptions = {},
 ): Promise<CreateLeadResult> {
+  const origin: CreateLeadOrigin = options.origin ?? { kind: 'direct' };
+  const notifyAssignee = options.notifyAssignee ?? true;
+  const audit = options.audit ?? true;
+
   // Offline-queue retry: the note carrying this key was already written, so the lead
   // exists. Return it rather than creating a second copy.
   if (input.clientUuid) {
@@ -126,16 +241,7 @@ export async function createLead(
    */
   const existingForPhone = await findDuplicateByPhone(input.phone);
 
-  if (existingForPhone) {
-    throw badRequest(
-      `${existingForPhone.customerName} (${existingForPhone.reference}) already has this number.`,
-      {
-        // Named against the field so both the app and the admin form show it under the
-        // number rather than as a banner the telecaller has to interpret.
-        phone: `Already used by ${existingForPhone.customerName} (${existingForPhone.reference}).`,
-      },
-    );
-  }
+  if (existingForPhone) throw duplicateNumber(existingForPhone, actor);
 
   const leadId = await withTransaction(async (connection) => {
     const id = await insertLeadTx(connection, {
@@ -158,12 +264,29 @@ export async function createLead(
       summaryNote: input.summaryNote,
     });
 
+    /*
+     * An imported lead says so, in words a telecaller reads, and carries the import and
+     * sheet row in `meta` for the trace back. The type stays `lead_created`: an unknown
+     * type renders as a blank row in both clients' timelines.
+     */
     await recordActivityTx(connection, {
       leadId: id,
       userId: actor.id,
       type: 'lead_created',
-      summary: `${actor.name} created this lead from ${source.replace(/_/g, ' ')}`,
-      meta: { source, status: input.status, assignedTo },
+      summary:
+        origin.kind === 'import'
+          ? `${actor.name} added this lead from a spreadsheet (${source.replace(/_/g, ' ')})`
+          : `${actor.name} created this lead from ${source.replace(/_/g, ' ')}`,
+      meta:
+        origin.kind === 'import'
+          ? {
+              source,
+              status: input.status,
+              assignedTo,
+              importId: origin.importId,
+              sheetRow: origin.sheetRow,
+            }
+          : { source, status: input.status, assignedTo },
     });
 
     if (assignedTo !== null && assignedTo !== actor.id) {
@@ -213,6 +336,10 @@ export async function createLead(
             : `Linked ${adopted} earlier calls from this number to ${actor.name}`,
         meta: { adoptedCalls: adopted },
       });
+
+      // The adopted calls are contact: without this the new lead would sit under "not yet
+      // called" — a work list — though the employee has already spoken to the customer.
+      await refreshLeadCachesTx(connection, id);
     }
 
     /**
@@ -228,7 +355,10 @@ export async function createLead(
         leadId: id,
         userId: actor.id,
         kind: 'system',
-        body: 'Lead created from the mobile app.',
+        body:
+          origin.kind === 'import'
+            ? `Added from a spreadsheet by ${actor.name} (row ${origin.sheetRow}).`
+            : 'Lead created from the mobile app.',
         callId: null,
         clientUuid: input.clientUuid,
       });
@@ -240,17 +370,19 @@ export async function createLead(
   const lead = await findLead(leadId, null);
   if (!lead) throw notFound('Lead not found after creation.');
 
-  await recordAudit({
-    actor,
-    action: 'lead_created',
-    entityType: 'lead',
-    entityId: leadId,
-    summary: `Created lead ${lead.reference} for ${lead.customerName}`,
-    meta: { source, assignedTo },
-    ipAddress,
-  });
+  if (audit) {
+    await recordAudit({
+      actor,
+      action: 'lead_created',
+      entityType: 'lead',
+      entityId: leadId,
+      summary: `Created lead ${lead.reference} for ${lead.customerName}`,
+      meta: { source, assignedTo },
+      ipAddress,
+    });
+  }
 
-  if (assignedTo !== null && assignedTo !== actor.id) {
+  if (notifyAssignee && assignedTo !== null && assignedTo !== actor.id) {
     await queueNotification({
       userId: assignedTo,
       kind: 'lead_assigned',
@@ -293,12 +425,7 @@ export async function editLead(
   if (input.phone !== undefined) {
     const clash = await findDuplicateByPhone(input.phone);
 
-    if (clash && clash.id !== id) {
-      throw badRequest(
-        `${clash.customerName} (${clash.reference}) already has this number.`,
-        { phone: `Already used by ${clash.customerName} (${clash.reference}).` },
-      );
-    }
+    if (clash && clash.id !== id) throw duplicateNumber(clash, actor);
   }
 
   const changed = await updateLeadFields(id, input);
@@ -417,19 +544,36 @@ export async function changeLeadStatus(
     }
 
     if (input.followUpAt) {
-      const [result] = await connection.execute(
-        `INSERT INTO follow_ups (lead_id, assigned_to, created_by, due_at, note)
-         VALUES (?, ?, ?, ?, ?)`,
-        [id, before.assignedTo ?? actor.id, actor.id, input.followUpAt, input.followUpNote],
-      );
-      createdFollowUpId = (result as { insertId: number }).insertId;
+      /*
+       * Who owes the call is decided under the assignee's row lock, in this transaction.
+       * It used to be `before.assignedTo ?? actor.id` with no check at all, which booked
+       * follow-ups onto a lead owner who had already been deactivated.
+       */
+      const assignee = await resolveFollowUpAssigneeTx(connection, {
+        actor,
+        leadOwner: before.assignedTo,
+      });
+
+      createdFollowUpId = await insertFollowUpTx(connection, {
+        leadId: id,
+        assignedTo: assignee,
+        createdBy: actor.id,
+        dueAt: input.followUpAt,
+        note: input.followUpNote,
+        // No key of its own, as before: the request's clientUuid is stored on the note.
+        clientUuid: null,
+      });
 
       await recordActivityTx(connection, {
         leadId: id,
         userId: actor.id,
         type: 'follow_up_created',
-        summary: `${actor.name} scheduled a follow-up for ${input.followUpAt.toISOString()}`,
-        meta: { dueAt: input.followUpAt.toISOString(), followUpId: createdFollowUpId },
+        summary: followUpScheduledSummary(actor.name, assignee, input.followUpAt),
+        meta: {
+          dueAt: input.followUpAt.toISOString(),
+          followUpId: createdFollowUpId,
+          assignedTo: assignee,
+        },
       });
     }
 
@@ -466,6 +610,70 @@ function label(status: LeadStatus): string {
 /* Assignment                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Moves a lead to a new owner inside the caller's transaction: the lead row, every one of
+ * its pending follow-ups, and the timeline entry — all or nothing.
+ *
+ * Shared by single assignment, and by follow-up moves and handovers that also transfer
+ * the lead. The caller must already hold the new owner's employee row
+ * (`lockAssignableEmployeeTx` or `lockEmployeesForUpdateTx`), and should hold the lead
+ * row (`lockLeadsForUpdateTx`) so `lead.assignedTo` is the owner being replaced — this
+ * re-checks neither, which keeps the lock order (employees, leads, follow-ups) the
+ * caller's to keep. Audit and notification are post-commit, so they stay with the caller.
+ *
+ * Every pending follow-up moves with the lead. Leaving one behind means the new owner
+ * never sees the commitment and the previous owner is chased for a lead they no longer
+ * hold — which also means a later reassignment overrides any earlier per-follow-up move.
+ */
+export async function reassignLeadInTx(
+  connection: PoolConnection,
+  lead: {
+    id: number;
+    reference: string;
+    customerName: string;
+    assignedTo: number | null;
+    /** The current owner's name, for the timeline. Looked up when not supplied. */
+    assignedToName?: string | null;
+  },
+  newOwnerId: number | null,
+  reason: string | null,
+  actor: Actor,
+): Promise<void> {
+  await assignLeadTx(connection, lead.id, newOwnerId, actor.id);
+
+  if (newOwnerId !== null) {
+    await reassignLeadPendingFollowUpsTx(connection, lead.id, newOwnerId);
+  }
+
+  const type =
+    newOwnerId === null
+      ? 'lead_unassigned'
+      : lead.assignedTo === null
+        ? 'lead_assigned'
+        : 'lead_reassigned';
+
+  let summary: string;
+  if (newOwnerId === null) {
+    summary = `${actor.name} returned this lead to the unassigned pool`;
+  } else if (lead.assignedTo === null) {
+    summary = `${actor.name} assigned this lead`;
+  } else {
+    const previousOwner =
+      lead.assignedToName !== undefined
+        ? lead.assignedToName
+        : await findEmployeeNameTx(connection, lead.assignedTo);
+    summary = `${actor.name} reassigned this lead from ${previousOwner ?? 'a former employee'}`;
+  }
+
+  await recordActivityTx(connection, {
+    leadId: lead.id,
+    userId: actor.id,
+    type,
+    summary,
+    meta: { from: lead.assignedTo, to: newOwnerId, reason },
+  });
+}
+
 export async function assignLead(
   id: number,
   assignedTo: number | null,
@@ -476,51 +684,44 @@ export async function assignLead(
   const before = await findLead(id, null);
   if (!before) throw notFound('Lead not found.');
 
-  if (assignedTo !== null) {
-    const owner = await findEmployee(assignedTo);
-    if (!owner) throw badRequest('The chosen employee does not exist.');
-    if (!owner.isActive) throw badRequest('That employee is deactivated and cannot take leads.');
-  }
-
-  if (before.assignedTo === assignedTo) {
-    // Not an error — a bulk operation may legitimately include a lead that is already
-    // where it should be — but nothing to record either.
-    return before;
-  }
-
-  const previousOwner = before.assignedToName;
-
-  await withTransaction(async (connection) => {
-    await assignLeadTx(connection, id, assignedTo, actor.id);
-
-    // Any pending follow-up moves with the lead. Leaving it behind means the new owner
-    // never sees the commitment and the previous owner is chased for a lead they no
-    // longer hold.
+  const previousOwnerId = await withTransaction(async (connection) => {
+    /*
+     * The new owner is re-read under a share lock in this transaction, not checked
+     * before it: a check outside could pass, the employee be deactivated a moment later,
+     * and the lead — with every pending follow-up on it — land on an account nobody
+     * works. See the lock protocol on resolveFollowUpAssigneeTx.
+     */
     if (assignedTo !== null) {
-      await connection.execute(
-        `UPDATE follow_ups SET assigned_to = ? WHERE lead_id = ? AND state = 'pending'`,
-        [assignedTo, id],
-      );
+      const owner = await lockAssignableEmployeeTx(connection, assignedTo);
+      if (!owner) throw badRequest('The chosen employee does not exist.');
+      if (!owner.assignable) {
+        throw badRequest('That employee is deactivated and cannot take leads.');
+      }
     }
 
-    const type =
-      assignedTo === null ? 'lead_unassigned' : before.assignedTo === null ? 'lead_assigned' : 'lead_reassigned';
+    const [current] = await lockLeadsForUpdateTx(connection, [id]);
+    if (!current) throw notFound('Lead not found.');
 
-    const summary =
-      assignedTo === null
-        ? `${actor.name} returned this lead to the unassigned pool`
-        : before.assignedTo === null
-          ? `${actor.name} assigned this lead`
-          : `${actor.name} reassigned this lead from ${previousOwner ?? 'a former employee'}`;
+    // Not an error — a bulk operation may legitimately include a lead that is already
+    // where it should be — but nothing to record either.
+    if (current.assignedTo === assignedTo) return undefined;
 
-    await recordActivityTx(connection, {
-      leadId: id,
-      userId: actor.id,
-      type,
-      summary,
-      meta: { from: before.assignedTo, to: assignedTo, reason },
-    });
+    await reassignLeadInTx(
+      connection,
+      {
+        ...current,
+        // The name read before the lock is only good if the owner has not changed since.
+        assignedToName: current.assignedTo === before.assignedTo ? before.assignedToName : undefined,
+      },
+      assignedTo,
+      reason,
+      actor,
+    );
+
+    return current.assignedTo;
   });
+
+  if (previousOwnerId === undefined) return before;
 
   const after = await findLead(id, null);
   if (!after) throw notFound('Lead not found.');
@@ -531,7 +732,7 @@ export async function assignLead(
     entityType: 'lead',
     entityId: id,
     summary: `Lead ${after.reference} assigned to ${after.assignedToName ?? 'nobody'}`,
-    meta: { from: before.assignedTo, to: assignedTo, reason },
+    meta: { from: previousOwnerId, to: assignedTo, reason },
     ipAddress,
   });
 
@@ -630,6 +831,24 @@ export async function addLeadNote(
   if (!lead) throw notFound('Lead not found.');
   if (!canActOnOwner(actor, lead.assignedTo)) throw notFound('Lead not found.');
 
+  /*
+   * A note may say which call it is about — but only a call in this lead's own history.
+   *
+   * `lead_notes.call_id` has no foreign key (the table predates `calls`), so nothing else
+   * stops a note on one lead naming a call on another. The Lead View files a note under
+   * the call it names; one that pointed elsewhere would either vanish from this lead's
+   * call history or, read the other way, put this customer's words under a stranger's
+   * call. One message for "no such call" and "someone else's call", so the refusal tells
+   * a caller nothing about calls outside the lead they already hold.
+   */
+  if (input.callId !== undefined && input.callId !== null) {
+    const call = await findCall(input.callId, null);
+    if (!call || call.leadId !== leadId) {
+      const message = "That call is not part of this lead's history.";
+      throw badRequest(message, { callId: message });
+    }
+  }
+
   const noteId = await withTransaction(async (connection) => {
     const id = await insertNoteTx(connection, {
       leadId,
@@ -662,6 +881,238 @@ export async function addLeadNote(
   if (!note) throw notFound('Note not found after creation.');
 
   return { note, deduplicated: false };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The admin lead list                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** A row of the admin lead list: the lead, plus the newest thing written about it. */
+export type LeadListItem = LeadRecord & { latestNote: LatestLeadNote | null };
+
+/**
+ * The admin lead list, each row carrying its latest note.
+ *
+ * `listLeads` itself is untouched — the mobile app shares it, and a telecaller's list has
+ * no notes column — so the notes are one more query, for the page's ids only, joined on
+ * here. Items, totals, ordering and filters are exactly `listLeads`'.
+ *
+ * A lead nobody has written a note on shows its summary note instead, which is where the
+ * admin create form puts "Requirement / notes": an empty cell beside a lead whose
+ * requirement is sitting in its record would read as "nothing known".
+ */
+export async function listLeadsWithLatestNotes(
+  filters: LeadListQuery,
+  scope: OwnershipScope,
+): Promise<Paginated<LeadListItem>> {
+  const page = await listLeads(filters, scope);
+  const latest = await listLatestLeadNotes(page.items.map((lead) => lead.id));
+
+  return {
+    ...page,
+    items: page.items.map((lead) => ({
+      ...lead,
+      latestNote: latest.get(lead.id) ?? summaryAsLatestNote(lead.summaryNote),
+    })),
+  };
+}
+
+/**
+ * A lead's summary note in the latest-note shape.
+ *
+ * Cut by code point (`Array.from`), not by `.slice`, because the SQL path cuts with
+ * `LEFT()`, which counts characters: a UTF-16 slice would split an emoji in half and
+ * disagree with the database about whether an Indic-script note was truncated.
+ */
+function summaryAsLatestNote(summary: string | null): LatestLeadNote | null {
+  if (summary === null || summary.trim() === '') return null;
+
+  const characters = Array.from(summary);
+  return {
+    source: 'summary',
+    noteId: null,
+    kind: null,
+    body: characters.slice(0, LATEST_NOTE_PREVIEW_LENGTH).join(''),
+    truncated: characters.length > LATEST_NOTE_PREVIEW_LENGTH,
+    userName: null,
+    callId: null,
+    createdAt: null,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The admin Lead View                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The most pending follow-ups the Lead View returns.
+ *
+ * A guard, not a page: open work on one lead is a handful, and the screen shows it
+ * whole. `counts.pendingFollowUps` is the true number, so a lead that ever passes this
+ * says so instead of hiding the rest.
+ */
+export const LEAD_VIEW_PENDING_FOLLOW_UP_CAP = 100;
+
+/** One call in a lead's history, with everything that was recorded against it. */
+export type CallHistoryEntry = CallRecord & {
+  /** Notes written against this call, oldest first. */
+  notes: LeadNoteRecord[];
+  /** Follow-ups booked on this call, newest due first. */
+  followUps: FollowUpRecord[];
+  statusChange: CallStatusChange | null;
+};
+
+/**
+ * What the signed-in employee may do from the Lead View, from the same ranks the routes
+ * behind each action require — so a button the screen offers is one the API will honour.
+ */
+export type LeadViewer = {
+  role: EmployeeRole;
+  canPlayRecordings: boolean;
+  canArchive: boolean;
+  canDelete: boolean;
+};
+
+/**
+ * The Lead View's opening response: the lead, and the FIRST page of each of its
+ * histories. Further pages come from the history endpoints, one card at a time — a lead
+ * with years of calls opens as fast as a new one.
+ */
+export type LeadView = {
+  lead: LeadDetailRecord;
+  viewer: LeadViewer;
+  /** Over every call on the lead, not the page. */
+  callSummary: LeadCallSummary;
+  counts: LeadHistoryCounts;
+  calls: Paginated<CallHistoryEntry>;
+  notes: Paginated<LeadNoteRecord>;
+  followUps: {
+    /** Every open follow-up, soonest first, up to LEAD_VIEW_PENDING_FOLLOW_UP_CAP. */
+    pending: FollowUpRecord[];
+    /** Completed and cancelled, newest first. */
+    closed: Paginated<FollowUpRecord>;
+  };
+  timeline: Paginated<ActivityRecord>;
+};
+
+export async function getLeadView(id: number, actor: Actor): Promise<LeadView> {
+  const lead = await findLeadDetail(id, ownershipScope(actor));
+  if (!lead) throw notFound('Lead not found.');
+
+  /*
+   * Seven reads at once, one connection each — the histories are independent, and the
+   * screen waits for all of them. The pool queues anything over its limit rather than
+   * failing, so a burst costs latency, not errors.
+   */
+  const [callPage, callSummary, notes, pending, closed, timeline, counts] = await Promise.all([
+    listLeadCallsPage(id, 1, LEAD_VIEW_PAGE_SIZE),
+    leadCallSummary(id),
+    listLeadNotesPage(id, 1, LEAD_VIEW_PAGE_SIZE),
+    listLeadPendingFollowUps(id, LEAD_VIEW_PENDING_FOLLOW_UP_CAP),
+    listLeadClosedFollowUpsPage(id, 1, LEAD_VIEW_PAGE_SIZE),
+    listLeadActivityPage(id, 1, LEAD_VIEW_PAGE_SIZE),
+    countLeadHistory(id),
+  ]);
+
+  return {
+    lead,
+    viewer: leadViewerFor(actor),
+    callSummary,
+    counts,
+    calls: { ...callPage, items: await withCallContext(id, callPage.items) },
+    notes,
+    followUps: { pending, closed },
+    timeline,
+  };
+}
+
+/** One page of the lead's calls, newest first, each with its notes, follow-ups and status change. */
+export async function listLeadCallHistory(
+  id: number,
+  page: number,
+  pageSize: number,
+  actor: Actor,
+): Promise<Paginated<CallHistoryEntry>> {
+  await assertCanReadLead(id, actor);
+  const callPage = await listLeadCallsPage(id, page, pageSize);
+  return { ...callPage, items: await withCallContext(id, callPage.items) };
+}
+
+/** One page of the lead's notes, newest first, every kind. */
+export async function listLeadNoteHistory(
+  id: number,
+  page: number,
+  pageSize: number,
+  actor: Actor,
+): Promise<Paginated<LeadNoteRecord>> {
+  await assertCanReadLead(id, actor);
+  return listLeadNotesPage(id, page, pageSize);
+}
+
+/** One page of the lead's completed and cancelled follow-ups, newest first. */
+export async function listLeadClosedFollowUps(
+  id: number,
+  page: number,
+  pageSize: number,
+  actor: Actor,
+): Promise<Paginated<FollowUpRecord>> {
+  await assertCanReadLead(id, actor);
+  return listLeadClosedFollowUpsPage(id, page, pageSize);
+}
+
+/** One page of the lead's timeline, newest first. */
+export async function listLeadActivityHistory(
+  id: number,
+  page: number,
+  pageSize: number,
+  actor: Actor,
+): Promise<Paginated<ActivityRecord>> {
+  await assertCanReadLead(id, actor);
+  return listLeadActivityPage(id, page, pageSize);
+}
+
+function leadViewerFor(actor: Actor): LeadViewer {
+  return {
+    role: actor.role,
+    // GET /recordings/:id/audio and POST /leads/:id/archive are manager and above;
+    // DELETE /leads/:id is admin only.
+    canPlayRecordings: hasRole(actor, 'manager'),
+    canArchive: hasRole(actor, 'manager'),
+    canDelete: hasRole(actor, 'admin'),
+  };
+}
+
+/**
+ * 404 unless the lead exists and the actor may see it — before any of its history is
+ * read. The same rule as `findLead`'s ownership filter and as `assertCanWriteLead`; a
+ * 404 rather than a 403 for the reason given there.
+ */
+async function assertCanReadLead(id: number, actor: Actor): Promise<void> {
+  const lead = await findLeadOwner(id);
+  if (!lead || !canActOnOwner(actor, lead.assignedTo)) throw notFound('Lead not found.');
+}
+
+/**
+ * Pairs a page of calls with what was recorded against each: notes, the follow-ups
+ * booked on it, and the status it set. Three queries for the whole page — never one per
+ * call — and none for an empty page.
+ */
+async function withCallContext(leadId: number, calls: CallRecord[]): Promise<CallHistoryEntry[]> {
+  if (calls.length === 0) return [];
+
+  const ids = calls.map((call) => call.id);
+  const [notes, followUps, statusChanges] = await Promise.all([
+    listLeadCallNotes(leadId, ids),
+    listCallFollowUps(leadId, ids),
+    listCallStatusChanges(leadId, ids),
+  ]);
+
+  return calls.map((call) => ({
+    ...call,
+    notes: notes.get(call.id) ?? [],
+    followUps: followUps.get(call.id) ?? [],
+    statusChange: statusChanges.get(call.id) ?? null,
+  }));
 }
 
 /* -------------------------------------------------------------------------- */

@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { adminApi } from '@/lib/api';
 import { BASE_PATH } from '@/lib/paths';
+import { AdminSessionLoader } from '@/components/admin/Loader';
 import { loginUrl } from '@/components/admin/useAdminSession';
 
 /**
@@ -33,13 +34,5 @@ export function AdminIndexRedirect() {
     };
   }, []);
 
-  return (
-    <div className="admin-login">
-      <div className="admin-login__card" aria-busy="true">
-        <p className="eyebrow">JMK Global Holdings</p>
-        <p style={{ color: 'var(--ink-500)', marginTop: '0.5rem' }}>Opening the admin area…</p>
-        <div className="skeleton" style={{ height: '2.75rem', marginTop: '1.5rem' }} />
-      </div>
-    </div>
-  );
+  return <AdminSessionLoader message="Opening the admin area…" />;
 }

@@ -58,6 +58,27 @@ export function createReference(prefix: 'ENQ' | 'APP' | 'LD'): string {
   return `${prefix}-${code}`;
 }
 
+/**
+ * A duration for people to read: `45s`, `3m 24s`, `2h 5m`.
+ *
+ * The same output as the copy in `calls/call.service.ts`, which writes it into stored
+ * call timeline summaries — so the two must keep printing identical text, and the calls
+ * module can switch to this one without a single summary changing. It lives here so the
+ * email templates can format talk time without importing from a feature module.
+ *
+ * A fractional or negative input (an average, a clock that ran backwards) is rounded and
+ * floored at zero rather than printed as `-3s` or `12.5s`.
+ */
+export function formatDuration(seconds: number): string {
+  const total = Number.isFinite(seconds) ? Math.max(Math.round(seconds), 0) : 0;
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  if (minutes < 60) return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
 /** Truncates a value to a column's length so a long user-agent can never break an insert. */
 export function truncate(value: string | undefined, maxLength: number): string | null {
   if (!value) return null;

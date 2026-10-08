@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, Sora } from 'next/font/google';
-import { Analytics } from '@/components/analytics/Analytics';
 import { SITE_URL, siteConfig } from '@/lib/site';
 import '@/styles/globals.css';
 
@@ -48,10 +47,8 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en-IN" className={`${inter.variable} ${sora.variable}`}>
-      <body>
-        {children}
-        <Analytics />
-      </body>
+      {/* Analytics loads from SiteChrome, on the public site only — never on admin screens. */}
+      <body>{children}</body>
     </html>
   );
 }

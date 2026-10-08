@@ -91,18 +91,24 @@ export type CreateLeadInput = z.infer<typeof createLeadSchema>;
  * preserve. Status has its own endpoint — it is the single most audited change on a
  * lead and it drives activity, conversion timestamps and the follow-up prompt, so it
  * does not belong in a generic field update.
+ *
+ * The optional fields are each wrapped in `.optional()` so an ABSENT key means
+ * "unchanged". On their own they turn a missing key into null, which is right on create
+ * and was destructive here: a request that only reformatted the phone number erased the
+ * lead's email, city, address, interest and summary along with it. `''` and an explicit
+ * null still clear a field — which is what both clients send to clear one.
  */
 export const updateLeadSchema = z
   .object({
     customerName: customerNameField.optional(),
     phone: phoneField.optional(),
-    alternatePhone: optionalPhoneField,
-    email: optionalEmailField,
-    address: optionalLine(500),
-    city: optionalLine(120),
+    alternatePhone: optionalPhoneField.optional(),
+    email: optionalEmailField.optional(),
+    address: optionalLine(500).optional(),
+    city: optionalLine(120).optional(),
     source: sourceField.optional(),
-    productInterest: optionalLine(190),
-    summaryNote: optionalBlock(4000),
+    productInterest: optionalLine(190).optional(),
+    summaryNote: optionalBlock(4000).optional(),
   })
   .refine((value) => Object.values(value).some((field) => field !== undefined), {
     message: 'Nothing to update.',
@@ -210,9 +216,18 @@ export const leadListQuerySchema = paginationSchema.extend({
    * `unassigned` is a distinct filter value, not the absence of one: the admin
    * assignment screen is built around the unassigned queue, and `assignedTo` omitted
    * has to keep meaning "any owner".
+   *
+   * `assigned` is "has an owner, whoever it is" — what the dashboard's Assigned card
+   * counts, so the card can open a list holding exactly its leads. Omitted still means
+   * "with or without one". For a telecaller neither value widens anything: their own
+   * ownership is applied first and wins.
+   *
+   * The literals come before the number on purpose. `z.coerce.number()` turns
+   * `'assigned'` into NaN and fails, and a union tried in the other order would report
+   * that failure rather than accept the literal.
    */
   assignedTo: z
-    .union([z.literal('unassigned'), z.coerce.number().int().positive()])
+    .union([z.literal('unassigned'), z.literal('assigned'), z.coerce.number().int().positive()])
     .optional(),
   q: z.string().trim().max(120).optional(),
   /**
@@ -228,11 +243,58 @@ export const leadListQuerySchema = paginationSchema.extend({
     .enum(['true', 'false'])
     .optional()
     .transform((value) => (value === undefined ? false : value === 'true')),
+  /**
+   * When the lead was created, as inclusive IST calendar days — the company's day, the
+   * same one every dashboard card and chart counts by. Either end may be left open.
+   */
   from: z.string().date('Expected YYYY-MM-DD.').optional(),
   to: z.string().date('Expected YYYY-MM-DD.').optional(),
+  /**
+   * When the lead was converted, as inclusive IST calendar days.
+   *
+   * A different question from `from`/`to`: a lead created in March and converted in
+   * May is one of May's conversions. This is what the dashboard's conversions series
+   * opens, so it applies that series' exact predicate — currently converted, converted
+   * inside the range — and a lead that was converted and has since moved on is in
+   * neither.
+   */
+  convertedFrom: z.string().date('Expected YYYY-MM-DD.').optional(),
+  convertedTo: z.string().date('Expected YYYY-MM-DD.').optional(),
 });
 
 export type LeadListQuery = z.infer<typeof leadListQuerySchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Lead View history                                                           */
+/* -------------------------------------------------------------------------- */
+
+/** How many rows of each history the Lead View opens with, and the default page size. */
+export const LEAD_VIEW_PAGE_SIZE = 20;
+
+/**
+ * The largest page one Lead View history request may ask for.
+ *
+ * Lower than the general list ceiling of 100 because every call on a page is enriched
+ * with its notes, follow-ups and status change — three more reads whose size grows with
+ * the page — and nothing on that screen needs more than a few dozen rows at a time.
+ */
+export const LEAD_VIEW_MAX_PAGE_SIZE = 50;
+
+/**
+ * One page of one of a lead's histories — its calls, notes, closed follow-ups or
+ * activity. Bounded here because the page size is interpolated into LIMIT; an
+ * over-large page is a 422, not a silent clamp the client would mistake for the end.
+ */
+export const leadHistoryQuerySchema = paginationSchema.extend({
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(LEAD_VIEW_MAX_PAGE_SIZE)
+    .default(LEAD_VIEW_PAGE_SIZE),
+});
+
+export type LeadHistoryQuery = z.infer<typeof leadHistoryQuerySchema>;
 
 /**
  * Lookup by phone number, used when a telecaller's handset rings with an unknown

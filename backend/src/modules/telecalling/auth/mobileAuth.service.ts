@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import type { PoolConnection } from 'mysql2/promise';
 import { config } from '../../../config/env';
-import { execute, queryOne, type RowDataPacket } from '../../../db/pool';
+import { execute, queryOne, type ResultSetHeader, type RowDataPacket } from '../../../db/pool';
+import { HttpError } from '../../../utils/httpError';
 import { describeError, logger } from '../../../utils/logger';
 import type { Actor } from '../actor';
 import type { DevicePlatform, EmployeeRole } from '../shared.schema';
@@ -193,6 +195,8 @@ export type RegistrationInput = {
   name: string;
   email: string;
   phone: string | null;
+  /** The company SIM number, canonical `+91XXXXXXXXXX`. Unique among pending and live staff. */
+  companyPhone: string;
   password: string;
 };
 
@@ -208,9 +212,10 @@ export type RegistrationResult =
    * A duplicate email is reported plainly. Unlike sign-in, signup MUST tell the user the
    * address is taken or they will retry forever — and it reveals nothing they could not
    * learn by trying to register any address anyway. This is the standard trade for a
-   * registration form.
+   * registration form. The same goes for a company number another applicant or employee
+   * already holds: two people cannot register one SIM.
    */
-  | { ok: false; reason: 'email_taken' };
+  | { ok: false; reason: 'email_taken' | 'company_phone_taken' };
 
 /**
  * Registers a telecaller, pending approval.
@@ -238,10 +243,10 @@ export async function registerEmployee(
     try {
       const inserted = await execute(
         `INSERT INTO telecaller_users
-           (employee_code, name, email, phone, password_hash, role,
+           (employee_code, name, email, phone, company_phone, password_hash, role,
             is_active, approval_status, registered_at)
-         VALUES (?, ?, ?, ?, ?, 'telecaller', 0, 'pending', NOW())`,
-        [employeeCode, input.name, email, input.phone, passwordHash],
+         VALUES (?, ?, ?, ?, ?, ?, 'telecaller', 0, 'pending', NOW())`,
+        [employeeCode, input.name, email, input.phone, input.companyPhone, passwordHash],
       );
 
       logger.info('Employee self-registered, awaiting approval', { employeeCode, email });
@@ -250,11 +255,17 @@ export async function registerEmployee(
       if (!isDuplicateKey(error)) throw error;
 
       /*
-       * Two unique indexes can collide here. An email clash is terminal and reported;
-       * an employee_code clash is a race between two simultaneous registrations, so the
-       * code is recomputed and the insert retried.
+       * Three unique indexes can collide here. An email clash and a company-number clash
+       * are terminal and reported; an employee_code clash is a race between two
+       * simultaneous registrations, so the code is recomputed and the insert retried.
+       *
+       * The company number is checked BEFORE retrying: otherwise its clash looks like a
+       * code race, is retried three times against the same claim, and ends as a 500.
        */
       if (await emailIsTaken(email)) return { ok: false, reason: 'email_taken' };
+      if (await companyPhoneIsClaimed(input.companyPhone)) {
+        return { ok: false, reason: 'company_phone_taken' };
+      }
     }
   }
 
@@ -265,6 +276,20 @@ async function emailIsTaken(email: string): Promise<boolean> {
   const row = await queryOne<RowDataPacket & { total: number }>(
     'SELECT COUNT(*) AS total FROM telecaller_users WHERE email = ?',
     [email],
+  );
+  return Number(row?.total ?? 0) > 0;
+}
+
+/**
+ * Whether a pending or live account already holds this company number — the rule the
+ * claim's unique index enforces (migration 021). A local query rather than the employee
+ * repository's, for the same reason `nextEmployeeCode` is local: this module stays free
+ * of a dependency on the employee module.
+ */
+async function companyPhoneIsClaimed(companyPhone: string): Promise<boolean> {
+  const row = await queryOne<RowDataPacket & { total: number }>(
+    'SELECT COUNT(*) AS total FROM telecaller_users WHERE company_phone_claim = RIGHT(?, 10)',
+    [companyPhone],
   );
   return Number(row?.total ?? 0) > 0;
 }
@@ -398,7 +423,18 @@ export async function createMobileSession(
       active: state?.is_active,
       approval: state?.approval_status,
     });
-    throw new Error('Account is not eligible for a session.');
+    /*
+     * A 403 the app can act on, not a bare Error. Every caller checks the account first,
+     * so this is reached only when it changed in between — a deactivation landing during
+     * a sign-in or a password change — and that is an answer to give, not a 500.
+     */
+    throw state?.approval_status === 'pending'
+      ? new HttpError(403, 'Your account is still waiting for approval.', { code: 'approval_pending' })
+      : state?.approval_status === 'rejected'
+        ? new HttpError(403, 'Your registration was not approved.', { code: 'registration_rejected' })
+        : new HttpError(403, 'Your account has been deactivated. Please speak to your administrator.', {
+            code: 'account_deactivated',
+          });
   }
 
   const refreshToken = crypto.randomBytes(32).toString('hex');
@@ -529,6 +565,12 @@ export async function revokeMobileSession(refreshToken: string): Promise<void> {
   );
 }
 
+const REVOKE_ALL_SESSIONS = `
+  UPDATE mobile_sessions
+     SET revoked_at = NOW(), push_token = NULL
+   WHERE user_id = ? AND revoked_at IS NULL
+`;
+
 /**
  * Revokes every device for one employee.
  *
@@ -536,12 +578,23 @@ export async function revokeMobileSession(refreshToken: string): Promise<void> {
  * tokens already issued stay valid until they expire — which is why they are short.
  */
 export async function revokeAllMobileSessions(userId: number): Promise<number> {
-  const result = await execute(
-    `UPDATE mobile_sessions
-        SET revoked_at = NOW(), push_token = NULL
-      WHERE user_id = ? AND revoked_at IS NULL`,
-    [userId],
-  );
+  const result = await execute(REVOKE_ALL_SESSIONS, [userId]);
+  return result.affectedRows;
+}
+
+/**
+ * The same, inside the caller's transaction.
+ *
+ * For deactivation, where the revocation has to commit or roll back with the flip of
+ * `is_active`: a deactivation refused for pending follow-ups must not sign the employee
+ * out, and one that succeeds must not leave a refresh row alive because a second
+ * statement failed after the first had committed.
+ */
+export async function revokeAllMobileSessionsTx(
+  connection: PoolConnection,
+  userId: number,
+): Promise<number> {
+  const [result] = await connection.execute<ResultSetHeader>(REVOKE_ALL_SESSIONS, [userId]);
   return result.affectedRows;
 }
 

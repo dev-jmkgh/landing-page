@@ -25,5 +25,18 @@ export const BRAND = {
     line: '#e4e7ec',
     page: '#f2f5f8',
     panel: '#f7f9fb',
+
+    /*
+     * Status tones, for figures that are good or bad news rather than neutral — the
+     * daily report's tiles and its "needs attention" panel. The site's own success,
+     * warning and danger tokens (frontend tokens.css), so a figure reads the same in the
+     * email as on the dashboard it summarises.
+     */
+    good: '#17795e',
+    goodSoft: '#e8f6f1',
+    warn: '#b54708',
+    warnSoft: '#fdf3e6',
+    bad: '#b42318',
+    badSoft: '#fdecea',
   },
 } as const;

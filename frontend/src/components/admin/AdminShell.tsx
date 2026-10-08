@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { AdminNav, type AdminArea } from '@/components/admin/AdminNav';
+import { GlobalLoadingBar } from '@/components/admin/Loader';
 import { Icon } from '@/components/ui/Icon';
 import { assetPath } from '@/lib/paths';
 
@@ -53,6 +54,12 @@ export function AdminShell({
 
   return (
     <div className="admin-layout">
+      {/*
+        One request bar for every admin screen, driven by the API transport itself, so a
+        panel cannot forget to show that it is waiting. See components/admin/Loader.tsx.
+      */}
+      <GlobalLoadingBar />
+
       {/*
         One sidebar element, not one per breakpoint. `data-open` drives the drawer on
         narrow screens and is ignored by the desktop rules, so the navigation exists once

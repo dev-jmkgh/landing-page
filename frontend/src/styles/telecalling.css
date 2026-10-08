@@ -188,10 +188,33 @@
   background-color: var(--admin-brand, var(--navy-500));
 }
 
-.tc-stat:hover {
+/*
+ * A tile that opens the list behind its number.
+ *
+ * The hover lift belongs to these alone. It used to apply to every tile, which told
+ * people a figure was clickable when it went nowhere; now only the tiles that do go
+ * somewhere move under the pointer.
+ */
+.tc-stat--link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tc-stat--link:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--blue-300);
   transform: translateY(-1px);
+}
+
+/*
+ * The radius is restated because the site-wide focus rule squares the corners of
+ * whatever it outlines, which suits a link in a sentence and not a tile.
+ */
+.tc-stat--link:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
 }
 
 .tc-stat__value {
@@ -329,6 +352,12 @@
   color: var(--danger-600);
 }
 
+/* "Needs a look, not wrong." #b54708 on #fdf3e6 measures 4.9:1, clear of AA. */
+.tc-badge--warn {
+  background-color: var(--warning-050);
+  color: var(--warning-600);
+}
+
 /* ----------------------------------------------------------------- segmented */
 
 .tc-segmented {
@@ -370,6 +399,46 @@
 .tc-segmented__button:focus-visible {
   outline: 2px solid var(--accent-500);
   outline-offset: -2px;
+}
+
+/*
+ * An explicit date range standing in for the presets, as the last segment.
+ *
+ * Styled as the pressed state because it is the one in force — while it shows, no
+ * preset button is pressed — and it carries its own remove button.
+ */
+.tc-segmented__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.45rem 0.45rem 0.8rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  background-color: var(--navy-800);
+  color: var(--color-on-dark);
+}
+
+.tc-segmented__clear {
+  display: inline-grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tc-segmented__clear:hover {
+  background-color: var(--navy-600);
+}
+
+.tc-segmented__clear:focus-visible {
+  outline: 2px solid var(--accent-400);
+  outline-offset: 1px;
 }
 
 /* ------------------------------------------------------------------ bulk bar */
@@ -417,6 +486,24 @@
   color: var(--danger-600);
 }
 
+/* A date over its time, for narrow table columns (DateTimeCell). */
+.tc-datetime {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-datetime__time {
+  font-size: 0.85rem;
+  color: var(--ink-500);
+}
+
+.tc-cell-bad .tc-datetime__time {
+  color: inherit;
+}
+
 .tc-cell-warn {
   color: var(--warning-600);
 }
@@ -458,11 +545,12 @@
 /* --------------------------------------------------------------------- chart */
 
 /*
- * Bar charts as plain HTML.
+ * Bar charts as plain HTML, for the ranked comparisons in Reports.
  *
- * Every chart this admin needs is a ranked comparison of one measure across a handful of
- * categories, which is a div with a width. That reads correctly in a screen reader,
- * prints, and adds nothing to a bundle that a static export has no cheap way to grow.
+ * A ranked comparison of one measure across a handful of categories is a div with a
+ * width. That reads correctly in a screen reader, prints, and adds nothing to the bundle.
+ * The dashboard's trend charts are the exception and use ApexCharts, loaded on demand;
+ * their rules are in the dashboard's region at the end of this file.
  */
 .tc-chart {
   display: flex;
@@ -607,8 +695,12 @@
  * A short fade-and-lift for content arriving after a fetch.
  *
  * CSS rather than a library: this project has no animation dependency and does not need
- * one for a single keyframe. `animation-fill-mode: both` holds the start state before the
- * delay elapses, so a staggered group does not flash at full opacity first.
+ * one for a single keyframe. `animation-fill-mode: backwards` holds the start state before
+ * the delay elapses, so a staggered group does not flash at full opacity first.
+ *
+ * Backwards, not `both`. The end state is the element's own anyway, and a held final
+ * keyframe outranks every ordinary rule — its `transform: none` silently cancelled the
+ * hover lift on the stat tiles for as long as they were on screen.
  */
 @keyframes tc-reveal {
   from {
@@ -623,7 +715,7 @@
 }
 
 .tc-reveal {
-  animation: tc-reveal var(--duration-base) var(--ease-out) both;
+  animation: tc-reveal var(--duration-base) var(--ease-out) backwards;
 }
 
 /* Small, capped stagger. Past the sixth child everything shares the last delay. */
@@ -726,7 +818,1861 @@
     animation: none;
   }
 
-  .tc-stat:hover {
+  .tc-stat--link:hover {
     transform: none;
+  }
+}
+
+
+/* ===========================================================================
+   Links and notes
+   ---------------------------------------------------------------------------
+   Shared by every table that names a lead, and by every panel that shows what
+   someone wrote.
+   =========================================================================== */
+
+/*
+ * A link in running text or a table cell — a customer's name opening their lead.
+ *
+ * base.css makes every anchor inherit its colour with no underline, which is right for
+ * the marketing site's styled links and leaves a plain anchor here indistinguishable from
+ * the text around it. The admin brand blue measures 5.9:1 on white; the underline comes
+ * on hover rather than always, because a table where every name is underlined is hard to
+ * read. The site-wide focus ring already applies.
+ */
+.tc-link {
+  color: var(--admin-brand, var(--navy-700));
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.tc-link:hover {
+  color: var(--admin-brand-hover, var(--navy-800));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/*
+ * A note in a table cell, cut to two lines.
+ *
+ * `pre-line` keeps the line breaks a telecaller typed, which carry meaning in a note
+ * ("Fees: 40k / Batch: weekend"), and the clamp keeps one long note from making its row
+ * ten times the height of the rest. The whole text belongs in the element's `title`, or
+ * behind a toggle that adds `.tc-note--open`.
+ */
+.tc-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  font-weight: 400;
+  color: var(--ink-700);
+}
+
+.tc-note--open {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: none;
+}
+
+
+/* ===========================================================================
+   Screen-specific rules
+   ---------------------------------------------------------------------------
+   One block per screen: the dashboard, then leads (list, Lead View, import),
+   then calls, follow-ups and employees. Anything shared by more than one
+   screen belongs above, not here.
+   =========================================================================== */
+
+/* ----------------------------------------------------------- dashboard head */
+
+/*
+ * Period on the left, chart granularity on the right, and a one-line caption of what the
+ * charts actually cover underneath — the server may have used a coarser grain than the
+ * one asked for, and the caption is where that shows.
+ */
+.tc-dash-filters {
+  row-gap: 0.5rem;
+}
+
+.tc-dash-granularity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tc-dash-granularity__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-500);
+}
+
+.tc-dash-caption {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/*
+ * A grain that would draw more bars than the server allows, for the period on screen.
+ * Greyed rather than hidden so the control does not change shape between periods.
+ */
+.tc-dash-granularity .tc-segmented__button:disabled,
+.tc-chart-card .tc-segmented__button:disabled {
+  color: var(--ink-400);
+  background: none;
+  cursor: not-allowed;
+}
+
+.tc-segmented--sm .tc-segmented__button {
+  padding: 0.3rem 0.6rem;
+  font-size: var(--text-xs);
+}
+
+/* "As of now. The date range does not apply." under the live tiles' heading. */
+.tc-section-title--with-hint {
+  margin-bottom: 0.2rem;
+}
+
+.tc-section-hint {
+  margin: 0 0 0.75rem;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+/*
+ * A link or a button inside an alert ("View overdue follow-ups", "Try again").
+ *
+ * It takes the alert's own colour, which already meets contrast on the alert's tint, and
+ * is underlined because colour alone cannot mark it out from the sentence around it.
+ */
+.tc-alert-link,
+.tc-alert-action {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.tc-alert-link {
+  white-space: nowrap;
+}
+
+.tc-alert-action {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.tc-alert-link:hover,
+.tc-alert-action:hover {
+  text-decoration-thickness: 2px;
+}
+
+.tc-alert-action:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* ------------------------------------------------------------ chart cards */
+
+/*
+ * A container, so the grid responds to the width the charts actually get. The viewport
+ * says little here: beside the 16.5rem sidebar a 1024px tablet leaves the charts less
+ * room than a phone in landscape gets without it.
+ */
+.tc-charts {
+  display: grid;
+  gap: 0.75rem;
+  container-type: inline-size;
+}
+
+/*
+ * One column until there is room for two charts of a readable width, then two, with the
+ * two that carry the most detail (calls, telecallers) across both. `minmax(0, 1fr)`, not
+ * `1fr`: a chart's SVG has an intrinsic width, and a plain `1fr` track would let it push
+ * the grid wider than the page.
+ */
+.tc-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+@container (min-width: 56rem) {
+  .tc-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.tc-chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1rem 1.25rem;
+  background-color: var(--surface);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-lg);
+}
+
+.tc-chart-card--wide {
+  grid-column: 1 / -1;
+}
+
+.tc-chart-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.tc-chart-card__heading {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.tc-chart-card__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+/* The definition line: what is counted, and by which date. */
+.tc-chart-card__sub {
+  margin: 0.2rem 0 0;
+  max-width: 44rem;
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--ink-500);
+}
+
+.tc-chart-card__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tc-chart-card__body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* A long table view scrolls inside the card; its header stays stuck while it does. */
+.tc-chart-card__table .table-wrap {
+  max-height: 24rem;
+}
+
+.tc-chart-card__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line-100);
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* A chart's empty state fills the chart's own height, so the grid does not jump. */
+.tc-empty--chart {
+  align-content: center;
+  padding: var(--space-6) var(--space-4);
+}
+
+.tc-empty--chart .tc-empty__icon {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.tc-empty--chart .tc-empty__title {
+  font-size: var(--text-base);
+}
+
+.tc-skeleton--chart {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-md);
+}
+
+/* ------------------------------------------------------------- apexcharts */
+
+.tc-apex {
+  position: relative;
+}
+
+/* Only the marks are clickable — not the legend, the axes or the empty plot. */
+.tc-apex--clickable .apexcharts-series path,
+.tc-apex--clickable .apexcharts-series .apexcharts-marker,
+.tc-apex--clickable .apexcharts-pie-area {
+  cursor: pointer;
+}
+
+/* The skeleton until the first render lands, and the failure notice if it never does. */
+.tc-apex__cover {
+  position: absolute;
+  inset: 0 0 auto;
+}
+
+.tc-apex__failed {
+  bottom: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+  background-color: var(--surface);
+}
+
+.tc-apex__failed p {
+  margin: 0;
+  max-width: 28rem;
+}
+
+/* The library's tooltip box, brought into line with the admin's own surfaces. */
+.tc-apex .apexcharts-tooltip.apexcharts-theme-light {
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+/* Tooltip content, written by chartTheme.ts' tooltipHtml — every text in it is escaped. */
+.tc-tip {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 9rem;
+  padding: 0.55rem 0.75rem;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--ink-700);
+}
+
+.tc-tip__title {
+  margin-bottom: 0.1rem;
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.tc-tip__row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+/* A short stroke of the series colour: a key, not a swatch. */
+.tc-tip__key {
+  flex: none;
+  width: 0.75rem;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.tc-tip__key--none {
+  background-color: transparent;
+}
+
+.tc-tip__value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+}
+
+.tc-tip__label,
+.tc-tip__note {
+  color: var(--ink-500);
+}
+
+.tc-tip__foot {
+  margin-top: 0.2rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--line-100);
+  color: var(--ink-500);
+}
+
+/* ------------------------------------------------------------- settings */
+
+/* A time-of-day setting: the time field, then the zone it is read in. */
+.tc-setting-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ---------------------------------------------------------- daily report */
+
+.tc-report {
+  display: grid;
+  gap: 1rem;
+}
+
+.tc-report > .tc-section-title {
+  margin: 0.5rem 0 0;
+}
+
+.tc-report-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-4);
+}
+
+.tc-report-meta__item {
+  display: grid;
+  align-content: start;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.tc-report-meta__label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.tc-report-meta__value {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+/* Masked recipient addresses can be long and unbroken. */
+.tc-report-meta__hint {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+  overflow-wrap: anywhere;
+}
+
+/* "Settings tab": a button, because it switches tabs in place, that reads as a link. */
+.tc-report-meta__action {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--admin-brand, var(--navy-700));
+  cursor: pointer;
+}
+
+.tc-report-meta__action:hover {
+  color: var(--admin-brand-hover, var(--navy-800));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.tc-report-meta__action:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.tc-report-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.tc-report-actions__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.tc-report-actions__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+}
+
+.tc-report-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Says why a button is disabled, so it is read at body-text contrast, not hint grey. */
+.tc-report-actions__hint {
+  margin: 0;
+  color: var(--ink-500);
+}
+
+.tc-email-preview-wrap {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.tc-email-preview__subject {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The email exactly as sent, in a sandboxed frame. A white page of its own: the email
+ * carries its own styles, and the admin's must not reach into it (they cannot — it is a
+ * separate document).
+ */
+.tc-email-preview {
+  display: block;
+  width: 100%;
+  min-height: 40rem;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+}
+
+/* ------------------------------------------------------- confirm dialog */
+
+.tc-confirm-dialog {
+  width: min(32rem, 100%);
+}
+
+.tc-confirm-dialog__title {
+  /* Clear of the close button in the corner. */
+  padding-right: 2.5rem;
+  font-size: var(--text-xl);
+}
+
+.tc-confirm-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: var(--space-6);
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 520px) {
+  .tc-chart-card {
+    padding: 0.85rem;
+  }
+
+  .tc-email-preview {
+    min-height: 28rem;
+  }
+
+  .tc-confirm-dialog__actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* The figures print; the controls that change them do not. */
+@media print {
+  .tc-dash-granularity,
+  .tc-chart-card__tools,
+  .tc-report-actions {
+    display: none;
+  }
+
+  .tc-chart-card {
+    break-inside: avoid;
+  }
+}
+
+/* --------------------------------------------------------------- lead list */
+
+/* The "Created" date filter, on its own row under the toolbar. */
+.tc-leads-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: calc(-1 * var(--space-2)) 0 var(--space-4);
+}
+
+.tc-leads-range__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+/*
+ * The Notes / remarks cell: the note clamped to two lines (`.tc-note`), with who wrote it
+ * and when underneath. The whole cell is the link to the lead's notes, so it gets the link
+ * colour on hover only — a column of blue paragraphs would drown the names beside it.
+ */
+.tc-note-cell {
+  display: grid;
+  gap: 0.2rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.tc-note-cell:hover .tc-note {
+  color: var(--admin-brand, var(--navy-700));
+}
+
+.tc-note-cell__meta {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* The "unfinished import" notice: sentence, then its actions. */
+.tc-import-banner {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.tc-import-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-700);
+}
+
+/* --------------------------------------------------------------- lead view */
+
+/*
+ * A container, so the two-column layout follows the width the view actually has — the
+ * sidebar takes a different share of the window at every size — not the window's width.
+ */
+.tc-lead-view {
+  container: tc-lead-view / inline-size;
+  display: grid;
+  gap: var(--space-5);
+}
+
+.tc-lead-view__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'back back'
+    'identity actions';
+  align-items: end;
+  gap: var(--space-2) var(--space-4);
+}
+
+/* Pulled left by its own padding, so the arrow lines up with the name beneath it. */
+.tc-lead-view__back {
+  grid-area: back;
+  justify-self: start;
+  margin-inline-start: -0.9rem;
+}
+
+.tc-lead-view__identity {
+  grid-area: identity;
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.tc-lead-view__name {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Focus is moved to the name when a lead opens, and to a card's title when a link opens
+ * the lead at that card, so a screen reader starts reading there. Neither is a control,
+ * so neither gets a ring: Chrome treats focus moved by script as keyboard focus, and a
+ * ring around a heading reads as something to click.
+ */
+.tc-lead-view__name:focus,
+.tc-lead-card__title:focus {
+  outline: none;
+}
+
+.tc-lead-view__name-skeleton {
+  width: min(18rem, 60%);
+  height: 1.75rem;
+}
+
+.tc-lead-view__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tc-lead-view__actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tc-lead-view__body {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.tc-lead-view__grid {
+  display: grid;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.tc-lead-view__aside {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+@container tc-lead-view (min-width: 56rem) {
+  .tc-lead-view__grid {
+    grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr);
+  }
+}
+
+/* One card of the view: a heading with its whole-history count, then the content. */
+.tc-lead-card {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.tc-lead-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tc-lead-card__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.tc-lead-card__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--surface-sunken);
+  color: var(--ink-700);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* `.tc-empty` is sized for a whole panel; inside a card it needs far less air. */
+.tc-lead-card__empty {
+  padding: var(--space-6) var(--space-4);
+}
+
+.tc-lead-card__error {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+}
+
+/* The card's grid gap already separates the pager from the list. */
+.tc-lead-card .pagination {
+  margin-top: 0;
+}
+
+/* The summary's facts, flowing into two columns where there is room. */
+.tc-lead-facts {
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  column-gap: var(--space-6);
+  margin: 0;
+}
+
+.tc-lead-facts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+.tc-lead-facts__external {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.tc-lead-requirement {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line-100);
+  font-size: var(--text-sm);
+}
+
+.tc-lead-requirement__title {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink-400);
+}
+
+/* Text someone typed, with its line breaks. */
+.tc-prewrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A button that reads as a link — "View call". */
+.tc-link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--admin-brand, var(--navy-700));
+  cursor: pointer;
+}
+
+.tc-link-button:hover {
+  color: var(--admin-brand-hover, var(--navy-800));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* --------------------------------------------------------- lead timelines */
+
+/* Call history and activity: grouped under an IST day heading, newest day first. */
+.tc-timeline {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.tc-timeline__day {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tc-timeline__day-head {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line-100);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink-900);
+}
+
+.tc-timeline__day-meta {
+  font-weight: 400;
+  color: var(--ink-500);
+}
+
+.tc-timeline__list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/*
+ * One call. The inset bar on the left carries the outcome — green answered, red a callback
+ * still owed, grey otherwise — the same edge the tables use for row emphasis.
+ */
+.tc-timeline__item {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+  box-shadow: inset 3px 0 0 var(--ink-400);
+  font-size: var(--text-sm);
+  transition:
+    background-color var(--duration-slow) var(--ease-out),
+    border-color var(--duration-slow) var(--ease-out);
+}
+
+.tc-timeline__item--good {
+  box-shadow: inset 3px 0 0 var(--success-600);
+}
+
+.tc-timeline__item--bad {
+  box-shadow: inset 3px 0 0 var(--danger-600);
+}
+
+/*
+ * Focus arrives here from "View call". The highlight below says which call it was; the
+ * outline is kept for keyboard focus only, so a click inside a call does not frame it.
+ */
+.tc-timeline__item:focus {
+  outline: none;
+}
+
+.tc-timeline__item:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+.tc-timeline__item--highlight {
+  border-color: var(--admin-brand, var(--navy-500));
+  background-color: var(--admin-brand-tint, var(--surface-blue));
+}
+
+.tc-timeline__time {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+  white-space: nowrap;
+}
+
+.tc-timeline__body {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.tc-timeline__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tc-timeline__lead-in {
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.tc-timeline__number {
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-timeline__play {
+  padding: 0.3rem 0.65rem;
+}
+
+.tc-timeline__audio {
+  width: 100%;
+  max-width: 22rem;
+}
+
+.tc-timeline__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tc-timeline__note {
+  display: grid;
+  gap: 0.2rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-100);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-muted);
+  color: var(--ink-900);
+}
+
+.tc-timeline__note-meta {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.tc-timeline__followup {
+  display: grid;
+  gap: 0.2rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--line-200);
+  border-radius: var(--radius-sm);
+}
+
+.tc-timeline__followup svg {
+  flex: none;
+  color: var(--ink-500);
+}
+
+/* The lead's own history, one line per entry under its day. */
+.tc-activity {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tc-activity__item {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.tc-activity__time {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-500);
+  white-space: nowrap;
+}
+
+.tc-activity__body {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.tc-activity__summary {
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+.tc-activity__meta {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* ------------------------------------------------- lead follow-ups and notes */
+
+.tc-lead-followups {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.tc-lead-followups--closed {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line-100);
+}
+
+.tc-lead-followups__group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.tc-lead-followups__group + .tc-lead-followups__group {
+  margin-top: var(--space-4);
+}
+
+.tc-lead-followups__title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.tc-lead-followups__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-400);
+}
+
+.tc-lead-followups__list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.tc-lead-followup {
+  display: grid;
+  gap: 0.2rem;
+  padding: var(--space-3);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.tc-lead-followup__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-900);
+}
+
+/* What happened, set apart from what was planned. */
+.tc-lead-followup__outcome {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--line-200);
+  color: var(--ink-700);
+}
+
+.tc-lead-followup__call,
+.tc-lead-note__call {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.tc-lead-notes {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tc-lead-note {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line-100);
+  font-size: var(--text-sm);
+}
+
+.tc-lead-note:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.tc-lead-note__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.tc-lead-note__body {
+  color: var(--ink-900);
+}
+
+/* The server's own bookkeeping, kept for the record but stepped back from what people wrote. */
+.tc-lead-note--system .tc-lead-note__body {
+  font-style: italic;
+  color: var(--ink-500);
+}
+
+/* ------------------------------------------------------------ lead import */
+
+.tc-import {
+  display: grid;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.tc-import__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-5);
+}
+
+.tc-import__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.tc-import__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+.tc-import__step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tc-import__step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-import__step[aria-current='step'] {
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.tc-import__step[aria-current='step'] .tc-import__step-number {
+  border-color: var(--admin-brand, var(--navy-700));
+  background-color: var(--admin-brand, var(--navy-700));
+  color: var(--color-on-dark);
+}
+
+.tc-import__step--done .tc-import__step-number {
+  border-color: var(--success-600);
+  background-color: var(--success-050);
+  color: var(--success-600);
+}
+
+.tc-import__section {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.tc-import__step-title {
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+.tc-import__subtitle {
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink-900);
+}
+
+.tc-import__legend {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+}
+
+.tc-import__check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-700);
+  cursor: pointer;
+}
+
+.tc-import__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.tc-import__notices {
+  display: grid;
+  gap: var(--space-1);
+}
+
+/* The column choices, as a fieldset without the browser's frame. */
+.tc-import__mapping-block {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-muted);
+}
+
+.tc-import__sheet {
+  max-width: 18rem;
+}
+
+.tc-import__mapping {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.tc-import__column .field__label {
+  overflow-wrap: anywhere;
+}
+
+.tc-import__column-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.tc-import__column-meta .tc-muted {
+  font-size: var(--text-xs);
+}
+
+.tc-import__table-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+/* The segmented row filter wraps on a narrow screen rather than pushing the page wide. */
+.tc-import__table-head .tc-segmented {
+  flex-wrap: wrap;
+}
+
+.tc-import__result {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+}
+
+.tc-import__messages {
+  display: grid;
+  gap: 0.15rem;
+  font-size: var(--text-xs);
+  color: var(--ink-700);
+}
+
+.tc-import__message--error {
+  color: var(--danger-600);
+}
+
+.tc-import__message--warn {
+  color: var(--warning-600);
+}
+
+.tc-import__progress {
+  height: 0.75rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.tc-import__progress-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background-color: var(--admin-brand, var(--navy-500));
+  transition: width var(--duration-base) var(--ease-out);
+}
+
+.tc-import__progress-text {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+}
+
+/* ------------------------------------------------------- small and print */
+
+@media (max-width: 520px) {
+  .tc-lead-view__head {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'back'
+      'identity'
+      'actions';
+  }
+
+  .tc-timeline__item,
+  .tc-activity__item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-import__progress-bar,
+  .tc-timeline__item {
+    transition: none;
+  }
+}
+
+/*
+ * A printed lead is a record to hand over or file: the lead and the pages showing, with
+ * nothing to click. One column, and no card or call split across a page break.
+ */
+@media print {
+  .tc-lead-view__back,
+  .tc-lead-view__actions,
+  .tc-lead-view .pagination__controls,
+  .tc-lead-view .tc-link-button,
+  .tc-lead-view .tc-timeline__play,
+  .tc-lead-view audio {
+    display: none;
+  }
+
+  /*
+   * The admin's own frame — sidebar, top bar, loading bar — is not part of the record.
+   * Only while a lead is open, so printing any other screen is left as it was.
+   */
+  body:has(.tc-lead-view) .admin-layout {
+    display: block;
+    min-height: 0;
+    background: none;
+  }
+
+  body:has(.tc-lead-view) .admin-layout__side,
+  body:has(.tc-lead-view) .admin-topbar,
+  body:has(.tc-lead-view) .global-loading-bar {
+    display: none;
+  }
+
+  .tc-lead-view__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tc-lead-view .tc-timeline__item,
+  .tc-lead-view .tc-lead-followup,
+  .tc-lead-view .tc-lead-note,
+  .tc-lead-view .tc-activity__item {
+    break-inside: avoid;
+  }
+}
+
+/* ------------------------------------------------------- calls, follow-ups */
+
+/*
+ * The figures for the whole filtered call list, above the table — "128 calls · 74
+ * answered (58%) · …". Tabular figures so the line does not shuffle as filters change.
+ */
+.tc-call-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-call-summary strong {
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+/*
+ * A button that reads as a link: "Show more" under a clamped note, "Change lead" in the
+ * move dialog. A reading aid or a small step, not an action that deserves a filled button.
+ */
+.tc-text-button {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--admin-brand, var(--navy-700));
+  cursor: pointer;
+}
+
+.tc-text-button:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.tc-text-button:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.tc-text-button:disabled {
+  color: var(--ink-400);
+  cursor: default;
+}
+
+/* A link dressed as a tag: "+2 earlier" opening the lead's call history. */
+.tc-badge-link {
+  text-decoration: none;
+}
+
+.tc-badge-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* -------------------------------------------------------------------- dialogs */
+
+/*
+ * The admin's form dialogs, on the shared `.dialog` shell.
+ *
+ * Head and foot stay put while the body scrolls, so the buttons are always in reach on a
+ * long form or a page of pending follow-ups — the shell alone would scroll the whole
+ * panel, actions included, out of view. The height cap matches the backdrop's padding.
+ */
+.tc-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(52rem, 100%);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2 * clamp(1rem, 4vw, 2.5rem));
+}
+
+.tc-dialog--wide {
+  width: min(66rem, 100%);
+}
+
+.tc-dialog__head {
+  flex: none;
+  /* Room on the right for the shell's round close button. */
+  padding: var(--space-5) 3.75rem var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--line-100);
+}
+
+.tc-dialog__eyebrow {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.tc-dialog__title {
+  margin: 0.2rem 0 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.tc-dialog__sub {
+  margin: 0.3rem 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+.tc-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-6);
+}
+
+.tc-dialog__foot {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--line-100);
+  background-color: var(--surface-muted);
+}
+
+/* Text that sits beside the foot's buttons — why the main one is disabled, say. */
+.tc-dialog__foot-note {
+  margin: 0 auto 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+.tc-dialog__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tc-dialog__section-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--ink-900);
+}
+
+/* Small print under a group of inputs, e.g. "Times are India Standard Time". */
+.tc-dialog__note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* What a record is now, as label/value pairs: the move dialog's "Current" card. */
+.tc-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-muted);
+  font-size: var(--text-sm);
+}
+
+.tc-facts dt {
+  font-weight: 600;
+  color: var(--ink-500);
+}
+
+.tc-facts dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  min-width: 0;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Current against new, one row per thing a move can change. A row that is not changing
+ * stays, muted, so the admin can see at a glance what will NOT happen as well.
+ */
+.tc-change {
+  display: grid;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.tc-change__row {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  border-top: 1px solid var(--line-100);
+}
+
+.tc-change__row:first-child {
+  border-top: 0;
+}
+
+.tc-change__label {
+  font-weight: 600;
+  color: var(--ink-500);
+}
+
+.tc-change__values {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tc-change__from {
+  color: var(--ink-500);
+}
+
+.tc-change__to {
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+/* The arrow is decoration (aria-hidden); a visually hidden "changes to" is what is read. */
+.tc-change__arrow {
+  color: var(--ink-400);
+}
+
+.tc-change__row--same .tc-change__from {
+  color: var(--ink-700);
+}
+
+.tc-change__same {
+  font-size: var(--text-xs);
+  color: var(--ink-400);
+}
+
+/* The lead the follow-up will be on, with the buttons that change it. */
+.tc-lead-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--ink-900);
+}
+
+/* Search results to choose one from — leads, as radio buttons dressed as rows. */
+.tc-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.tc-pick-list__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.tc-pick-list__item:hover {
+  border-color: var(--blue-300);
+  background-color: var(--surface-muted);
+}
+
+.tc-pick-list__item[data-selected='true'] {
+  border-color: var(--admin-brand, var(--navy-700));
+  background-color: var(--admin-brand-tint, var(--surface-blue));
+}
+
+.tc-pick-list__item:focus-within {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 1px;
+}
+
+.tc-pick-list__item input {
+  margin-top: 0.2rem;
+  accent-color: var(--admin-brand, var(--navy-700));
+}
+
+.tc-pick-list__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.tc-pick-list__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.tc-pick-list__meta {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Advice that does not block: a time outside calling hours, a follow-up its holder cannot
+ * open the lead for. The warning tone, with a left edge so it reads as a note on the form
+ * rather than as a failure.
+ */
+.tc-advice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  list-style: none;
+  border-radius: var(--radius-md);
+  background-color: var(--warning-050);
+  box-shadow: inset 3px 0 0 var(--warning-600);
+  font-size: var(--text-sm);
+  color: var(--warning-600);
+}
+
+/* Radio buttons and tick boxes with their labels — schedules, "also transfer the lead". */
+.tc-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.tc-choice-list > legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.tc-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+}
+
+.tc-choice > label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.tc-choice input[type='radio'],
+.tc-choice input[type='checkbox'] {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--admin-brand, var(--navy-700));
+}
+
+.tc-choice__inputs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tc-choice__inputs .input {
+  width: auto;
+}
+
+/* `.textarea` is sized for a message form; a note in a dialog needs two lines, not eight. */
+.tc-textarea--short {
+  min-height: 4.75rem;
+}
+
+/* "All 40 pending follow-ups are selected · Choose individually". */
+.tc-selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent-200);
+  border-radius: var(--radius-md);
+  background-color: var(--accent-050);
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+}
+
+/* A row of tags standing for counts: "3 overdue · 2 due today · 7 upcoming". */
+.tc-count-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@media (max-width: 720px) {
+  .tc-change__row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .tc-dialog__head,
+  .tc-dialog__body,
+  .tc-dialog__foot {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+
+  .tc-dialog__head {
+    padding-right: 3.75rem;
   }
 }

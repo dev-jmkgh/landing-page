@@ -162,6 +162,13 @@ type SeedUser = {
   name: string;
   email: string;
   phone: string;
+  /**
+   * The company SIM number, canonical `+91XXXXXXXXXX` (migration 021). Every telecaller
+   * has one — the API requires it for the role — and each is unique, because the
+   * database refuses two live employees on one number. Incoming calls are verified
+   * against it, so a telecaller without one would see no incoming calls at all.
+   */
+  companyPhone?: string;
   role: 'admin' | 'manager' | 'supervisor' | 'telecaller';
   availability: 'available' | 'busy' | 'on_break' | 'offline';
   active: boolean;
@@ -221,6 +228,7 @@ const USERS: SeedUser[] = [
     name: 'Ravi Kumar',
     email: 'ravi@jmkdemo.test',
     phone: '9845010004',
+    companyPhone: '+919847020004',
     role: 'telecaller',
     availability: 'available',
     active: true,
@@ -232,6 +240,7 @@ const USERS: SeedUser[] = [
     name: 'Mira Nair',
     email: 'mira@jmkdemo.test',
     phone: '9845010005',
+    companyPhone: '+919847020005',
     role: 'telecaller',
     availability: 'on_break',
     active: true,
@@ -243,6 +252,7 @@ const USERS: SeedUser[] = [
     name: 'Sanjay Patel',
     email: 'sanjay@jmkdemo.test',
     phone: '9845010006',
+    companyPhone: '+919847020006',
     role: 'telecaller',
     availability: 'offline',
     active: true,
@@ -254,6 +264,7 @@ const USERS: SeedUser[] = [
     name: 'Deepa Iyer',
     email: 'deepa@jmkdemo.test',
     phone: '9845010007',
+    companyPhone: '+919847020007',
     role: 'telecaller',
     availability: 'offline',
     active: true,
@@ -266,6 +277,7 @@ const USERS: SeedUser[] = [
     name: 'Vikram Rao',
     email: 'vikram.former@jmkdemo.test',
     phone: '9845010008',
+    companyPhone: '+919847020008',
     role: 'telecaller',
     availability: 'offline',
     active: false,
@@ -278,6 +290,7 @@ const USERS: SeedUser[] = [
     name: 'Priya Sharma',
     email: 'priya.new@jmkdemo.test',
     phone: '9845010009',
+    companyPhone: '+919847020009',
     role: 'telecaller',
     availability: 'offline',
     active: false,
@@ -289,6 +302,7 @@ const USERS: SeedUser[] = [
     name: 'Arjun Das',
     email: 'arjun.new@jmkdemo.test',
     phone: '9845010010',
+    companyPhone: '+919847020010',
     role: 'telecaller',
     availability: 'offline',
     active: false,
@@ -306,6 +320,7 @@ const USERS: SeedUser[] = [
     name: 'Unknown Applicant',
     email: 'stranger@jmkdemo.test',
     phone: '9845010011',
+    companyPhone: '+919847020011',
     role: 'telecaller',
     availability: 'offline',
     active: false,
@@ -486,14 +501,49 @@ async function main(): Promise<void> {
    */
   await db.query("SET time_zone = '+00:00'");
 
+  /*
+   * Refuse an unmigrated database BEFORE anything is deleted.
+   *
+   * This script writes columns and clears tables that only exist from migration 021
+   * and 026 onwards. Against a database that has not had `npm run db:migrate`, it would
+   * otherwise fail part-way with a bare "Unknown column" — and a green e2e run proves
+   * nothing here, because the suite migrates its own scratch database.
+   */
+  const [schemaRows] = (await db.query(
+    `SELECT
+       (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'telecaller_users'
+           AND COLUMN_NAME = 'company_phone')                                     AS company_phone,
+       (SELECT COUNT(*) FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME IN ('lead_import_rows', 'lead_imports', 'report_runs', 'follow_up_moves')) AS new_tables`,
+  )) as [Array<Record<string, number>>, unknown];
+  const schema = schemaRows[0] ?? {};
+
+  if (Number(schema.company_phone) !== 1 || Number(schema.new_tables) !== 4) {
+    console.error(`"${process.env.DB_NAME ?? 'jmk'}" is missing recent migrations. Nothing was changed.`);
+    console.error('Run  npm run db:migrate  against it first, then seed again.');
+    await db.end();
+    process.exit(1);
+  }
+
   console.log(`Seeding telecalling demo data into "${process.env.DB_NAME ?? 'jmk'}"…\n`);
 
   /*
    * Cleared in dependency order rather than with FK checks disabled, so that a missing
    * ON DELETE rule shows up here as an error instead of leaving orphans behind.
    * `enquiries`, `job_applications` and `admin_users` are untouched by design.
+   *
+   * The import staging rows, the import headers, the daily-report runs and the
+   * follow-up move history come first, ahead of the leads, follow-ups and employees
+   * they point at. `report_runs` has no foreign key, but a reset should let the daily
+   * email be tried again for dates it already ran.
    */
   for (const table of [
+    'lead_import_rows',
+    'lead_imports',
+    'report_runs',
+    'follow_up_moves',
     'call_recordings',
     'notifications',
     'lead_activities',
@@ -516,10 +566,10 @@ async function main(): Promise<void> {
     const registered = u.approval === 'approved' ? null : sql(shift({ days: -2 }));
     const [res] = await db.execute(
       `INSERT INTO telecaller_users
-         (employee_code, name, email, email_verified_at, phone, password_hash, role,
-          availability, is_active, approval_status, registered_at, approved_at,
+         (employee_code, name, email, email_verified_at, phone, company_phone, password_hash,
+          role, availability, is_active, approval_status, registered_at, approved_at,
           rejection_reason, last_login_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         u.code,
         u.name,
@@ -531,6 +581,7 @@ async function main(): Promise<void> {
          */
         u.emailVerified === false ? null : sql(shift({ days: -3 })),
         u.phone,
+        u.companyPhone ?? null,
         hash,
         u.role,
         u.availability,
@@ -647,6 +698,11 @@ async function main(): Promise<void> {
    * `missed` is included explicitly. It is the one outcome no client path currently
    * produces, so the dashboard's Missed tile reads zero on real data — seeding it is the
    * only way to see whether that tile is wired up at all.
+   *
+   * Every call seeded here is OUTGOING, which is on the company line by construction.
+   * An incoming row added to this script must also set `sim_match` (e.g. 'confirmed')
+   * and `received_on_phone` (the owner's company number): an incoming call without them
+   * is an unverified legacy row, and every list, tile and report leaves it out.
    */
   const OUTCOMES_BY_STATUS: Record<string, string[]> = {
     new: [],
@@ -912,9 +968,14 @@ async function main(): Promise<void> {
     const owner = l.owner ? uid(l.owner) : uid('admin');
     const created = sql(shift({ days: -l.createdDaysAgo, hours: -2 }));
 
+    /*
+     * The types are the API's own (`ACTIVITY_TYPES` in shared.schema.ts). This used to
+     * write 'created' and 'assigned', which no client knows — both timelines render an
+     * unknown type as a blank row, so every seeded lead opened with two empty lines.
+     */
     await db.execute(
       `INSERT INTO lead_activities (lead_id, user_id, type, summary, meta, created_at)
-       VALUES (?, ?, 'created', ?, ?, ?)`,
+       VALUES (?, ?, 'lead_created', ?, ?, ?)`,
       [lid(index), uid('admin'), `Lead created from ${l.source}`, JSON.stringify({ source: l.source }), created],
     );
     activities += 1;
@@ -922,7 +983,7 @@ async function main(): Promise<void> {
     if (l.owner) {
       await db.execute(
         `INSERT INTO lead_activities (lead_id, user_id, type, summary, meta, created_at)
-         VALUES (?, ?, 'assigned', ?, ?, ?)`,
+         VALUES (?, ?, 'lead_assigned', ?, ?, ?)`,
         [lid(index), uid('admin'), `Assigned to ${userName(l.owner)}`, JSON.stringify({ assignedTo: owner }), created],
       );
       activities += 1;

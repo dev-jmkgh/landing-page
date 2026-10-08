@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AREAS } from '@/components/admin/AdminNav';
 import { AdminShell } from '@/components/admin/AdminShell';
+import { AdminSessionLoader } from '@/components/admin/Loader';
 import { useAdminSession } from '@/components/admin/useAdminSession';
 import { FormAlert } from '@/components/forms/Fields';
 import { HrAttendancePanel } from './HrAttendancePanel';
@@ -76,15 +77,7 @@ export function HrApp() {
   const [section, setSection] = useSection();
 
   if (status === 'checking') {
-    return (
-      <div className="admin-login">
-        <div className="admin-login__card" aria-busy="true">
-          <div className="skeleton" style={{ height: '1.5rem', width: '60%' }} />
-          <div className="skeleton" style={{ height: '1rem', width: '85%', marginTop: '1rem' }} />
-          <div className="skeleton" style={{ height: '2.75rem', marginTop: '1.5rem' }} />
-        </div>
-      </div>
-    );
+    return <AdminSessionLoader />;
   }
 
   if (status === 'unavailable') {

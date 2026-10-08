@@ -20,6 +20,12 @@
  *
  * Requires a reachable MySQL using the DB_* values from backend/.env, with permission to
  * create and drop a database.
+ *
+ *   E2E_DB_NAME=jmk_e2e_<you> npm run test:telecalling
+ *
+ * names the scratch database, so several runs can go at once without dropping each
+ * other's. Feature sections live in `scripts/e2e/` and run at the end — see
+ * `scripts/e2e/context.ts` for what they receive and the rules they follow.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -29,10 +35,34 @@ import bcrypt from 'bcryptjs';
 import { optionalPhoneField } from '../src/modules/telecalling/shared.schema';
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
+import type { Client, E2EContext, Json } from './e2e/context';
 
 dotenv.config();
 
-const SCRATCH_DB = 'jmk_telecalling_e2e';
+/**
+ * The scratch database. It is DROPPED at the start and at the end of every run.
+ *
+ * Overridable so that runs can proceed side by side — two runs sharing one name drop
+ * each other's database mid-flight. Because the name is dropped, it is held to a strict
+ * shape and must say `e2e`: a typo that named the developer's own database would
+ * otherwise destroy it, and refusing is the only acceptable answer to that.
+ */
+const SCRATCH_DB = resolveScratchDb(process.env.E2E_DB_NAME, process.env.DB_NAME);
+
+function resolveScratchDb(requested: string | undefined, appDb: string | undefined): string {
+  if (requested === undefined || requested === '') return 'jmk_telecalling_e2e';
+
+  if (!/^[A-Za-z0-9_]{1,48}$/.test(requested) || !/e2e/i.test(requested) || requested === appDb) {
+    console.error(
+      `Refusing E2E_DB_NAME=${JSON.stringify(requested)}: this database is dropped before and ` +
+        'after the run, so it must be 1-48 letters, digits or underscores, contain "e2e", ' +
+        'and not be the database named by DB_NAME.',
+    );
+    process.exit(1);
+  }
+
+  return requested;
+}
 
 // Must be set before the app (and therefore config/env) is imported. dotenv does not
 // override an existing process.env value, so this wins over the .env file.
@@ -40,6 +70,30 @@ process.env.DB_NAME = SCRATCH_DB;
 process.env.NODE_ENV = 'development';
 process.env.JWT_SECRET = 'e2e-check-secret-that-is-long-enough-to-be-fine';
 process.env.LOG_LEVEL = 'error';
+
+/**
+ * No real mail, from any run.
+ *
+ * backend/.env carries live SMTP credentials and real ADMIN_EMAILS, and every run used to
+ * submit a handful of verification emails to `@example.test` addresses through them —
+ * and any feature that mails the administrators would mail real inboxes on every run.
+ * Blank credentials make `config.smtp.enabled` false, so `sendMail` reports 'skipped'
+ * and nothing is attempted. No assertion depends on delivery: a feature that sends mail
+ * must leave a database trace to assert on instead.
+ *
+ * ADMIN_EMAILS is set to a placeholder rather than emptied so the config's recipient
+ * list stays non-empty and the code that reads it runs as it would in production; the
+ * report scheduler is switched off so no timer starts inside the run.
+ *
+ * TELECALLING_REPORT_EMAILS is a leftover on purpose: it used to divert the daily report
+ * away from ADMIN_EMAILS and must now be ignored (the config warns about it at startup).
+ */
+process.env.MAIL_PROVIDER = 'smtp';
+process.env.SMTP_USER = '';
+process.env.SMTP_PASSWORD = '';
+process.env.ADMIN_EMAILS = 'owner@example.test';
+process.env.TELECALLING_REPORT_EMAILS = 'leftover-report-list@example.test';
+process.env.TELECALLING_REPORT_SCHEDULER = '0';
 
 /**
  * The API-wide rate limit is lifted for this suite.
@@ -112,7 +166,10 @@ function splitStatements(sql: string): string[] {
     .filter((statement) => statement.length > 0);
 }
 
-async function setupDatabase(): Promise<mysql.Connection> {
+/** Every seeded and fixture account shares this password. */
+const E2E_PASSWORD = 'correct-horse-battery';
+
+async function setupDatabase(): Promise<{ db: mysql.Connection; passwordHash: string }> {
   const root = await mysql.createConnection({
     host: process.env.DB_HOST ?? 'localhost',
     port: Number(process.env.DB_PORT ?? 3306),
@@ -134,7 +191,7 @@ async function setupDatabase(): Promise<mysql.Connection> {
     for (const statement of splitStatements(sql)) await root.query(statement);
   }
 
-  const hash = await bcrypt.hash('correct-horse-battery', 12);
+  const hash = await bcrypt.hash(E2E_PASSWORD, 12);
 
   await root.query(
     /*
@@ -150,40 +207,34 @@ async function setupDatabase(): Promise<mysql.Connection> {
      * suite at the same assertion. Both defaults are deliberately hostile to a forgetful
      * writer. These three are admin-created staff, so a verified address is the truthful
      * value — nobody emailed them a code.
+     *
+     * The two telecallers hold company SIM numbers (migration 021), so their handsets'
+     * incoming calls can be verified as arriving on the company line. The admin holds
+     * none, as an admin need not.
      */
     `INSERT INTO telecaller_users
        (employee_code, name, email, password_hash, role, is_active, approval_status,
-        email_verified_at)
-     VALUES ('TC-0001', 'Asha Admin', 'admin@example.test', ?, 'admin', 1, 'approved', NOW()),
-            ('TC-0002', 'Ravi Caller', 'ravi@example.test', ?, 'telecaller', 1, 'approved', NOW()),
-            ('TC-0003', 'Mira Caller', 'mira@example.test', ?, 'telecaller', 1, 'approved', NOW())`,
+        email_verified_at, company_phone)
+     VALUES ('TC-0001', 'Asha Admin', 'admin@example.test', ?, 'admin', 1, 'approved', NOW(), NULL),
+            ('TC-0002', 'Ravi Caller', 'ravi@example.test', ?, 'telecaller', 1, 'approved', NOW(), '+919876500002'),
+            ('TC-0003', 'Mira Caller', 'mira@example.test', ?, 'telecaller', 1, 'approved', NOW(), '+919876500003')`,
     [hash, hash, hash],
   );
 
-  return root;
+  return { db: root, passwordHash: hash };
 }
 
-type Json = Record<string, any>;
-
-function makeClient(base: string) {
+function makeClient(base: string): Client {
   let accessToken: string | null = null;
 
-  async function call(
-    method: string,
-    pathname: string,
-    body?: unknown,
-  ): Promise<{ status: number; json: Json }> {
+  function headersFor(extra: Record<string, string> = {}): Record<string, string> {
     const headers: Record<string, string> = { Accept: 'application/json' };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    // Last, so a caller can override a default — a Cookie session, an Origin.
+    return { ...headers, ...extra };
+  }
 
-    const response = await fetch(`${base}${pathname}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      redirect: 'manual',
-    });
-
+  async function parse(response: Response) {
     const text = await response.text();
     let json: Json = {};
     try {
@@ -191,23 +242,89 @@ function makeClient(base: string) {
     } catch {
       json = { raw: text.slice(0, 200) };
     }
-    return { status: response.status, json };
+    return { status: response.status, json, headers: response.headers };
+  }
+
+  async function call(
+    method: string,
+    pathname: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ) {
+    const response = await fetch(`${base}${pathname}`, {
+      method,
+      headers: headersFor({
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...headers,
+      }),
+      body: body === undefined ? undefined : JSON.stringify(body),
+      redirect: 'manual',
+    });
+    return parse(response);
+  }
+
+  /*
+   * No Content-Type here on purpose: fetch writes `multipart/form-data` with the
+   * boundary it generated, and a hand-set header would lose the boundary and leave the
+   * server unable to read the body.
+   */
+  async function callForm(method: string, pathname: string, form: FormData) {
+    const response = await fetch(`${base}${pathname}`, {
+      method,
+      headers: headersFor(),
+      body: form,
+      redirect: 'manual',
+    });
+    return parse(response);
+  }
+
+  async function getRaw(pathname: string) {
+    const response = await fetch(`${base}${pathname}`, {
+      method: 'GET',
+      headers: headersFor({ Accept: '*/*' }),
+      redirect: 'manual',
+    });
+    return {
+      status: response.status,
+      headers: response.headers,
+      body: Buffer.from(await response.arrayBuffer()),
+    };
   }
 
   return {
     call,
+    callForm,
+    getRaw,
     setToken: (token: string | null) => {
       accessToken = token;
     },
     get: (p: string) => call('GET', p),
     post: (p: string, body?: unknown) => call('POST', p, body),
     patch: (p: string, body?: unknown) => call('PATCH', p, body),
+    put: (p: string, body?: unknown) => call('PUT', p, body),
+    del: (p: string, body?: unknown) => call('DELETE', p, body),
   };
 }
 
 async function main(): Promise<void> {
-  const db = await setupDatabase();
+  const { db, passwordHash } = await setupDatabase();
   console.log(`scratch database ready: ${SCRATCH_DB}\n`);
+
+  /*
+   * A second connection for the section files, pinned to UTC exactly like the app's pool
+   * (`db/pool.ts`): the driver writes Dates as UTC wall clock and `NOW()` means UTC.
+   * `db` above runs in the server's zone, which is IST on a developer machine — a
+   * fixture written through it with `NOW()` lands five and a half hours off.
+   */
+  const utcDb = await mysql.createConnection({
+    host: process.env.DB_HOST ?? 'localhost',
+    port: Number(process.env.DB_PORT ?? 3306),
+    user: process.env.DB_USER ?? 'root',
+    password: process.env.DB_PASSWORD ?? '',
+    database: SCRATCH_DB,
+    timezone: 'Z',
+  });
+  await utcDb.query("SET time_zone = '+00:00'");
 
   /*
    * Dynamic, and it has to be.
@@ -229,6 +346,19 @@ async function main(): Promise<void> {
   const server: Server = await new Promise((resolve) => {
     const listener = app.listen(0, () => resolve(listener));
   });
+
+  /*
+   * Idle keep-alive sockets stay open for a minute instead of Node's five seconds.
+   *
+   * This suite blocks its own event loop on purpose — the email-verification section
+   * hashes up to a million codes to recover one — and with several runs on one machine
+   * that can outlast five seconds. The server then closes the idle socket in the same
+   * tick the client reuses it, and the next request dies with ECONNRESET, aborting the
+   * whole run. Nothing here tests keep-alive, so the window is simply made wider than
+   * any pause the suite takes. headersTimeout must stay above it.
+   */
+  server.keepAliveTimeout = 60_000;
+  server.headersTimeout = 65_000;
 
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
@@ -658,6 +788,9 @@ async function main(): Promise<void> {
       durationSeconds: 0,
       startedAt: incomingStartedAt,
       clientUuid: '44444444-4444-4444-8444-444444444444',
+      // Which line took it: the SIM the handset confirmed against Ravi's company number.
+      // Without this the server sets an incoming call aside (scripts/e2e/calls.ts).
+      line: { match: 'confirmed', confirmedFor: '9876500002' },
     });
     check('a missed call from an unknown number is logged', incomingUnknown.status === 201, incomingUnknown.json);
     check(
@@ -677,6 +810,7 @@ async function main(): Promise<void> {
       outcome: 'missed',
       startedAt: incomingStartedAt,
       clientUuid: '44444444-4444-4444-8444-444444444444',
+      line: { match: 'confirmed', confirmedFor: '9876500002' },
     });
     check(
       're-importing the same call-log row does not duplicate it',
@@ -694,6 +828,7 @@ async function main(): Promise<void> {
       durationSeconds: 45,
       startedAt: new Date(Date.now() - 900_000).toISOString(),
       clientUuid: '55555555-5555-4555-8555-555555555555',
+      line: { match: 'confirmed', confirmedFor: '9876500002' },
     });
     check('an incoming call from a known number is logged', incomingKnown.status === 201, incomingKnown.json);
 
@@ -798,6 +933,8 @@ async function main(): Promise<void> {
       outcome: 'missed',
       startedAt: new Date(Date.now() - 2_400_000).toISOString(),
       clientUuid: '77777777-7777-4777-8777-777777777777',
+      // Mira's handset, confirmed against Mira's company number.
+      line: { match: 'confirmed', confirmedFor: '9876500003' },
     });
     check('another telecaller logs a call from the same number', miraIncoming.status === 201, miraIncoming.json);
 
@@ -878,6 +1015,7 @@ async function main(): Promise<void> {
       durationSeconds: 60,
       startedAt: new Date(Date.now() - 1_200_000).toISOString(),
       clientUuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      line: { match: 'confirmed', confirmedFor: '9876500002' },
     });
     check(
       'a call from a freshly created lead attaches on its own too',
@@ -949,6 +1087,7 @@ async function main(): Promise<void> {
       source: 'call_log',
       startedAt: new Date(Date.now() - 300_000).toISOString(),
       clientUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      line: { match: 'confirmed', confirmedFor: '9876500002' },
     });
     const orphan = strangerCall.json.call as Json;
     check('a call from a number no lead has is unattached', orphan?.leadId === null, orphan);
@@ -1246,6 +1385,8 @@ async function main(): Promise<void> {
       const parsed = signupSchema.safeParse({
         name: 'Sneaky Admin',
         email: 'sneaky.admin@example.test',
+        // Required at signup now (migration 021); the role fields are what this probes.
+        companyPhone: '98000 00009',
         password: 'correct-horse-battery',
         requestedRole: requested,
       });
@@ -2169,6 +2310,8 @@ async function main(): Promise<void> {
       email: 'nikhil@example.test',
       password: 'another-long-password',
       role: 'telecaller',
+      // A telecaller now needs a company SIM number on creation (migration 021).
+      companyPhone: '+91 77712 49001',
     });
     check('an admin adds an employee', newEmployee.status === 201, newEmployee.json);
     check('the employee code is generated in sequence', newEmployee.json.employee?.employeeCode === 'TC-0004', newEmployee.json.employee);
@@ -2178,6 +2321,8 @@ async function main(): Promise<void> {
       name: 'Clash',
       email: 'nikhil@example.test',
       password: 'another-long-password',
+      // A free company number (required for a telecaller), so the refusal can only be the email.
+      companyPhone: '+91 77712 49002',
     });
     check('a duplicate email is refused with a field error', duplicateEmail.status === 422 && Boolean(duplicateEmail.json.errors?.email), duplicateEmail.json);
 
@@ -2225,6 +2370,8 @@ async function main(): Promise<void> {
     const escalation = await applicant.post('/mobile/auth/signup', {
       name: 'Sneaky Applicant',
       email: 'sneaky@example.test',
+      // Required at signup now; the escalation fields below are what this probes.
+      companyPhone: '98000 00002',
       password: 'a-perfectly-long-password',
       role: 'admin',
       isActive: true,
@@ -2264,6 +2411,8 @@ async function main(): Promise<void> {
     const dupSignup = await applicant.post('/mobile/auth/signup', {
       name: 'Priya Again',
       email: 'priya@example.test',
+      // A free company number, so the refusal can only be the duplicate email.
+      companyPhone: '98000 00004',
       password: 'a-perfectly-long-password',
     });
     check('a duplicate email is refused', dupSignup.status === 422, dupSignup.status);
@@ -2285,6 +2434,8 @@ async function main(): Promise<void> {
       name: 'Nirmal No Phone',
       email: 'nirmal.nophone@example.test',
       phone: null,
+      // The personal phone is what is optional; the company SIM number is required.
+      companyPhone: '98000 00003',
       password: 'a-perfectly-long-password',
     });
     check(
@@ -2648,10 +2799,14 @@ async function main(): Promise<void> {
       currentPassword: 'a-perfectly-long-password',
       newPassword: 'another-perfectly-long-one',
     });
+    /*
+     * Refused with the code the app acts on, BEFORE anything is changed. It used to rewrite
+     * the password and revoke the sessions, then fail to mint the new session with a 500.
+     */
     check(
       'a deactivated account cannot mint a new session via change-password',
-      deactivatedChangePw.status >= 400,
-      deactivatedChangePw.status,
+      deactivatedChangePw.status === 403 && deactivatedChangePw.json.code === 'account_deactivated',
+      { status: deactivatedChangePw.status, json: deactivatedChangePw.json },
     );
     check(
       'and no tokens leak out of it',
@@ -2705,10 +2860,103 @@ async function main(): Promise<void> {
     });
     check('an unknown lead source is normalised rather than rejected', unknownSource.status === 201, unknownSource.json);
     check('it lands as "other"', unknownSource.json.lead?.source === 'other', unknownSource.json.lead?.source);
+
+    /* ======================================================== section files */
+    /*
+     * Feature sections, one file each in scripts/e2e/, run last so nothing above depends
+     * on what they write. They receive everything they need in one context object — see
+     * scripts/e2e/context.ts for the contract and the rules.
+     *
+     * Loaded with `await import()` for the same reason the app is: by now the environment
+     * overrides are in place, so even a section file that statically imports something
+     * reaching config/env gets the scratch database, not the developer's.
+     *
+     * Each runs inside its own try: a section that throws is one FAIL with the error as
+     * its detail, and the sections after it still run. Without that, one TypeError in an
+     * early section would end the run and hide every later result.
+     */
+    const ids = new Map(
+      (
+        (await db.query(
+          "SELECT id, email FROM telecaller_users WHERE email IN ('admin@example.test', 'ravi@example.test', 'mira@example.test')",
+        )) as [Json[], unknown]
+      )[0].map((row) => [String(row.email), Number(row.id)] as const),
+    );
+
+    let fixtureCount = 0;
+
+    const context: E2EContext = {
+      base,
+      db,
+      utcDb,
+      check,
+      makeClient,
+      adminAsBearer,
+      adminId: ids.get('admin@example.test') ?? 0,
+      ravi,
+      raviId: ids.get('ravi@example.test') ?? 0,
+      mira,
+      miraId: ids.get('mira@example.test') ?? 0,
+      async createSignedInEmployee(options) {
+        fixtureCount += 1;
+        const code = options.code ?? `FX-${String(fixtureCount).padStart(4, '0')}`;
+        const email = options.email.trim().toLowerCase();
+
+        const [inserted] = await db.execute(
+          `INSERT INTO telecaller_users
+             (employee_code, name, email, email_verified_at, password_hash, role,
+              is_active, approval_status, approved_at, company_phone)
+           VALUES (?, ?, ?, UTC_TIMESTAMP(), ?, ?, 1, 'approved', UTC_TIMESTAMP(), ?)`,
+          [code, options.name, email, passwordHash, options.role, options.companyPhone ?? null],
+        );
+        const id = (inserted as mysql.ResultSetHeader).insertId;
+
+        const client = makeClient(base);
+        const login = await client.post('/mobile/auth/login', { email, password: E2E_PASSWORD });
+        const accessToken = login.json.accessToken as unknown;
+        const refreshToken = login.json.refreshToken as unknown;
+
+        if (login.status !== 200 || typeof accessToken !== 'string' || typeof refreshToken !== 'string') {
+          throw new Error(
+            `createSignedInEmployee could not sign in ${email}: ${login.status} ${JSON.stringify(login.json)}`,
+          );
+        }
+
+        client.setToken(accessToken);
+        return { client, id, refreshToken };
+      },
+    };
+
+    const sections: [string, () => Promise<{ run: (ctx: E2EContext) => Promise<void> }>][] = [
+      ['foundation', () => import('./e2e/foundation')],
+      ['calls', () => import('./e2e/calls')],
+      ['dashboard', () => import('./e2e/dashboard')],
+      ['leads', () => import('./e2e/leads')],
+      ['people', () => import('./e2e/people')],
+      ['dailyReport', () => import('./e2e/dailyReport')],
+      ['leadImport', () => import('./e2e/leadImport')],
+    ];
+
+    for (const [name, load] of sections) {
+      try {
+        const section = await load();
+        await section.run(context);
+      } catch (error) {
+        check(`${name} section crashed`, false, String(error));
+        if (error instanceof Error && error.stack) console.error(error.stack);
+      }
+    }
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // Node 19+ does this inside close(). On 18 the minute-long keep-alive window above
+      // would otherwise hold close() open until the idle sockets timed out.
+      server.closeIdleConnections();
+    });
     const { closePool } = await import('../src/db/pool');
     await closePool();
+    // Closed before the drop, so no open session of ours can hold a metadata lock on it.
+    await utcDb.end();
     await db.query(`DROP DATABASE IF EXISTS \`${SCRATCH_DB}\``);
     await db.end();
   }

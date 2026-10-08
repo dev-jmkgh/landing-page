@@ -243,6 +243,14 @@ function maskEmail(email: string): string {
   return `${name.slice(0, 2)}***@${domain}`;
 }
 
+/**
+ * Addresses as the logs show them — `ow***@example.com` — for screens that must say who
+ * receives something without publishing the list.
+ */
+export function maskAddresses(addresses: readonly string[]): string[] {
+  return addresses.map(maskEmail);
+}
+
 export type MailAttachment = {
   filename: string;
   /**
@@ -437,14 +445,17 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
 export type AdminNotificationInput = Omit<MailInput, 'to'>;
 
 /**
- * Delivers an administrative notification to every address in ADMIN_EMAILS.
- *
- * This is the only way the application sends mail to the business — enquiries and
- * career applications both go through it — so adding a recipient is an .env change
- * and never a code change.
+ * What a fan-out send achieved: the overall result, and how many of the recipients the
+ * mail server accepted it for — "delivered to 2 of 3" is something a sender can record,
+ * where the bare 'partial' is not.
+ */
+export type FanOutResult = { result: MailResult; delivered: number; total: number };
+
+/**
+ * Sends `input` to each address in `recipients` as its own message.
  *
  * ONE MESSAGE PER RECIPIENT, not one message addressed to all of them. It costs an
- * extra send per admin and buys independence: a single bad address no longer decides
+ * extra send per address and buys independence: a single bad address no longer decides
  * whether anyone hears about an enquiry.
  *
  * That is not hypothetical. With SES in the sandbox, a message addressed to two admins
@@ -454,7 +465,50 @@ export type AdminNotificationInput = Omit<MailInput, 'to'>;
  * failure outlives the sandbox, because one bouncing or suspended mailbox in the list
  * would otherwise take the whole notification down with it.
  *
- * It also stops the admins' addresses appearing in each other's To header.
+ * It also stops the recipients' addresses appearing in each other's To header.
+ *
+ * Never throws, like `sendMail`. `label` names the notification in the partial-delivery
+ * warning; it defaults to the wording the admin notifications have always logged.
+ */
+export async function sendToEach(
+  recipients: readonly string[],
+  input: AdminNotificationInput,
+  label = 'Admin notification',
+): Promise<FanOutResult> {
+  if (recipients.length === 0) {
+    logger.error(`${label} not sent: no recipients`, { subject: input.subject });
+    return { result: 'failed', delivered: 0, total: 0 };
+  }
+
+  const results = await Promise.all(
+    recipients.map((to) => sendMail({ ...input, to })),
+  );
+  const total = results.length;
+
+  if (results.every((result) => result === 'skipped')) {
+    return { result: 'skipped', delivered: 0, total };
+  }
+
+  const delivered = results.filter((result) => result === 'sent' || result === 'partial').length;
+
+  if (delivered === 0) return { result: 'failed', delivered, total };
+  if (delivered < total) {
+    logger.warn(`${label} reached some recipients but not all`, {
+      subject: input.subject,
+      delivered,
+      total,
+    });
+    return { result: 'partial', delivered, total };
+  }
+  return { result: 'sent', delivered, total };
+}
+
+/**
+ * Delivers an administrative notification to every address in ADMIN_EMAILS.
+ *
+ * This is how the application sends mail to the business — enquiries and career
+ * applications both go through it — so adding a recipient is an .env change and never a
+ * code change. One message per address; see `sendToEach`.
  */
 export async function sendAdminNotification(input: AdminNotificationInput): Promise<MailResult> {
   const recipients = config.mail.adminRecipients;
@@ -466,22 +520,5 @@ export async function sendAdminNotification(input: AdminNotificationInput): Prom
     return 'failed';
   }
 
-  const results = await Promise.all(
-    recipients.map((to) => sendMail({ ...input, to })),
-  );
-
-  if (results.every((result) => result === 'skipped')) return 'skipped';
-
-  const delivered = results.filter((result) => result === 'sent' || result === 'partial').length;
-
-  if (delivered === 0) return 'failed';
-  if (delivered < results.length) {
-    logger.warn('Admin notification reached some recipients but not all', {
-      subject: input.subject,
-      delivered,
-      total: results.length,
-    });
-    return 'partial';
-  }
-  return 'sent';
+  return (await sendToEach(recipients, input)).result;
 }

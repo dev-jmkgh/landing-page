@@ -21,6 +21,8 @@ export function Dialog({
   onClose,
   title,
   label,
+  className,
+  dismissOnBackdrop = true,
   children,
 }: {
   open: boolean;
@@ -29,6 +31,22 @@ export function Dialog({
   title: string;
   /** Accessible name, when it should differ from the visible heading. */
   label?: string;
+  /**
+   * Extra classes for the panel, appended to `.dialog`.
+   *
+   * For a dialog that needs its own width or layout — an admin form is wider than the
+   * marketing card this shell was built for. Omit it and the panel is exactly as before.
+   */
+  className?: string;
+  /**
+   * Whether a click on the dimmed backdrop closes the dialog. Defaults to true, which is
+   * what the marketing dialogs rely on.
+   *
+   * Pass false for a dialog that holds a form. There, a click that lands a few pixels
+   * outside the panel is far more often a slip than a decision, and closing would throw
+   * away whatever had been typed. Escape and the close button still work either way.
+   */
+  dismissOnBackdrop?: boolean;
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -86,9 +104,9 @@ export function Dialog({
   if (!open) return null;
 
   return (
-    <div className="dialog-backdrop" onClick={close}>
+    <div className="dialog-backdrop" onClick={dismissOnBackdrop ? close : undefined}>
       <div
-        className="dialog"
+        className={className ? `dialog ${className}` : 'dialog'}
         role="dialog"
         aria-modal="true"
         aria-label={label ?? title}

@@ -7,8 +7,22 @@
  */
 
 export { renderEmail, renderText, type EmailDocument } from './layout/base';
-export { formatSubmissionTime, actionButton } from './layout/components';
+export {
+  formatSubmissionTime,
+  actionButton,
+  callout,
+  sectionHeading,
+  metricGrid,
+  dataTable,
+  textTable,
+  type CalloutTone,
+  type MetricTile,
+  type MetricTone,
+  type DataColumn,
+  type DataCell,
+} from './layout/components';
 export { BRAND } from './layout/brand';
+export { EMAIL_LOGO_CID, EMAIL_LOGO_PNG } from './layout/logo';
 
 export {
   enquiryAdminEmail,
@@ -26,3 +40,11 @@ export {
   employeeVerificationEmail,
   type EmployeeVerificationEmailData,
 } from './templates/employeeVerification';
+
+export {
+  dailyTelecallingReportEmail,
+  formatReportDay,
+  TEAM_TABLE_LIMIT,
+  type DailyReportEmailData,
+  type DailyReportEmailLinks,
+} from './templates/dailyTelecallingReport';

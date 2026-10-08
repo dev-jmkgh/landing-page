@@ -2,29 +2,38 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
+import { ButtonSpinner, LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
 import {
+  APPROVAL_STATUSES,
   EMPLOYEE_ROLES,
   EMPLOYEE_ROLE_LABELS,
+  companyPhoneKey,
+  formatCompanyPhone,
   formatDateTime,
   humanise,
   telecallingApi,
   type ApprovalStatus,
+  type CompanySim,
   type Employee,
   type EmployeeRole,
   type Paginated,
 } from '@/lib/telecalling';
-import { EmptyPanel, Pager, Tag, TableSkeleton } from './shared';
+import { DeactivateEmployeeDialog, type DeactivateEmployeeMode } from './DeactivateEmployeeDialog';
+import { useTelecallingNav } from './nav';
+import { DateTimeCell, EmptyPanel, Pager, Tag, TableSkeleton } from './shared';
+import { readEnum, readPage, readText } from './urlState';
 
 /**
  * Employee management (spec: Admin Module 3).
  *
- * Add, edit, activate, deactivate, reset a password, and hand a departing employee's
- * follow-ups to someone else. Deactivating an account revokes every mobile session it
- * holds server-side, so it takes effect within one access-token lifetime rather than
- * whenever the handset next signs out.
+ * Add, edit, activate, deactivate, reset a password, set the company SIM number, and hand
+ * a departing employee's follow-ups to someone else. Deactivating an account revokes every
+ * mobile session it holds server-side, so it takes effect within one access-token lifetime
+ * rather than whenever the handset next signs out — and it is refused while the employee
+ * still holds pending follow-ups, which the deactivation dialog moves first.
  *
  * This screen is also where self-registrations are granted access. An employee who signs
  * up in the mobile app cannot sign in until someone approves them here — the backend has
@@ -35,6 +44,9 @@ import { EmptyPanel, Pager, Tag, TableSkeleton } from './shared';
  * matters because the states are a cycle, not a hierarchy: a rejection can be reopened
  * back to pending, and an approved account can later be deactivated without leaving the
  * approved state.
+ *
+ * Filters live in the address: the dashboard's "Active employees" tile opens this list on
+ * Status: Active, and a refresh or Back returns to the same view.
  */
 
 const PAGE_SIZE = 25;
@@ -52,15 +64,49 @@ const TABS: { key: ApprovalStatus; label: string }[] = [
   { key: 'rejected', label: 'Rejected' },
 ];
 
+/** The Status filter on the Employees tab, as the `active` the API takes. */
+type StatusFilter = 'all' | 'active' | 'inactive';
+
 type NewEmployee = {
   name: string;
   email: string;
+  /** Personal number, optional. */
   phone: string;
+  /** The company SIM; required for a telecaller. */
+  companyPhone: string;
   password: string;
   role: EmployeeRole;
 };
 
-const BLANK: NewEmployee = { name: '', email: '', phone: '', password: '', role: 'telecaller' };
+const BLANK: NewEmployee = {
+  name: '',
+  email: '',
+  phone: '',
+  companyPhone: '',
+  password: '',
+  role: 'telecaller',
+};
+
+type Filters = {
+  tab: ApprovalStatus;
+  status: StatusFilter;
+  role: EmployeeRole | 'all';
+  simMissing: boolean;
+  q: string;
+  page: number;
+};
+
+function readFilters(params: URLSearchParams): Filters {
+  const active = params.get('active');
+  return {
+    tab: readEnum(params, 'approval', APPROVAL_STATUSES, 'approved'),
+    status: active === 'true' ? 'active' : active === 'false' ? 'inactive' : 'all',
+    role: readEnum<EmployeeRole | 'all'>(params, 'role', EMPLOYEE_ROLES, 'all'),
+    simMissing: params.get('companySim') === 'missing',
+    q: readText(params, 'q'),
+    page: readPage(params),
+  };
+}
 
 /**
  * How long an applicant has been waiting, in words.
@@ -89,11 +135,23 @@ function waitingFor(registeredAt: string | null): string | null {
 }
 
 export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
-  const [tab, setTab] = useState<ApprovalStatus>('approved');
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [role, setRole] = useState<EmployeeRole | 'all'>('all');
+  const nav = useTelecallingNav();
+  const { replaceParams, leadId: openLeadId } = nav;
+
+  // Read once: from here on the state is the source and the address follows it.
+  const [initial] = useState(() => readFilters(nav.params));
+
+  const [tab, setTab] = useState<ApprovalStatus>(initial.tab);
+  const [status, setStatus] = useState<StatusFilter>(initial.status);
+  const [role, setRole] = useState<EmployeeRole | 'all'>(initial.role);
+  /*
+   * Telecallers with no company number, or whose phone has not confirmed the company SIM
+   * yet: the people whose incoming calls are not being recorded, to chase after rollout.
+   */
+  const [simMissing, setSimMissing] = useState(initial.simMissing);
+  const [search, setSearch] = useState(initial.q);
+  const [debounced, setDebounced] = useState(initial.q);
+  const [page, setPage] = useState(initial.page);
 
   /**
    * The badge count, loaded separately from the list.
@@ -115,16 +173,54 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
 
+  /** The employee in the deactivation / move-follow-ups dialog. */
+  const [managing, setManaging] = useState<{
+    employee: Employee;
+    mode: DeactivateEmployeeMode;
+  } | null>(null);
+
   const abort = useRef<AbortController | null>(null);
 
+  /** Filters that only mean something on the Employees tab. */
+  const approvedTab = tab === 'approved';
+
+  /*
+   * The search box, debounced. The page goes back to 1 only when the settled text really
+   * changes — never on mount, where the page came from the address.
+   */
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(search.trim()), 350);
+    const next = search.trim();
+    if (next === debounced) return undefined;
+
+    const timer = window.setTimeout(() => {
+      setDebounced(next);
+      setPage(1);
+    }, 350);
     return () => window.clearTimeout(timer);
-  }, [search]);
+  }, [search, debounced]);
+
+  /* A lead opening over this screen closes the dialog, which would otherwise stay open behind it. */
+  useEffect(() => {
+    if (openLeadId !== null) setManaging(null);
+  }, [openLeadId]);
+
+  /* -------------------------------------------------------- the address */
 
   useEffect(() => {
-    setPage(1);
-  }, [tab, debounced, role]);
+    replaceParams(
+      {
+        approval: tab,
+        active: approvedTab && status !== 'all' ? status === 'active' : undefined,
+        role,
+        companySim: approvedTab && simMissing ? 'missing' : undefined,
+        q: debounced,
+        page,
+      },
+      { approval: 'approved', page: 1 },
+    );
+  }, [replaceParams, tab, approvedTab, status, role, simMissing, debounced, page]);
+
+  /* ------------------------------------------------------------ loading */
 
   const load = useCallback(async () => {
     abort.current?.abort();
@@ -135,12 +231,22 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
     setError(null);
 
     try {
-      setData(
-        await telecallingApi.listEmployees(
-          { page, pageSize: PAGE_SIZE, role, approval: tab, q: debounced || undefined },
-          controller.signal,
-        ),
+      const result = await telecallingApi.listEmployees(
+        {
+          page,
+          pageSize: PAGE_SIZE,
+          role,
+          approval: tab,
+          active: approvedTab && status !== 'all' ? status === 'active' : undefined,
+          companySim: approvedTab && simMissing ? 'missing' : undefined,
+          q: debounced || undefined,
+        },
+        controller.signal,
       );
+      setData(result);
+      // A page past the end — an approval just emptied it, or the address is older than
+      // the list — comes back as the last page. The page follows, so the address matches.
+      if (result.page !== page && !controller.signal.aborted) setPage(result.page);
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return;
       if (caught instanceof ApiError && caught.status === 401) {
@@ -149,9 +255,10 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
       }
       setError(caught instanceof ApiError ? caught.message : 'Could not load employees.');
     } finally {
-      setLoading(false);
+      // An aborted request's `finally` must not clear the spinner of the one replacing it.
+      if (abort.current === controller) setLoading(false);
     }
-  }, [page, role, tab, debounced, onUnauthorized]);
+  }, [page, role, tab, approvedTab, status, simMissing, debounced, onUnauthorized]);
 
   useEffect(() => {
     void load();
@@ -178,6 +285,18 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
   }, [refreshPendingCount]);
 
   useEffect(() => () => abort.current?.abort(), []);
+
+  /** Puts a changed employee back into the list in place. */
+  const patchRow = useCallback((updated: Employee) => {
+    setData((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.map((row) => (row.id === updated.id ? updated : row)),
+          }
+        : current,
+    );
+  }, []);
 
   /* ------------------------------------------------ registration approval */
 
@@ -220,8 +339,11 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
         return;
       }
 
+      // A company number that belongs to someone else comes back against the field.
       setError(
-        caught instanceof ApiError ? caught.message : 'Could not update that registration.',
+        caught instanceof ApiError
+          ? (caught.fieldErrors.companyPhone ?? caught.message)
+          : 'Could not update that registration.',
       );
     } finally {
       setBusyId(null);
@@ -233,15 +355,38 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
      * Confirmed because it grants access to customer personal data: an approved
      * telecaller can sign in and read the phone numbers, addresses and call history of
      * every lead assigned to them.
+     *
+     * An applicant from an older app build may have no company SIM number on record, and
+     * the server will not approve without one — incoming calls are only ever counted from
+     * that line. Asking for it here, in the same step, saves a refusal and a second try.
      */
-    const confirmed = window.confirm(
-      `Approve ${employee.name} (${employee.email})? They will be able to sign in to the mobile app immediately and see the leads assigned to them.`,
-    );
-    if (!confirmed) return;
+    let companyPhone: string | undefined;
+
+    if (employee.companyPhone === null) {
+      const answer = window.prompt(
+        `Approve ${employee.name} (${employee.email})? They will be able to sign in to the mobile app immediately and see the leads assigned to them.\n\nFirst enter their company SIM number. Check it against the SIM cards the company issued.`,
+        '',
+      );
+      if (answer === null) return;
+
+      const key = companyPhoneKey(answer);
+      if (key === null) {
+        setError(
+          `Enter a 10-digit mobile number for ${employee.name}'s company SIM, then approve again.`,
+        );
+        return;
+      }
+      companyPhone = `+91${key}`;
+    } else {
+      const confirmed = window.confirm(
+        `Approve ${employee.name} (${employee.email}) with the company SIM ${formatCompanyPhone(employee.companyPhone)}? Check the number against the SIM cards the company issued.\n\nThey will be able to sign in to the mobile app immediately and see the leads assigned to them.`,
+      );
+      if (!confirmed) return;
+    }
 
     await decide(
       employee,
-      () => telecallingApi.approveRegistration(employee.id),
+      () => telecallingApi.approveRegistration(employee.id, companyPhone),
       `${employee.name} approved. They can sign in to the mobile app now.`,
     );
   };
@@ -289,6 +434,22 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
     if (!/^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(form.email.trim())) {
       localErrors.email = 'Enter a valid email address.';
     }
+
+    /*
+     * The company SIM is required for a telecaller: their incoming calls are recorded
+     * only when they reach this number, so a telecaller without one has none recorded at
+     * all. Other roles may have one. Checked here with the server's own rule so a typo is
+     * named before the round trip; the server checks again and also refuses a number
+     * another employee already holds.
+     */
+    const companyText = form.companyPhone.trim();
+    const companyKey = companyText ? companyPhoneKey(companyText) : null;
+    if (form.role === 'telecaller' && !companyText) {
+      localErrors.companyPhone = 'Enter the company SIM number for this telecaller.';
+    } else if (companyText && companyKey === null) {
+      localErrors.companyPhone = 'Enter a 10-digit mobile number.';
+    }
+
     // The server requires twelve; checking here saves a round trip and says why.
     if (form.password.length < 12) localErrors.password = 'Use at least 12 characters.';
 
@@ -304,6 +465,7 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
         name: form.name.trim(),
         email: form.email.trim().toLowerCase(),
         phone: form.phone.trim() || null,
+        companyPhone: companyKey !== null ? `+91${companyKey}` : null,
         password: form.password,
         role: form.role,
       });
@@ -327,39 +489,32 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
     }
   };
 
-  const setActive = async (employee: Employee, isActive: boolean) => {
-    if (!isActive) {
-      /**
-       * Confirmed, because it is not only a flag: the server revokes every mobile session
-       * the employee holds. Someone mid-shift is signed out of the app, which is the
-       * intent when offboarding and a surprise otherwise.
-       */
-      const confirmed = window.confirm(
-        `Deactivate ${employee.name}? They will be signed out of the mobile app immediately and cannot receive new leads. Their existing leads stay assigned to them until you reassign them.`,
-      );
-      if (!confirmed) return;
-    }
-
+  /**
+   * Reactivation stays a single click; deactivation goes through the dialog, which deals
+   * with the follow-ups the server would otherwise refuse it over.
+   */
+  const reactivate = async (employee: Employee) => {
     setBusyId(employee.id);
     setError(null);
     setNotice(null);
 
     try {
-      const updated = await telecallingApi.updateEmployee(employee.id, { isActive });
-      setData((current) =>
-        current
-          ? {
-              ...current,
-              items: current.items.map((row) => (row.id === updated.id ? updated : row)),
-            }
-          : current,
-      );
-      setNotice(
-        isActive ? `${updated.name} reactivated.` : `${updated.name} deactivated and signed out.`,
-      );
+      const updated = await telecallingApi.updateEmployee(employee.id, { isActive: true });
+      patchRow(updated);
+      setNotice(`${updated.name} reactivated. They can sign in to the mobile app again.`);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) return onUnauthorized();
-      setError(caught instanceof ApiError ? caught.message : 'Could not update the employee.');
+      if (caught instanceof ApiError && caught.status === 403) {
+        setError('Only an administrator can reactivate employees.');
+        return;
+      }
+      // Their company number may have been given to someone since: that comes back
+      // against the field, with the holder named.
+      setError(
+        caught instanceof ApiError
+          ? (caught.fieldErrors.companyPhone ?? caught.message)
+          : 'Could not reactivate the employee.',
+      );
     } finally {
       setBusyId(null);
     }
@@ -371,14 +526,7 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
 
     try {
       const updated = await telecallingApi.updateEmployee(employee.id, { role: next });
-      setData((current) =>
-        current
-          ? {
-              ...current,
-              items: current.items.map((row) => (row.id === updated.id ? updated : row)),
-            }
-          : current,
-      );
+      patchRow(updated);
       setNotice(`${updated.name} is now ${EMPLOYEE_ROLE_LABELS[updated.role]}.`);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) return onUnauthorized();
@@ -419,47 +567,103 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
     }
   };
 
-  const handover = async (employee: Employee) => {
-    if (!data) return;
-
-    const candidates = data.items.filter((row) => row.isActive && row.id !== employee.id);
-
-    if (candidates.length === 0) {
-      setError('There is no other active employee to hand the follow-ups to.');
-      return;
-    }
-
+  /**
+   * Sets, changes or removes the company SIM number.
+   *
+   * A prompt, like Reset password: one value, and the server's answer — a number already
+   * held by someone else is refused, with the holder named — shows in the banner above.
+   * Changing it clears the SIM their phone confirmed, so the app asks them to choose
+   * their company SIM again.
+   */
+  const editCompanyNumber = async (employee: Employee) => {
+    const current = employee.companyPhone ? formatCompanyPhone(employee.companyPhone) : '';
     const answer = window.prompt(
-      `Move ${employee.name}'s pending follow-ups to which employee? Enter the employee code.\n\n${candidates
-        .map((row) => `${row.employeeCode} — ${row.name}`)
-        .join('\n')}`,
+      `${employee.name}'s company SIM number — the SIM card the company issued them. Incoming calls are recorded only when they reach this number.\n\nChanging it asks them to choose their company SIM again in the app. Leave it blank to remove the number.`,
+      current,
     );
 
     if (answer === null) return;
 
-    const target = candidates.find(
-      (row) => row.employeeCode.toLowerCase() === answer.trim().toLowerCase(),
-    );
+    const trimmed = answer.trim();
+    let companyPhone: string | null;
 
-    if (!target) {
-      setError('That employee code did not match anyone active.');
-      return;
+    if (trimmed === '') {
+      if (employee.companyPhone === null) return;
+
+      const confirmed = window.confirm(
+        `Remove ${employee.name}'s company number?${
+          employee.role === 'telecaller'
+            ? ' Their incoming calls will not be recorded until a number is added again.'
+            : ''
+        }`,
+      );
+      if (!confirmed) return;
+      companyPhone = null;
+    } else {
+      const key = companyPhoneKey(trimmed);
+      if (key === null) {
+        setError(`Enter a 10-digit mobile number for ${employee.name}'s company SIM.`);
+        return;
+      }
+      companyPhone = `+91${key}`;
+      if (companyPhone === employee.companyPhone) return;
     }
 
     setBusyId(employee.id);
     setError(null);
+    setNotice(null);
 
     try {
-      const result = await telecallingApi.handoverFollowUps(employee.id, target.id);
+      const updated = await telecallingApi.updateEmployee(employee.id, { companyPhone });
+      patchRow(updated);
       setNotice(
-        `Moved ${result.moved} pending follow-up${result.moved === 1 ? '' : 's'} from ${employee.name} to ${target.name}.`,
+        updated.companyPhone
+          ? `${updated.name}'s company number is now ${formatCompanyPhone(updated.companyPhone)}. The app will ask them to choose their company SIM again.`
+          : `${updated.name}'s company number was removed.`,
       );
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) return onUnauthorized();
-      setError(caught instanceof ApiError ? caught.message : 'Could not move the follow-ups.');
+      if (caught instanceof ApiError && caught.status === 403) {
+        setError('Only an administrator can change an employee’s company number.');
+        return;
+      }
+      setError(
+        caught instanceof ApiError
+          ? (caught.fieldErrors.companyPhone ?? caught.message)
+          : 'Could not save the company number.',
+      );
     } finally {
       setBusyId(null);
     }
+  };
+
+  const closeManaging = useCallback((summary: string | null) => {
+    setManaging(null);
+    if (summary) setNotice(summary);
+  }, []);
+
+  const handleDeactivated = useCallback(
+    (updated: Employee, message: string) => {
+      setManaging(null);
+      setError(null);
+      patchRow(updated);
+      setNotice(message);
+    },
+    [patchRow],
+  );
+
+  /* ------------------------------------------------------------- render */
+
+  const filtered =
+    debounced !== '' || role !== 'all' || (approvedTab && (status !== 'all' || simMissing));
+
+  const clearFilters = () => {
+    setSearch('');
+    setDebounced('');
+    setRole('all');
+    setStatus('all');
+    setSimMissing(false);
+    setPage(1);
   };
 
   return (
@@ -473,7 +677,11 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
               role="tab"
               className="admin-tab"
               aria-selected={tab === item.key}
-              onClick={() => setTab(item.key)}
+              onClick={() => {
+                if (item.key === tab) return;
+                setTab(item.key);
+                setPage(1);
+              }}
             >
               {item.label}
               {/*
@@ -512,7 +720,10 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
               id="tc-emp-role"
               className="select"
               value={role}
-              onChange={(event) => setRole(event.target.value as EmployeeRole | 'all')}
+              onChange={(event) => {
+                setRole(event.target.value as EmployeeRole | 'all');
+                setPage(1);
+              }}
             >
               <option value="all">All roles</option>
               {EMPLOYEE_ROLES.map((value) => (
@@ -522,6 +733,47 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
               ))}
             </select>
           </div>
+
+          {approvedTab ? (
+            <div className="field">
+              <label className="field__label" htmlFor="tc-emp-status">
+                Status
+              </label>
+              <select
+                id="tc-emp-status"
+                className="select"
+                value={status}
+                onChange={(event) => {
+                  setStatus(event.target.value as StatusFilter);
+                  setPage(1);
+                }}
+              >
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="inactive">Deactivated</option>
+              </select>
+            </div>
+          ) : null}
+
+          {approvedTab ? (
+            <div className="field">
+              <label className="field__label" htmlFor="tc-emp-sim">
+                Company SIM
+              </label>
+              <select
+                id="tc-emp-sim"
+                className="select"
+                value={simMissing ? 'missing' : 'any'}
+                onChange={(event) => {
+                  setSimMissing(event.target.value === 'missing');
+                  setPage(1);
+                }}
+              >
+                <option value="any">Any</option>
+                <option value="missing">Number missing or SIM not set up</option>
+              </select>
+            </div>
+          ) : null}
 
           <button type="button" className="btn btn--outline" onClick={() => void load()}>
             <Icon name="refresh" size={16} />
@@ -533,7 +785,7 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
             queue of people asking for one is a confusing pair of controls to offer
             together, and an admin-created account skips approval entirely.
           */}
-          {tab === 'approved' ? (
+          {approvedTab ? (
             <button
               type="button"
               className="btn btn--primary"
@@ -549,14 +801,14 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
       {error ? <FormAlert variant="error">{error}</FormAlert> : null}
       {notice ? <FormAlert variant="success">{notice}</FormAlert> : null}
 
-      {showForm && tab === 'approved' ? (
+      {showForm && approvedTab ? (
         <div className="tc-card tc-form">
           <h3 className="tc-section-title" style={{ marginTop: 0 }}>
             New employee
           </h3>
 
           <div className="tc-form__grid">
-            <div className="field">
+            <div className={`field${formErrors.name ? ' field--invalid' : ''}`}>
               <label className="field__label" htmlFor="tc-new-name">
                 Full name
               </label>
@@ -569,7 +821,7 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
               {formErrors.name ? <p className="field__error">{formErrors.name}</p> : null}
             </div>
 
-            <div className="field">
+            <div className={`field${formErrors.email ? ' field--invalid' : ''}`}>
               <label className="field__label" htmlFor="tc-new-email">
                 Email address
               </label>
@@ -582,18 +834,6 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
                 onChange={(event) => setForm({ ...form, email: event.target.value })}
               />
               {formErrors.email ? <p className="field__error">{formErrors.email}</p> : null}
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="tc-new-phone">
-                Phone (optional)
-              </label>
-              <input
-                id="tc-new-phone"
-                className="input"
-                value={form.phone}
-                onChange={(event) => setForm({ ...form, phone: event.target.value })}
-              />
             </div>
 
             <div className="field">
@@ -614,7 +854,54 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
               </select>
             </div>
 
-            <div className="field">
+            <div className={`field${formErrors.companyPhone ? ' field--invalid' : ''}`}>
+              <label className="field__label" htmlFor="tc-new-company-phone">
+                Company SIM number
+                {form.role === 'telecaller' ? (
+                  <span className="field__required" aria-hidden="true">
+                    *
+                  </span>
+                ) : (
+                  ' (optional)'
+                )}
+              </label>
+              <input
+                id="tc-new-company-phone"
+                className="input"
+                type="tel"
+                inputMode="tel"
+                autoComplete="off"
+                placeholder="98765 43210"
+                required={form.role === 'telecaller'}
+                aria-describedby="tc-new-company-phone-hint"
+                value={form.companyPhone}
+                onChange={(event) => setForm({ ...form, companyPhone: event.target.value })}
+              />
+              {formErrors.companyPhone ? (
+                <p className="field__error">{formErrors.companyPhone}</p>
+              ) : (
+                <p className="field__hint" id="tc-new-company-phone-hint">
+                  The SIM card the company issued them. Incoming calls are recorded only when
+                  they reach this number{form.role === 'telecaller' ? '.' : ' — needed for telecallers.'}
+                </p>
+              )}
+            </div>
+
+            <div className={`field${formErrors.phone ? ' field--invalid' : ''}`}>
+              <label className="field__label" htmlFor="tc-new-phone">
+                Personal phone (optional)
+              </label>
+              <input
+                id="tc-new-phone"
+                className="input"
+                type="tel"
+                value={form.phone}
+                onChange={(event) => setForm({ ...form, phone: event.target.value })}
+              />
+              {formErrors.phone ? <p className="field__error">{formErrors.phone}</p> : null}
+            </div>
+
+            <div className={`field${formErrors.password ? ' field--invalid' : ''}`}>
               <label className="field__label" htmlFor="tc-new-password">
                 Password
               </label>
@@ -648,283 +935,341 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
             className="btn btn--primary"
             onClick={() => void create()}
             disabled={creating}
+            aria-busy={creating || undefined}
           >
-            {creating ? 'Adding…' : 'Add employee'}
+            {creating ? <ButtonSpinner /> : null}
+            Add employee
           </button>
         </div>
       ) : null}
 
-      {loading && !data ? (
-        <TableSkeleton />
-      ) : !data || data.items.length === 0 ? (
-        tab === 'pending' ? (
-          <EmptyPanel
-            title="Nobody is waiting for approval"
-            message="When an employee signs up in the mobile app they appear here, and cannot sign in until you approve them."
-          />
-        ) : tab === 'rejected' ? (
-          <EmptyPanel
-            title="No rejected registrations"
-            message="Registrations you turn down are kept here, so one refused by mistake can be reopened rather than signed up again."
-          />
-        ) : (
-          <EmptyPanel
-            title="No employees"
-            message="Add the first telecaller to start assigning leads."
-            actionLabel="Add employee"
-            onAction={() => setShowForm(true)}
-          />
-        )
-      ) : tab === 'pending' ? (
-        /* ------------------------------------------------ the signup queue */
-        <DataTable
-          rows={data.items}
-          rowKey={(employee) => employee.id}
-          rowBusy={(employee) => busyId === employee.id}
-          minWidth="58rem"
-          caption="Employees who have signed up in the mobile app and are waiting for approval"
-          columns={[
-            {
-              key: 'applicant',
-              header: 'Applicant',
-              render: (employee) => (
-                <CellStack primary={employee.name} secondary={employee.email}>
-                  <span className="tc-muted tc-mono">{employee.employeeCode}</span>
-                </CellStack>
-              ),
-            },
-            {
-              key: 'phone',
-              header: 'Phone',
-              width: '10rem',
-              nowrap: true,
-              render: (employee) => employee.phone ?? <span className="tc-muted">—</span>,
-            },
-            {
-              key: 'registered',
-              header: 'Signed up',
-              width: '11rem',
-              nowrap: true,
-              render: (employee) => (
-                <CellStack
-                  primary={formatDateTime(employee.registeredAt)}
-                  /*
-                    The queue is ordered oldest-first server-side, so the person who has
-                    been waiting longest is at the top of page one.
-                  */
-                  secondary={waitingFor(employee.registeredAt)}
-                />
-              ),
-            },
-            {
-              key: 'actions',
-              header: 'Actions',
-              align: 'end',
-              width: '15rem',
-              nowrap: true,
-              render: (employee) => (
-                <CellActions>
-                  <button
-                    type="button"
-                    className="btn btn--primary btn--sm"
-                    disabled={busyId === employee.id}
-                    onClick={() => void approve(employee)}
-                  >
-                    <Icon name="check" size={15} />
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    disabled={busyId === employee.id}
-                    onClick={() => void reject(employee)}
-                  >
-                    Reject
-                  </button>
-                </CellActions>
-              ),
-            },
-          ]}
-        />
-      ) : tab === 'rejected' ? (
-        /* ------------------------------------------ turned down, reopenable */
-        <DataTable
-          rows={data.items}
-          rowKey={(employee) => employee.id}
-          rowBusy={(employee) => busyId === employee.id}
-          minWidth="58rem"
-          caption="Rejected registrations, which can be reopened"
-          columns={[
-            {
-              key: 'applicant',
-              header: 'Applicant',
-              width: '16rem',
-              render: (employee) => (
-                <CellStack primary={employee.name} secondary={employee.email}>
-                  <span className="tc-muted tc-mono">{employee.employeeCode}</span>
-                </CellStack>
-              ),
-            },
-            {
-              key: 'decided',
-              header: 'Decided',
-              width: '11rem',
-              nowrap: true,
-              /*
-                `approvedAt` despite the name: the server writes that column on rejection
-                too, so on these rows it is the decision time. Labelled "Decided" rather
-                than "Approved" for that reason.
-              */
-              render: (employee) => formatDateTime(employee.approvedAt),
-            },
-            {
-              key: 'reason',
-              header: 'Reason given',
-              render: (employee) =>
-                employee.rejectionReason ?? (
-                  <span className="tc-muted">No reason recorded</span>
-                ),
-            },
-            {
-              key: 'actions',
-              header: 'Actions',
-              align: 'end',
-              width: '10rem',
-              nowrap: true,
-              render: (employee) => (
-                <CellActions>
-                  {/*
-                    Reopen, not Approve. The server refuses approving a rejected
-                    registration outright and says to reopen it first, so offering
-                    Approve here would be a button that always errors.
-                  */}
-                  <button
-                    type="button"
-                    className="btn btn--outline btn--sm"
-                    disabled={busyId === employee.id}
-                    onClick={() => void reopen(employee)}
-                  >
-                    <Icon name="refresh" size={15} />
-                    Reopen
-                  </button>
-                </CellActions>
-              ),
-            },
-          ]}
-        />
+      {data === null ? (
+        loading ? (
+          <TableSkeleton />
+        ) : null
       ) : (
-        <DataTable
-          rows={data.items}
-          rowKey={(employee) => employee.id}
-          rowBusy={(employee) => busyId === employee.id}
-          minWidth="66rem"
-          caption="Employees, with role, status and administrative actions"
-          columns={[
-            {
-              key: 'employee',
-              header: 'Employee',
-              render: (employee) => (
-                <CellStack primary={employee.name} secondary={employee.email}>
-                  <span className="tc-muted tc-mono">{employee.employeeCode}</span>
-                  {employee.phone ? <span className="tc-muted">{employee.phone}</span> : null}
-                </CellStack>
-              ),
-            },
-            {
-              key: 'role',
-              header: 'Role',
-              width: '10rem',
-              render: (employee) => (
-                <select
-                  className="select select--sm"
-                  value={employee.role}
-                  disabled={busyId === employee.id}
-                  onChange={(event) =>
-                    void changeRole(employee, event.target.value as EmployeeRole)
-                  }
-                  aria-label={`Change role for ${employee.name}`}
-                >
-                  {EMPLOYEE_ROLES.map((value) => (
-                    <option key={value} value={value}>
-                      {EMPLOYEE_ROLE_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              ),
-            },
-            {
-              key: 'status',
-              header: 'Status',
-              width: '9rem',
-              render: (employee) => (
-                <CellStack
-                  primary={
-                    employee.isActive ? (
-                      <Tag tone="good">Active</Tag>
-                    ) : (
-                      <Tag tone="bad">Deactivated</Tag>
-                    )
-                  }
-                  secondary={humanise(employee.availability)}
-                />
-              ),
-            },
-            {
-              key: 'lastLogin',
-              header: 'Last signed in',
-              width: '10rem',
-              nowrap: true,
-              render: (employee) => formatDateTime(employee.lastLoginAt),
-            },
-            {
-              key: 'actions',
-              header: 'Actions',
-              align: 'end',
-              width: '20rem',
-              render: (employee) => (
-                <CellActions>
-                  <button
-                    type="button"
-                    className="btn btn--outline btn--sm"
-                    disabled={busyId === employee.id}
-                    onClick={() => void resetPassword(employee)}
-                  >
-                    Reset password
-                  </button>
-
-                  <button
-                    type="button"
-                    className="btn btn--outline btn--sm"
-                    disabled={busyId === employee.id}
-                    onClick={() => void handover(employee)}
-                  >
-                    Move follow-ups
-                  </button>
-
-                  {employee.isActive ? (
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
+        <LoadingOverlay busy={loading}>
+          {data.items.length === 0 ? (
+            filtered ? (
+              <EmptyPanel
+                title="Nobody matches these filters"
+                message="Try another search, or clear the filters to see everyone on this tab."
+                actionLabel="Clear filters"
+                onAction={clearFilters}
+              />
+            ) : tab === 'pending' ? (
+              <EmptyPanel
+                title="Nobody is waiting for approval"
+                message="When an employee signs up in the mobile app they appear here, and cannot sign in until you approve them."
+              />
+            ) : tab === 'rejected' ? (
+              <EmptyPanel
+                title="No rejected registrations"
+                message="Registrations you turn down are kept here, so one refused by mistake can be reopened rather than signed up again."
+              />
+            ) : (
+              <EmptyPanel
+                title="No employees"
+                message="Add the first telecaller to start assigning leads."
+                actionLabel="Add employee"
+                onAction={() => setShowForm(true)}
+              />
+            )
+          ) : tab === 'pending' ? (
+            /* ------------------------------------------------ the signup queue */
+            <DataTable
+              rows={data.items}
+              rowKey={(employee) => employee.id}
+              rowBusy={(employee) => busyId === employee.id}
+              minWidth="60rem"
+              caption="Employees who have signed up in the mobile app and are waiting for approval"
+              columns={[
+                {
+                  key: 'applicant',
+                  header: 'Applicant',
+                  render: (employee) => (
+                    <CellStack primary={employee.name} secondary={employee.email}>
+                      <span className="tc-muted tc-mono">{employee.employeeCode}</span>
+                    </CellStack>
+                  ),
+                },
+                {
+                  key: 'companySim',
+                  header: 'Company SIM',
+                  width: '12rem',
+                  render: (employee) => (
+                    <CellStack
+                      primary={
+                        employee.companyPhone ? (
+                          formatCompanyPhone(employee.companyPhone)
+                        ) : (
+                          /*
+                            Older app builds did not ask for it. Approve asks for it, so
+                            this is a warning about the next step, not a dead end.
+                          */
+                          <Tag tone="warn">Not given</Tag>
+                        )
+                      }
+                      secondary={employee.phone ? `Personal: ${employee.phone}` : null}
+                    />
+                  ),
+                },
+                {
+                  key: 'registered',
+                  header: 'Signed up',
+                  width: '11rem',
+                  nowrap: true,
+                  render: (employee) => (
+                    <CellStack
+                      primary={formatDateTime(employee.registeredAt)}
+                      /*
+                        The queue is ordered oldest-first server-side, so the person who has
+                        been waiting longest is at the top of page one.
+                      */
+                      secondary={waitingFor(employee.registeredAt)}
+                    />
+                  ),
+                },
+                {
+                  key: 'actions',
+                  header: 'Actions',
+                  align: 'end',
+                  width: '15rem',
+                  nowrap: true,
+                  render: (employee) => (
+                    <CellActions>
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        disabled={busyId === employee.id}
+                        onClick={() => void approve(employee)}
+                      >
+                        <Icon name="check" size={15} />
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        disabled={busyId === employee.id}
+                        onClick={() => void reject(employee)}
+                      >
+                        Reject
+                      </button>
+                    </CellActions>
+                  ),
+                },
+              ]}
+            />
+          ) : tab === 'rejected' ? (
+            /* ------------------------------------------ turned down, reopenable */
+            <DataTable
+              rows={data.items}
+              rowKey={(employee) => employee.id}
+              rowBusy={(employee) => busyId === employee.id}
+              minWidth="58rem"
+              caption="Rejected registrations, which can be reopened"
+              columns={[
+                {
+                  key: 'applicant',
+                  header: 'Applicant',
+                  width: '16rem',
+                  render: (employee) => (
+                    <CellStack primary={employee.name} secondary={employee.email}>
+                      <span className="tc-muted tc-mono">{employee.employeeCode}</span>
+                    </CellStack>
+                  ),
+                },
+                {
+                  key: 'decided',
+                  header: 'Decided',
+                  width: '11rem',
+                  nowrap: true,
+                  /*
+                    `approvedAt` despite the name: the server writes that column on rejection
+                    too, so on these rows it is the decision time. Labelled "Decided" rather
+                    than "Approved" for that reason.
+                  */
+                  render: (employee) => formatDateTime(employee.approvedAt),
+                },
+                {
+                  key: 'reason',
+                  header: 'Reason given',
+                  render: (employee) =>
+                    employee.rejectionReason ?? (
+                      <span className="tc-muted">No reason recorded</span>
+                    ),
+                },
+                {
+                  key: 'actions',
+                  header: 'Actions',
+                  align: 'end',
+                  width: '10rem',
+                  nowrap: true,
+                  render: (employee) => (
+                    <CellActions>
+                      {/*
+                        Reopen, not Approve. The server refuses approving a rejected
+                        registration outright and says to reopen it first, so offering
+                        Approve here would be a button that always errors.
+                      */}
+                      <button
+                        type="button"
+                        className="btn btn--outline btn--sm"
+                        disabled={busyId === employee.id}
+                        onClick={() => void reopen(employee)}
+                      >
+                        <Icon name="refresh" size={15} />
+                        Reopen
+                      </button>
+                    </CellActions>
+                  ),
+                },
+              ]}
+            />
+          ) : (
+            <DataTable
+              rows={data.items}
+              rowKey={(employee) => employee.id}
+              rowBusy={(employee) => busyId === employee.id}
+              /*
+               * Fits beside the sidebar on a 1440px screen with the actions in view: they
+               * stack one per line, about as tall as the employee's own details beside them.
+               */
+              minWidth="68rem"
+              caption="Employees, with company SIM, role, status and administrative actions"
+              columns={[
+                {
+                  key: 'employee',
+                  header: 'Employee',
+                  render: (employee) => (
+                    <CellStack primary={employee.name} secondary={employee.email}>
+                      <span className="tc-muted tc-mono">{employee.employeeCode}</span>
+                      {employee.phone ? (
+                        <span className="tc-muted">Personal: {employee.phone}</span>
+                      ) : null}
+                    </CellStack>
+                  ),
+                },
+                {
+                  key: 'companySim',
+                  header: 'Company SIM',
+                  width: '14rem',
+                  render: (employee) => (
+                    <CompanySimCell
+                      employee={employee}
+                      busy={busyId === employee.id}
+                      onEdit={() => void editCompanyNumber(employee)}
+                    />
+                  ),
+                },
+                {
+                  key: 'role',
+                  header: 'Role',
+                  // Wide enough for the select to show "Administrator" whole.
+                  width: '11.5rem',
+                  render: (employee) => (
+                    <select
+                      className="select select--sm"
+                      value={employee.role}
                       disabled={busyId === employee.id}
-                      onClick={() => void setActive(employee, false)}
+                      onChange={(event) =>
+                        void changeRole(employee, event.target.value as EmployeeRole)
+                      }
+                      aria-label={`Change role for ${employee.name}`}
                     >
-                      Deactivate
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn btn--outline btn--sm"
-                      disabled={busyId === employee.id}
-                      onClick={() => void setActive(employee, true)}
-                    >
-                      Reactivate
-                    </button>
-                  )}
-                </CellActions>
-              ),
-            },
-          ]}
-        />
+                      {EMPLOYEE_ROLES.map((value) => (
+                        <option key={value} value={value}>
+                          {EMPLOYEE_ROLE_LABELS[value]}
+                        </option>
+                      ))}
+                    </select>
+                  ),
+                },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  width: '8.5rem',
+                  render: (employee) => (
+                    <CellStack
+                      primary={
+                        employee.isActive ? (
+                          <Tag tone="good">Active</Tag>
+                        ) : (
+                          <Tag tone="bad">Deactivated</Tag>
+                        )
+                      }
+                      secondary={humanise(employee.availability)}
+                    />
+                  ),
+                },
+                {
+                  key: 'lastLogin',
+                  header: 'Last signed in',
+                  width: '8rem',
+                  render: (employee) => <DateTimeCell value={employee.lastLoginAt} />,
+                },
+                {
+                  key: 'actions',
+                  header: 'Actions',
+                  align: 'end',
+                  // One button per line; wide enough that "Move follow-ups" stays on one.
+                  width: '12rem',
+                  render: (employee) => (
+                    <CellActions>
+                      <button
+                        type="button"
+                        className="btn btn--outline btn--sm"
+                        disabled={busyId === employee.id}
+                        onClick={() => void resetPassword(employee)}
+                      >
+                        Reset password
+                      </button>
+
+                      {/*
+                        Offered for deactivated employees too: follow-ups left on someone
+                        who has gone are exactly the ones that need moving.
+                      */}
+                      <button
+                        type="button"
+                        className="btn btn--outline btn--sm"
+                        disabled={busyId === employee.id}
+                        onClick={() => {
+                          setNotice(null);
+                          setManaging({ employee, mode: 'move' });
+                        }}
+                      >
+                        Move follow-ups
+                      </button>
+
+                      {employee.isActive ? (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          disabled={busyId === employee.id}
+                          onClick={() => {
+                            setNotice(null);
+                            setManaging({ employee, mode: 'deactivate' });
+                          }}
+                        >
+                          Deactivate
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn--outline btn--sm"
+                          disabled={busyId === employee.id}
+                          onClick={() => void reactivate(employee)}
+                        >
+                          Reactivate
+                        </button>
+                      )}
+                    </CellActions>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </LoadingOverlay>
       )}
 
       {data ? (
@@ -932,11 +1277,89 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
           page={data.page}
           totalPages={data.totalPages}
           total={data.total}
-          noun={tab === 'approved' ? 'employee' : 'registration'}
+          noun={approvedTab ? 'employee' : 'registration'}
           busy={loading}
           onChange={setPage}
         />
       ) : null}
+
+      {managing ? (
+        <DeactivateEmployeeDialog
+          key={`${managing.mode}-${managing.employee.id}`}
+          employee={managing.employee}
+          mode={managing.mode}
+          onClose={closeManaging}
+          onDeactivated={handleDeactivated}
+          onUnauthorized={onUnauthorized}
+        />
+      ) : null}
     </>
+  );
+}
+
+/**
+ * The company number and what the employee's phone last said about the SIM.
+ *
+ * "SIM not set up" is the state that silently loses incoming calls — the number is on
+ * record but no phone has confirmed which SIM holds it — so it is the one in warning
+ * colour. A telecaller with no number at all is the same problem one step earlier.
+ */
+function CompanySimCell({
+  employee,
+  busy,
+  onEdit,
+}: {
+  employee: Employee;
+  busy: boolean;
+  /** Adds or changes the number — here, beside it, rather than among the row's actions. */
+  onEdit: () => void;
+}) {
+  const edit = (
+    <button type="button" className="tc-text-button" disabled={busy} onClick={onEdit}>
+      {employee.companyPhone ? 'Change number' : 'Add number'}
+    </button>
+  );
+
+  if (!employee.companyPhone) {
+    return employee.role === 'telecaller' ? (
+      <CellStack primary={<span className="tc-muted">No company number</span>}>
+        <Tag tone="warn">Incoming calls not recorded</Tag>
+        {edit}
+      </CellStack>
+    ) : (
+      <CellStack primary={<span className="tc-muted">—</span>}>{edit}</CellStack>
+    );
+  }
+
+  return (
+    <CellStack primary={formatCompanyPhone(employee.companyPhone)}>
+      <SimStatus sim={employee.companySim} />
+      {edit}
+    </CellStack>
+  );
+}
+
+function SimStatus({ sim }: { sim: CompanySim | null }) {
+  if (sim === null) return <Tag tone="warn">SIM not set up</Tag>;
+
+  const reported = `Reported ${formatDateTime(sim.at)}${sim.device ? ` from ${sim.device}` : ''}`;
+
+  if (sim.status === 'declined') {
+    // The employee said the company SIM is not in this phone, so nothing can be read from it.
+    return (
+      <span title={reported}>
+        <Tag>Not on phone</Tag>
+      </span>
+    );
+  }
+
+  const details = [sim.label, sim.slot !== null ? `SIM ${sim.slot + 1}` : null]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <span title={reported}>
+      <Tag tone="good">SIM confirmed{details ? ` · ${details}` : ''}</Tag>
+    </span>
   );
 }

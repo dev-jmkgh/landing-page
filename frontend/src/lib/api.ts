@@ -52,18 +52,39 @@ export const API_NOT_CONFIGURED_MESSAGE =
 
 export type FieldErrors = Record<string, string>;
 
+/**
+ * Structured context the server attached to an error.
+ *
+ * Most errors carry none. A conflict does, when the screen needs more than the sentence
+ * to recover: the follow-up a move collided with, or how many follow-ups are still
+ * blocking a deactivation. The shape is per error `code`, so callers narrow it there.
+ */
+export type ErrorDetails = Record<string, unknown>;
+
 /** Normalised transport/validation error surfaced to the UI. */
 export class ApiError extends Error {
   readonly status: number;
   readonly fieldErrors: FieldErrors;
   readonly code?: string;
+  readonly details?: ErrorDetails;
 
-  constructor(message: string, status: number, fieldErrors: FieldErrors = {}, code?: string) {
+  /**
+   * `details` is the fifth argument, after `code`, so every existing `new ApiError(...)`
+   * call — four arguments or fewer — compiles and behaves exactly as it did.
+   */
+  constructor(
+    message: string,
+    status: number,
+    fieldErrors: FieldErrors = {},
+    code?: string,
+    details?: ErrorDetails,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.fieldErrors = fieldErrors;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -126,38 +147,106 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     if (token) headers['X-CSRF-Token'] = token;
   }
 
-  let response: Response;
+  // Admin requests are counted for the global loading bar (components/admin/Loader.tsx).
+  // Public website requests are not: the bar only exists inside the admin shell.
+  if (authenticated) setActiveRequests(activeRequests + 1);
+
   try {
-    response = await fetch(`${apiBaseUrl()}${path}`, {
-      method,
-      headers,
-      body: payload,
-      credentials: authenticated ? 'include' : 'same-origin',
-      signal,
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    throw new ApiError(NETWORK_MESSAGE, 0);
+    let response: Response;
+    try {
+      response = await fetch(`${apiBaseUrl()}${path}`, {
+        method,
+        headers,
+        body: payload,
+        credentials: authenticated ? 'include' : 'same-origin',
+        signal,
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      throw new ApiError(NETWORK_MESSAGE, 0);
+    }
+
+    const isJson = response.headers.get('content-type')?.includes('application/json') ?? false;
+    /*
+     * An abort that lands after the headers but before the body has finished arriving
+     * fails the body read, not `fetch` — and swallowing that turned a cancelled request
+     * into a successful `null`, which the screen then reported as "Could not load…" over
+     * the newer request's correct rows. Rethrow it so callers see an AbortError and
+     * ignore it, as they already do for an abort before the headers.
+     */
+    const data: unknown = isJson
+      ? await response.json().catch((error: unknown) => {
+          if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+            throw error instanceof DOMException ? error : new DOMException('Aborted', 'AbortError');
+          }
+          return null;
+        })
+      : null;
+
+    if (!response.ok) {
+      const errorBody = (data ?? {}) as {
+        message?: string;
+        code?: string;
+        errors?: FieldErrors;
+        details?: unknown;
+      };
+      // Only a plain object is passed on. Anything else is not a shape any screen reads,
+      // and handing it over typed as a record would invite a crash on the first property.
+      const details =
+        typeof errorBody.details === 'object' &&
+        errorBody.details !== null &&
+        !Array.isArray(errorBody.details)
+          ? (errorBody.details as ErrorDetails)
+          : undefined;
+      throw new ApiError(
+        errorBody.message ?? GENERIC_MESSAGE,
+        response.status,
+        errorBody.errors ?? {},
+        errorBody.code,
+        details,
+      );
+    }
+
+    return (data ?? null) as T;
+  } finally {
+    // In `finally`, so an aborted, failed or rejected request can never leave the bar
+    // running forever.
+    if (authenticated) setActiveRequests(activeRequests - 1);
   }
+}
 
-  const isJson = response.headers.get('content-type')?.includes('application/json') ?? false;
-  const data: unknown = isJson ? await response.json().catch(() => null) : null;
+/* -------------------------------------------------------------------------- */
+/* In-flight request tracking                                                  */
+/* -------------------------------------------------------------------------- */
 
-  if (!response.ok) {
-    const errorBody = (data ?? {}) as {
-      message?: string;
-      code?: string;
-      errors?: FieldErrors;
-    };
-    throw new ApiError(
-      errorBody.message ?? GENERIC_MESSAGE,
-      response.status,
-      errorBody.errors ?? {},
-      errorBody.code,
-    );
-  }
+/**
+ * How many authenticated requests are in flight right now.
+ *
+ * Kept here, in the transport, because this is the one place every admin request passes
+ * through — so the global loading bar can never miss one, and no panel has to remember to
+ * report its own. Read through `subscribeToRequests` / `getActiveRequestCount`, which are
+ * shaped for React's `useSyncExternalStore`.
+ */
+let activeRequests = 0;
+const requestListeners = new Set<() => void>();
 
-  return (data ?? null) as T;
+function setActiveRequests(next: number): void {
+  // Never below zero, whatever happens to the bookkeeping.
+  activeRequests = Math.max(0, next);
+  for (const listener of requestListeners) listener();
+}
+
+/** The number of admin requests currently in flight. */
+export function getActiveRequestCount(): number {
+  return activeRequests;
+}
+
+/** Calls `listener` whenever that number changes. Returns the unsubscribe function. */
+export function subscribeToRequests(listener: () => void): () => void {
+  requestListeners.add(listener);
+  return () => {
+    requestListeners.delete(listener);
+  };
 }
 
 /**

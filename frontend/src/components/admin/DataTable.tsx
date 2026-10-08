@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 
 /**
  * The one table in the admin area.
@@ -44,6 +44,21 @@ export type Column<T> = {
   render: (row: T) => ReactNode;
 };
 
+/**
+ * Elements whose own clicks must never be read as "open this row".
+ *
+ * A double-click on the status select, the owner select or the bulk tick box is someone
+ * operating that control twice, not asking for the record. `data-no-row-activate` lets a
+ * cell opt any other element out explicitly.
+ */
+const ROW_ACTIVATION_EXCLUDED =
+  'a, button, input, select, textarea, label, audio, video, summary, [role="button"], [contenteditable="true"], [data-no-row-activate]';
+
+function startsOnControl(event: MouseEvent<HTMLElement>): boolean {
+  const target = event.target;
+  return target instanceof Element && target.closest(ROW_ACTIVATION_EXCLUDED) !== null;
+}
+
 export function DataTable<T>({
   columns,
   rows,
@@ -52,6 +67,8 @@ export function DataTable<T>({
   rowTone,
   minWidth = '46rem',
   caption,
+  onRowDoubleClick,
+  rowTitle,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -67,6 +84,21 @@ export function DataTable<T>({
   minWidth?: string;
   /** Screen-reader description. Visually hidden. */
   caption?: string;
+  /**
+   * Opens the row's record on a double-click.
+   *
+   * A double-click rather than a single click because the dense telecalling tables
+   * already give single clicks to inline controls — status and owner selects, the bulk
+   * tick box — and a row that navigated on every click would fire on all of them.
+   * Opt-in, so every table that does not pass it (RecordsTable included) is unchanged.
+   *
+   * This is a shortcut, never the only way in: a double-click is invisible to a keyboard
+   * and to a screen reader, so a table that uses it must also render a real link to the
+   * same record (the customer name, in the lead tables).
+   */
+  onRowDoubleClick?: (row: T) => void;
+  /** Hover hint for a double-clickable row, e.g. "Double-click to open the lead". */
+  rowTitle?: (row: T) => string | undefined;
 }) {
   return (
     <div className="table-wrap">
@@ -108,6 +140,30 @@ export function DataTable<T>({
                 key={rowKey(row)}
                 aria-busy={rowBusy?.(row) ? true : undefined}
                 data-tone={tone}
+                data-activatable={onRowDoubleClick ? 'true' : undefined}
+                title={onRowDoubleClick ? rowTitle?.(row) : undefined}
+                onMouseDown={
+                  onRowDoubleClick
+                    ? (event) => {
+                        /*
+                         * The second press of a double-click selects the word under the
+                         * pointer, which would flash a highlight across the cell just as
+                         * the record opens. Suppressing that default only for the second
+                         * press keeps an ordinary drag-select working, so a phone number
+                         * can still be copied out of a row.
+                         */
+                        if (event.detail > 1 && !startsOnControl(event)) event.preventDefault();
+                      }
+                    : undefined
+                }
+                onDoubleClick={
+                  onRowDoubleClick
+                    ? (event) => {
+                        if (startsOnControl(event)) return;
+                        onRowDoubleClick(row);
+                      }
+                    : undefined
+                }
               >
                 {columns.map((column) => (
                   <td

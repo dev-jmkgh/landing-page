@@ -2,6 +2,10 @@ import type { Server } from 'node:http';
 import { createApp } from './app';
 import { config } from './config/env';
 import { closePool, verifyConnection } from './db/pool';
+import {
+  startTelecallingReportScheduler,
+  type TelecallingReportScheduler,
+} from './modules/telecalling/reports/dailyReport.scheduler';
 import { ensureStorageReady, storageReport } from './services/storage';
 import { verifyMailer } from './services/mailer';
 import { describeError, logger } from './utils/logger';
@@ -45,12 +49,36 @@ async function start(): Promise<void> {
     process.exit(1);
   });
 
+  /*
+   * The daily telecalling report's clock. Here and never in createApp(), so the e2e
+   * harness and anything else that imports the app get no timers. Whether THIS process
+   * runs it is a per-process switch (on by default only in production); whether a day's
+   * report has gone out is decided by the database, so several processes with it on
+   * still send once. Its timers are unref'd and it never throws.
+   */
+  const reportScheduler: TelecallingReportScheduler | null = config.telecallingReport
+    .schedulerEnabled
+    ? startTelecallingReportScheduler()
+    : null;
+
+  logger.info('Daily telecalling report', {
+    scheduler: reportScheduler ? 'on' : 'off',
+    recipients: config.telecallingReport.recipients.length,
+    recipientSource: 'ADMIN_EMAILS',
+  });
+
   const shutdown = (signal: string) => {
     logger.info(`Received ${signal}, shutting down`);
 
+    // Stop scheduling at once; a report already being sent is allowed to finish, within
+    // the hard exit below, before the pool it writes its outcome through is closed.
+    const schedulerStopped = reportScheduler ? reportScheduler.stop() : Promise.resolve();
+
     server.close(() => {
-      void closePool()
-        .catch((error) => logger.warn('Error closing database pool', describeError(error)))
+      void schedulerStopped
+        .catch((error: unknown) => logger.warn('Error stopping the report scheduler', describeError(error)))
+        .then(() => closePool())
+        .catch((error: unknown) => logger.warn('Error closing database pool', describeError(error)))
         .finally(() => process.exit(0));
     });
 

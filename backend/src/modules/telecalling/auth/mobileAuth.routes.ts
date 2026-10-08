@@ -21,7 +21,12 @@ import {
 } from './emailVerification.service';
 import { findEmployee } from '../employees/employee.repository';
 import { changeOwnPassword } from '../employees/employee.service';
-import { DEVICE_PLATFORMS, optionalPhoneField } from '../shared.schema';
+import {
+  companyPhoneField,
+  companyPhoneKey,
+  DEVICE_PLATFORMS,
+  optionalPhoneField,
+} from '../shared.schema';
 import {
   authenticateEmployee,
   createMobileSession,
@@ -166,15 +171,8 @@ function refusalToError(refusal: SignInRefusal): HttpError {
 /* Self-registration                                                           */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Exported so the e2e harness can assert against the real rule rather than a copy.
- *
- * What this schema REFUSES is the security boundary, and `signupLimiter` allows only
- * five registrations per window — so probing it over HTTP would spend the budget the
- * rest of the suite needs. A copied schema in the test would pass while this one
- * regressed.
- */
-export const signupSchema = z.object({
+/** The sign-up fields, before the company number is resolved — see `signupSchema`. */
+const signupFields = z.object({
   name: z
     .string({ required_error: 'Enter your full name.' })
     .transform((value) => value.replace(/\s+/g, ' ').trim())
@@ -206,6 +204,12 @@ export const signupSchema = z.object({
    */
   phone: optionalPhoneField,
   /*
+   * The company SIM number — required (see the transform below), canonical
+   * `+91XXXXXXXXXX`. Incoming calls count only when they arrive on it, so it is collected
+   * at signup, checked by an administrator at approval, and unique among staff.
+   */
+  companyPhone: companyPhoneField.optional(),
+  /*
    * Twelve, matching admin-created accounts. Not relaxed for self-registration: these
    * accounts reach the same customer data, and a self-chosen password is if anything
    * more likely to be weak than one an administrator generated.
@@ -214,6 +218,43 @@ export const signupSchema = z.object({
     .string({ required_error: 'Choose a password.' })
     .min(12, 'Use at least 12 characters.')
     .max(200),
+});
+
+/**
+ * Exported so the e2e harness can assert against the real rule rather than a copy.
+ *
+ * What this schema REFUSES is the security boundary, and `signupLimiter` allows only
+ * five registrations per window — so probing it over HTTP would spend the budget the
+ * rest of the suite needs. A copied schema in the test would pass while this one
+ * regressed.
+ *
+ * The company number is resolved here, with older app builds in mind. Builds from before
+ * company SIMs have no `companyPhone` field; their one number was
+ * "Phone number (optional)". Their applicants are still in the field, so that number is
+ * taken as the company number when `companyPhone` is absent — the administrator checks
+ * it at approval. Missing from both, the refusal is reported under `phone`, because that
+ * is the field an older sign-up form can show an error beneath. A `companyPhone` that is
+ * present but wrong was already refused under its own name by the field rule.
+ *
+ * `companyPhoneSource` says which field the number came from, so a "number already
+ * registered" refusal later can be put under the field the person actually typed it in.
+ */
+export const signupSchema = signupFields.transform((input, context) => {
+  if (input.companyPhone !== undefined) {
+    return { ...input, companyPhone: input.companyPhone, companyPhoneSource: 'companyPhone' as const };
+  }
+
+  const legacyKey = input.phone ? companyPhoneKey(input.phone) : null;
+  if (legacyKey) {
+    return { ...input, companyPhone: `+91${legacyKey}`, companyPhoneSource: 'phone' as const };
+  }
+
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['phone'],
+    message: input.phone ? 'Enter a 10-digit mobile number.' : 'Enter your company SIM number.',
+  });
+  return z.NEVER;
 });
 
 /**
@@ -236,9 +277,21 @@ mobileAuthRouter.post(
   asyncHandler(async (request, response) => {
     const input = request.body as z.infer<typeof signupSchema>;
 
-    const result = await registerEmployee(input);
+    const result = await registerEmployee({
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      companyPhone: input.companyPhone,
+      password: input.password,
+    });
 
     if (!result.ok) {
+      if (result.reason === 'company_phone_taken') {
+        throw validationFailed({
+          [input.companyPhoneSource]:
+            'This number is already registered to another employee. Check the number, or ask your administrator.',
+        });
+      }
       throw validationFailed({
         email:
           'An account with that email address already exists. Try signing in, or ask your administrator.',

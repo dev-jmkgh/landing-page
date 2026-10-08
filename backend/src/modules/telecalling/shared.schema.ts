@@ -94,6 +94,72 @@ export const UNANSWERED_OUTCOMES: readonly CallOutcome[] = [
   'no_answer',
 ];
 
+/**
+ * `'missed','rejected','busy','unreachable','no_answer'`, for `c.outcome IN (...)`.
+ *
+ * Interpolated rather than bound, which is safe only because it is built from the
+ * closed tuple above, never from input. One copy, so "not answered" cannot mean five
+ * outcomes in one query and four in the next.
+ */
+export const UNANSWERED_SQL_LIST = UNANSWERED_OUTCOMES.map((outcome) => `'${outcome}'`).join(',');
+
+/**
+ * THE single definition of a call on the company line, as SQL.
+ *
+ * An outgoing call was dialled from the app, so it is company work by construction. An
+ * incoming call counts only once the server has verified it arrived on the employee's
+ * registered company SIM — `sim_match` is set then, and only then (migration 021).
+ * Legacy incoming rows uploaded before that check existed keep `sim_match` NULL: they
+ * stay in the table and in lead history, but every count, tile, report and incoming
+ * list applies this predicate, so personal calls on a second SIM never reach them.
+ *
+ * `alias` is the calls table's alias in the surrounding query, written in code; pass
+ * `''` for an unaliased `calls`.
+ */
+export function companyLineSql(alias = 'c'): string {
+  if (alias !== '' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+    throw new Error(`Invalid SQL alias for companyLineSql: ${JSON.stringify(alias)}`);
+  }
+  const column = (name: string) => (alias ? `${alias}.${name}` : name);
+  return `(${column('direction')} = 'outgoing' OR ${column('sim_match')} IS NOT NULL)`;
+}
+
+/**
+ * How an incoming call's line was verified (`calls.sim_match`).
+ *
+ *   number      the handset read the SIM's own number and it matched the registered one
+ *   confirmed   the employee confirmed this SIM as the company SIM on this handset
+ *   single_sim  the call-log row named no SIM and the confirmed SIM was the only one
+ *   provider    a telephony provider reported the number dialled
+ */
+export const SIM_MATCHES = ['number', 'confirmed', 'single_sim', 'provider'] as const;
+export type SimMatch = (typeof SIM_MATCHES)[number];
+
+/** The subset a handset may assert. `provider` is only ever set by the server. */
+export const DEVICE_SIM_MATCHES = ['number', 'confirmed', 'single_sim'] as const;
+export type DeviceSimMatch = (typeof DEVICE_SIM_MATCHES)[number];
+
+/**
+ * Which incoming calls a list shows. `company` (the default everywhere) applies
+ * `companyLineSql`; `unverified` is the legacy rows nobody could verify, for admins who
+ * need to look at them; `all` is both.
+ */
+export const CALL_LINES = ['company', 'unverified', 'all'] as const;
+export type CallLine = (typeof CALL_LINES)[number];
+
+/**
+ * Why an uploaded incoming call was not stored. Returned to the app with a 200 — never
+ * a 4xx, which older app builds treat as a permanent failure worth an alert.
+ */
+export const CALL_IGNORE_REASONS = [
+  'line_unverified',
+  'no_company_number',
+  'stale_confirmation',
+  'not_company_line',
+  'other_employee_line',
+] as const;
+export type CallIgnoreReason = (typeof CALL_IGNORE_REASONS)[number];
+
 /** How the call was placed. See the telecalling-spec skill for why both exist. */
 export const CALL_CHANNELS = ['device', 'cloud'] as const;
 export type CallChannel = (typeof CALL_CHANNELS)[number];
@@ -119,6 +185,10 @@ export type FollowUpState = (typeof FOLLOW_UP_STATES)[number];
  * `overdue` and `today` are not stored states — they are date windows applied to
  * `state = 'pending'`. Expressing them as a scope keeps that arithmetic in one place
  * instead of in every screen that shows a follow-up list.
+ *
+ * `completed_today` is the window over `state = 'completed'` that the dashboard's
+ * "Completed today" card counts, so the card can open a list holding exactly its rows.
+ * Appended, so a client that only knows the older values is unaffected.
  */
 export const FOLLOW_UP_SCOPES = [
   'today',
@@ -127,6 +197,7 @@ export const FOLLOW_UP_SCOPES = [
   'pending',
   'completed',
   'all',
+  'completed_today',
 ] as const;
 export type FollowUpScope = (typeof FOLLOW_UP_SCOPES)[number];
 
@@ -179,6 +250,14 @@ export const ACTIVITY_TYPES = [
   'follow_up_cancelled',
   'lead_archived',
   'lead_restored',
+  /*
+   * A follow-up handed to another employee, and one moved in more than one way at once
+   * (time and assignee, or onto another lead). Reassigning used to be logged as
+   * `follow_up_rescheduled`, which told a reader the time had changed when it had not.
+   * Both clients render only the summary, so an older build shows these lines as written.
+   */
+  'follow_up_moved',
+  'follow_up_reassigned',
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -209,7 +288,17 @@ export const phoneField = z
       }, 'Enter a valid phone number.'),
   );
 
-/** Optional phone: an empty string becomes null rather than failing validation. */
+/**
+ * Optional phone: an empty string becomes null rather than failing validation.
+ *
+ * NEVER USE IT BARE IN A PATCH SCHEMA — wrap it in `.optional()`. It turns an ABSENT key
+ * into `null` as well, which is right on a create form and destructive on a partial
+ * update: `{ isActive: false }` sent to a schema holding the bare field came out as
+ * `{ isActive: false, phone: null }` and erased the stored number. `.optional()` returns
+ * `undefined` for a missing key without running the transform, so absent means
+ * "unchanged" and an explicit null still clears. The same holds for `optionalEmailField`,
+ * `optionalLine` and `optionalBlock`.
+ */
 export const optionalPhoneField = z
   .string()
   .transform(normaliseLine)
@@ -223,6 +312,62 @@ export const optionalPhoneField = z
       .regex(PHONE_PATTERN, 'Enter a valid phone number.')
       .nullable(),
   );
+
+/**
+ * The 10-digit national number of an Indian mobile, or null if `value` is not one.
+ *
+ * Accepts the shapes people actually type and handsets report — `+91 98765 00002`,
+ * `919876500002`, `09876500002`, `98765-00002` — by stripping everything but digits,
+ * then a leading `91` from twelve digits or a leading `0` from eleven. What remains
+ * must be a mobile number (`[6-9]` then nine digits); a landline or a short code is not
+ * a SIM anyone can be issued.
+ *
+ * This is the matching key for the company line: `telecaller_users.company_phone_key`
+ * is the same last ten digits, computed in the database.
+ */
+export function companyPhoneKey(value: string): string | null {
+  let digits = value.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2);
+  else if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
+  return /^[6-9]\d{9}$/.test(digits) ? digits : null;
+}
+
+/**
+ * A company SIM number, required. Output is canonical `+91XXXXXXXXXX`.
+ *
+ * Canonicalised, unlike every other phone field here, because this one is a system
+ * identifier the server matches calls against — not a number kept "as typed" for a
+ * person to read back off a paper lead.
+ */
+export const companyPhoneField = z
+  .string({
+    required_error: 'Enter your company SIM number.',
+    invalid_type_error: 'Enter your company SIM number.',
+  })
+  .transform(normaliseLine)
+  .pipe(z.string().min(1, 'Enter your company SIM number.'))
+  .transform((value, context) => {
+    const key = companyPhoneKey(value);
+    if (!key) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter a 10-digit mobile number.' });
+      return z.NEVER;
+    }
+    return `+91${key}`;
+  });
+
+/**
+ * A company SIM number that may be cleared: `''` and `null` become null, anything else
+ * must be a valid number.
+ *
+ * Deliberately has no answer for an absent key. Wrap it in `.optional()` at the use
+ * site, so a PATCH that does not mention the number leaves it alone — see the warning
+ * on `optionalPhoneField`.
+ */
+export const optionalCompanyPhoneField = z.union([
+  z.literal('').transform(() => null),
+  z.null(),
+  companyPhoneField,
+]);
 
 export const optionalEmailField = z
   .string()
@@ -300,7 +445,13 @@ export const paginationSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-/** Inclusive date-range filter used by every admin report and dashboard. */
+/**
+ * Inclusive date-range filter used by every admin report and dashboard.
+ *
+ * `from` and `to` are IST calendar days. Turn them into SQL with the helpers in
+ * `companyTime.ts` (half-open instant bounds), never by appending `' 00:00:00'` — the
+ * columns hold UTC, so that reads the range five and a half hours early.
+ */
 export const dateRangeSchema = z.object({
   from: z.string().date('Expected YYYY-MM-DD.').optional(),
   to: z.string().date('Expected YYYY-MM-DD.').optional(),

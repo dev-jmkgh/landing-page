@@ -1,5 +1,12 @@
 import { execute, query, queryOne, type RowDataPacket } from '../../../db/pool';
 import { describeError, logger } from '../../../utils/logger';
+import { DEFAULT_SEND_TIME } from '../reports/dailyReport.schema';
+
+/*
+ * The writable keys and their per-key value rules live with the request schemas; they are
+ * re-exported here for the callers that have always imported them from this file.
+ */
+export { WRITABLE_SETTING_KEYS, type WritableSettingKey } from './settings.schema';
 
 /**
  * System settings (spec: Admin Module 15).
@@ -20,6 +27,9 @@ const DEFAULTS: Record<string, unknown> = {
   'followup.overdue_alert_hours': 24,
   'assignment.strategy': 'manual',
   'calling.working_hours': { start: '09:30', end: '18:30', timezone: 'Asia/Kolkata' },
+  // The same values migration 023 seeds, for a database that has not run it yet.
+  'report.daily_email_enabled': true,
+  'report.daily_email_time': DEFAULT_SEND_TIME,
 };
 
 export type SettingRecord = {
@@ -121,15 +131,3 @@ export async function writeSetting(
     [key, JSON.stringify(value), updatedBy],
   );
 }
-
-/** The keys an admin may write. A closed list, so a typo creates an error, not a row. */
-export const WRITABLE_SETTING_KEYS = [
-  'recording.enabled',
-  'recording.announce',
-  'followup.reminder_minutes',
-  'followup.overdue_alert_hours',
-  'assignment.strategy',
-  'calling.working_hours',
-] as const;
-
-export type WritableSettingKey = (typeof WRITABLE_SETTING_KEYS)[number];

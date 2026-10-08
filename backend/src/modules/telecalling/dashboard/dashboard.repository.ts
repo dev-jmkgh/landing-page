@@ -1,5 +1,18 @@
 import { query, queryOne, type RowDataPacket, type SqlParam } from '../../../db/pool';
-import type { DateRange } from '../shared.schema';
+import {
+  bucketSql,
+  companyRangeClause,
+  companyTodayCondition,
+  localSql,
+  MAX_CHART_FRAMES,
+  type Granularity,
+} from '../companyTime';
+import {
+  companyLineSql,
+  UNANSWERED_SQL_LIST,
+  type DateRange,
+  type LeadStatus,
+} from '../shared.schema';
 
 /**
  * Dashboard and report aggregates (spec: Mobile Modules 2 and 12, Admin Modules 2, 11, 12).
@@ -8,27 +21,56 @@ import type { DateRange } from '../shared.schema';
  * rollup job, on purpose: a cached counter that is wrong is a bug that takes days to
  * notice and hours to trace, whereas a slow query announces itself immediately and can
  * be fixed with an index. When one of these does get slow, measure first — the indexes
- * in migrations 006–008 were chosen for exactly these shapes.
+ * in migrations 006–008 and 024 were chosen for exactly these shapes.
+ *
+ * Two rules hold for every query in this file, because a tile, the chart beside it and
+ * the list either of them opens must count the same rows:
+ *
+ *   - A day is the company's day, in IST. Ranges and "today" are half-open instant bounds
+ *     from `companyTime.ts` — never `CURDATE()` or `'YYYY-MM-DD 00:00:00'`, which inside
+ *     the UTC-pinned pool end the working day at 05:30 in the morning.
+ *   - A call counts only on the company line (`companyLineSql`): every outgoing call, and
+ *     an incoming one once it was verified as received on the employee's company SIM.
+ *     Older unverified incoming rows stay in the table and in lead history, and are in no
+ *     figure here — that is where personal calls on a second SIM sit.
  */
 
-/** Turns an optional YYYY-MM-DD range into a bounded SQL predicate on `column`. */
-function rangeClause(
-  column: string,
-  range: DateRange,
-  params: SqlParam[],
-): string {
-  const parts: string[] = [];
+/**
+ * A report window as two instants — `start` inclusive, `end` exclusive.
+ *
+ * For a caller that has already worked out the exact window, such as the daily email: it
+ * reports one finished IST day, and must count exactly the instants it names rather than
+ * have them re-derived from calendar dates.
+ */
+export type InstantRange = { start: Date; end: Date };
 
-  if (range.from) {
-    parts.push(`${column} >= ?`);
-    params.push(`${range.from} 00:00:00`);
-  }
-  if (range.to) {
-    parts.push(`${column} <= ?`);
-    params.push(`${range.to} 23:59:59`);
-  }
+/**
+ * What a report can be bounded by: inclusive IST calendar dates — what every screen
+ * sends — or an exact instant window.
+ */
+export type ReportRange = DateRange | InstantRange;
 
-  return parts.length > 0 ? ` AND ${parts.join(' AND ')}` : '';
+function isInstantRange(range: ReportRange): range is InstantRange {
+  return 'start' in range;
+}
+
+/**
+ * Turns a report range into a bounded SQL predicate on `column`, pushing the bounds.
+ *
+ * Calendar dates go through `companyRangeClause`: half-open IST day bounds, bound as Date
+ * objects. This used to bind `'${from} 00:00:00'` and `'${to} 23:59:59'` against UTC
+ * columns, so every range — every tile, report and the mobile "My activity" — ran from
+ * 05:30 to 05:29 IST and filed early-morning calls under the previous day, while the
+ * lists the tiles open drew the line somewhere else.
+ *
+ * An instant window is bound exactly as given, with the same half-open shape.
+ */
+function rangeClause(column: string, range: ReportRange, params: SqlParam[]): string {
+  if (isInstantRange(range)) {
+    params.push(range.start, range.end);
+    return ` AND ${column} >= ? AND ${column} < ?`;
+  }
+  return companyRangeClause(column, range, params);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -108,23 +150,44 @@ export async function employeeDashboard(userId: number): Promise<EmployeeDashboa
     [userId],
   );
 
+  /*
+   * One instant for both "today" windows below, so a request that straddles IST midnight
+   * cannot count its follow-ups on one day and its calls on the next.
+   */
+  const now = new Date();
+
+  /*
+   * "Due today" is the IST day, the window the follow-up list's Today tab uses.
+   *
+   * It was `DATE(due_at) = CURDATE()`, which inside the UTC-pinned pool is the UTC date:
+   * a follow-up due at 09:00 IST counted, one due at 05:00 IST was "yesterday's", and the
+   * tile disagreed with the list it opens. Overdue and upcoming compare instants with
+   * `NOW()` and were never affected.
+   */
+  const followUpParams: SqlParam[] = [];
+  const dueToday = companyTodayCondition('due_at', followUpParams, now);
+  followUpParams.push(userId);
+
   const followUpRow = await queryOne<
     RowDataPacket & { today: number; overdue: number; upcoming: number }
   >(
-    `SELECT SUM(DATE(due_at) = CURDATE()) AS today,
+    `SELECT SUM(${dueToday}) AS today,
             SUM(due_at < NOW()) AS overdue,
             SUM(due_at > NOW()) AS upcoming
        FROM follow_ups
       WHERE assigned_to = ? AND state = 'pending'`,
-    [userId],
+    followUpParams,
   );
 
   /**
-   * Today's calls are bounded by `DATE(started_at) = CURDATE()` rather than by a
-   * server-side window, so the figure matches what the telecaller sees in their own call
-   * list. `started_at` is the client's timestamp — a call logged from the offline queue
-   * counts on the day it happened, not the day it synced.
+   * Today's calls are the IST day's, by `started_at` — the client's timestamp, so a call
+   * logged from the offline queue counts on the day it happened, not the day it synced.
+   * The bounds are the ones the call list's date filter uses, so the figure matches what
+   * the telecaller sees in their own call list.
    */
+  const callParams: SqlParam[] = [userId];
+  const startedToday = companyTodayCondition('c.started_at', callParams, now);
+
   const callRow = await queryOne<
     RowDataPacket & {
       total: number;
@@ -144,14 +207,14 @@ export async function employeeDashboard(userId: number): Promise<EmployeeDashboa
      * row missed, so the tile and the list cannot disagree about what missed means.
      */
     `SELECT COUNT(*) AS total,
-            SUM(outcome = 'answered') AS answered,
-            SUM(outcome = 'missed') AS missed,
-            COALESCE(SUM(CASE WHEN outcome = 'answered' THEN duration_seconds ELSE 0 END), 0) AS talk_time,
-            SUM(direction = 'incoming') AS incoming,
-            SUM(direction = 'incoming' AND outcome <> 'answered') AS incoming_missed
-       FROM calls
-      WHERE user_id = ? AND DATE(started_at) = CURDATE()`,
-    [userId],
+            SUM(c.outcome = 'answered') AS answered,
+            SUM(c.outcome = 'missed') AS missed,
+            COALESCE(SUM(CASE WHEN c.outcome = 'answered' THEN c.duration_seconds ELSE 0 END), 0) AS talk_time,
+            SUM(c.direction = 'incoming') AS incoming,
+            SUM(c.direction = 'incoming' AND c.outcome <> 'answered') AS incoming_missed
+       FROM calls c
+      WHERE c.user_id = ? AND ${startedToday} AND ${companyLineSql('c')}`,
+    callParams,
   );
 
   const pendingRow = await queryOne<
@@ -166,16 +229,21 @@ export async function employeeDashboard(userId: number): Promise<EmployeeDashboa
      * said something, and nobody has done anything since. So this counts unhandled
      * incoming calls whatever their outcome, and the two figures are shown as two tiles
      * rather than being added together.
+     *
+     * Both count the company line only, like the callback list they open: a missed call
+     * on someone's personal SIM is not work the company is owed.
      */
     `SELECT
-       (SELECT COUNT(*) FROM calls
-         WHERE user_id = ?
-           AND followed_up = 0
-           AND outcome IN ('missed','rejected','busy','unreachable','no_answer')) AS total,
-       (SELECT COUNT(*) FROM calls
-         WHERE user_id = ?
-           AND direction = 'incoming'
-           AND followed_up = 0) AS incoming_unhandled,
+       (SELECT COUNT(*) FROM calls c
+         WHERE c.user_id = ?
+           AND c.followed_up = 0
+           AND c.outcome IN (${UNANSWERED_SQL_LIST})
+           AND ${companyLineSql('c')}) AS total,
+       (SELECT COUNT(*) FROM calls c
+         WHERE c.user_id = ?
+           AND c.direction = 'incoming'
+           AND c.followed_up = 0
+           AND ${companyLineSql('c')}) AS incoming_unhandled,
        (SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL) AS unread`,
     [userId, userId, userId],
   );
@@ -224,6 +292,14 @@ function num(value: unknown): number {
 
 export type ActivitySummary = {
   calls: number;
+  /**
+   * `calls` split by direction: dialled from the app, and received on the company SIM.
+   *
+   * Additive — `outgoingCalls + incomingCalls === calls` — so the existing tiles keep
+   * their meaning and the screen can say "8 made · 4 received" under them.
+   */
+  outgoingCalls: number;
+  incomingCalls: number;
   answered: number;
   missed: number;
   talkTimeSeconds: number;
@@ -247,11 +323,13 @@ export async function employeeActivitySummary(
   range: DateRange,
 ): Promise<ActivitySummary> {
   const callParams: SqlParam[] = [userId];
-  const callRange = rangeClause('started_at', range, callParams);
+  const callRange = rangeClause('c.started_at', range, callParams);
 
   const callRow = await queryOne<
     RowDataPacket & {
       total: number;
+      outgoing: number;
+      incoming: number;
       answered: number;
       missed: number;
       talk_time: number;
@@ -259,12 +337,14 @@ export async function employeeActivitySummary(
     }
   >(
     `SELECT COUNT(*) AS total,
-            SUM(outcome = 'answered') AS answered,
-            SUM(outcome IN ('missed','rejected','busy','unreachable','no_answer')) AS missed,
-            COALESCE(SUM(CASE WHEN outcome = 'answered' THEN duration_seconds ELSE 0 END), 0) AS talk_time,
-            COUNT(DISTINCT CASE WHEN outcome = 'answered' THEN lead_id END) AS contacted
-       FROM calls
-      WHERE user_id = ?${callRange}`,
+            SUM(c.direction = 'outgoing') AS outgoing,
+            SUM(c.direction = 'incoming') AS incoming,
+            SUM(c.outcome = 'answered') AS answered,
+            SUM(c.outcome IN (${UNANSWERED_SQL_LIST})) AS missed,
+            COALESCE(SUM(CASE WHEN c.outcome = 'answered' THEN c.duration_seconds ELSE 0 END), 0) AS talk_time,
+            COUNT(DISTINCT CASE WHEN c.outcome = 'answered' THEN c.lead_id END) AS contacted
+       FROM calls c
+      WHERE c.user_id = ? AND ${companyLineSql('c')}${callRange}`,
     callParams,
   );
 
@@ -300,6 +380,8 @@ export async function employeeActivitySummary(
 
   return {
     calls: num(callRow?.total),
+    outgoingCalls: num(callRow?.outgoing),
+    incomingCalls: num(callRow?.incoming),
     answered,
     missed: num(callRow?.missed),
     talkTimeSeconds: talkTime,
@@ -348,7 +430,14 @@ export type AdminDashboard = {
     overdue: number;
     completed: number;
   };
-  employees: {
+  /**
+   * Approved staff, and how many of them are enabled. Not bound by the range.
+   *
+   * Named `headcount`, not `employees`: the route sends the per-employee performance rows
+   * as `employees`, and when this was called that too, spreading it into the response and
+   * then setting the rows overwrote it — the "Active employees" tile rendered blank.
+   */
+  headcount: {
     total: number;
     active: number;
   };
@@ -389,7 +478,7 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
   );
 
   const callParams: SqlParam[] = [];
-  const callRange = rangeClause('started_at', range, callParams);
+  const callRange = rangeClause('c.started_at', range, callParams);
 
   const callRow = await queryOne<
     RowDataPacket & {
@@ -402,23 +491,34 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
     }
   >(
     `SELECT COUNT(*) AS total,
-            SUM(outcome = 'answered') AS answered,
-            SUM(outcome IN ('missed','rejected','busy','unreachable','no_answer')) AS missed,
-            COALESCE(SUM(CASE WHEN outcome = 'answered' THEN duration_seconds ELSE 0 END), 0) AS talk_time,
-            SUM(direction = 'incoming') AS incoming,
-            SUM(direction = 'incoming' AND outcome <> 'answered') AS incoming_missed
-       FROM calls
-      WHERE 1 = 1${callRange}`,
+            SUM(c.outcome = 'answered') AS answered,
+            SUM(c.outcome IN (${UNANSWERED_SQL_LIST})) AS missed,
+            COALESCE(SUM(CASE WHEN c.outcome = 'answered' THEN c.duration_seconds ELSE 0 END), 0) AS talk_time,
+            SUM(c.direction = 'incoming') AS incoming,
+            SUM(c.direction = 'incoming' AND c.outcome <> 'answered') AS incoming_missed
+       FROM calls c
+      WHERE ${companyLineSql('c')}${callRange}`,
     callParams,
   );
+
+  /*
+   * Live, not bound by the range: "due today" and "completed today" are about the IST day
+   * the admin is looking at the screen on — the same windows as the follow-up list's
+   * Today and Completed-today tabs these cards open, so a card and its list agree.
+   */
+  const now = new Date();
+  const followUpParams: SqlParam[] = [];
+  const dueToday = companyTodayCondition('due_at', followUpParams, now);
+  const completedToday = companyTodayCondition('completed_at', followUpParams, now);
 
   const followUpRow = await queryOne<
     RowDataPacket & { today: number; overdue: number; completed: number }
   >(
-    `SELECT SUM(state = 'pending' AND DATE(due_at) = CURDATE()) AS today,
+    `SELECT SUM(state = 'pending' AND ${dueToday}) AS today,
             SUM(state = 'pending' AND due_at < NOW()) AS overdue,
-            SUM(state = 'completed' AND DATE(completed_at) = CURDATE()) AS completed
+            SUM(state = 'completed' AND ${completedToday}) AS completed
        FROM follow_ups`,
+    followUpParams,
   );
 
   /*
@@ -462,7 +562,7 @@ export async function adminDashboard(range: DateRange): Promise<AdminDashboard> 
       overdue: num(followUpRow?.overdue),
       completed: num(followUpRow?.completed),
     },
-    employees: {
+    headcount: {
       total: num(employeeRow?.total),
       active: num(employeeRow?.active),
     },
@@ -485,6 +585,13 @@ export type EmployeePerformance = {
   calls: number;
   answered: number;
   missed: number;
+  /**
+   * `calls` by direction, and the incoming ones nobody answered — the same definitions as
+   * the dashboard's Incoming tiles. `outgoing + incoming === calls`.
+   */
+  outgoing: number;
+  incoming: number;
+  incomingMissed: number;
   talkTimeSeconds: number;
   averageDurationSeconds: number;
   followUpsCompleted: number;
@@ -511,7 +618,7 @@ function aggregate(
   alias: string,
   build: (rangeSql: string) => string,
   column: string,
-  range: DateRange,
+  range: ReportRange,
 ): AggregateColumn {
   const params: SqlParam[] = [];
   const rangeSql = rangeClause(column, range, params);
@@ -532,26 +639,59 @@ function liveAggregate(alias: string, sql: string): AggregateColumn {
  * COUNT(DISTINCT ...) on every column — both slower and much easier to get quietly
  * wrong. The staff table has tens of rows, so the subqueries run tens of times against
  * indexes built for exactly these predicates.
+ *
+ * Takes a calendar range (every screen) or an exact instant window (the daily email),
+ * so the dashboard, the Reports screen and the email share one definition of every
+ * per-employee figure.
  */
-export async function employeePerformance(range: DateRange): Promise<EmployeePerformance[]> {
+export async function employeePerformance(range: ReportRange): Promise<EmployeePerformance[]> {
+  /*
+   * Every call aggregate — and the "has made calls" test that brings a non-telecaller
+   * into the table — counts the company line only, like every other call figure.
+   */
+  const line = companyLineSql('c');
+
   const columns: AggregateColumn[] = [
     aggregate(
       'calls',
-      (r) => `(SELECT COUNT(*) FROM calls c WHERE c.user_id = u.id${r})`,
+      (r) => `(SELECT COUNT(*) FROM calls c WHERE c.user_id = u.id AND ${line}${r})`,
       'c.started_at',
       range,
     ),
     aggregate(
       'answered',
-      (r) => `(SELECT SUM(c.outcome = 'answered') FROM calls c WHERE c.user_id = u.id${r})`,
+      (r) =>
+        `(SELECT SUM(c.outcome = 'answered') FROM calls c WHERE c.user_id = u.id AND ${line}${r})`,
       'c.started_at',
       range,
     ),
     aggregate(
       'missed',
       (r) =>
-        `(SELECT SUM(c.outcome IN ('missed','rejected','busy','unreachable','no_answer'))
-            FROM calls c WHERE c.user_id = u.id${r})`,
+        `(SELECT SUM(c.outcome IN (${UNANSWERED_SQL_LIST}))
+            FROM calls c WHERE c.user_id = u.id AND ${line}${r})`,
+      'c.started_at',
+      range,
+    ),
+    aggregate(
+      'outgoing',
+      (r) =>
+        `(SELECT SUM(c.direction = 'outgoing') FROM calls c WHERE c.user_id = u.id AND ${line}${r})`,
+      'c.started_at',
+      range,
+    ),
+    aggregate(
+      'incoming',
+      (r) =>
+        `(SELECT SUM(c.direction = 'incoming') FROM calls c WHERE c.user_id = u.id AND ${line}${r})`,
+      'c.started_at',
+      range,
+    ),
+    aggregate(
+      'incoming_missed',
+      (r) =>
+        `(SELECT SUM(c.direction = 'incoming' AND c.outcome <> 'answered')
+            FROM calls c WHERE c.user_id = u.id AND ${line}${r})`,
       'c.started_at',
       range,
     ),
@@ -559,7 +699,7 @@ export async function employeePerformance(range: DateRange): Promise<EmployeePer
       'talk_time',
       (r) =>
         `(SELECT COALESCE(SUM(CASE WHEN c.outcome = 'answered' THEN c.duration_seconds ELSE 0 END), 0)
-            FROM calls c WHERE c.user_id = u.id${r})`,
+            FROM calls c WHERE c.user_id = u.id AND ${line}${r})`,
       'c.started_at',
       range,
     ),
@@ -567,7 +707,8 @@ export async function employeePerformance(range: DateRange): Promise<EmployeePer
       'leads_contacted',
       (r) =>
         `(SELECT COUNT(DISTINCT c.lead_id) FROM calls c
-           WHERE c.user_id = u.id AND c.outcome = 'answered' AND c.lead_id IS NOT NULL${r})`,
+           WHERE c.user_id = u.id AND c.outcome = 'answered' AND c.lead_id IS NOT NULL
+             AND ${line}${r})`,
       'c.started_at',
       range,
     ),
@@ -612,6 +753,9 @@ export async function employeePerformance(range: DateRange): Promise<EmployeePer
       calls: number;
       answered: number;
       missed: number;
+      outgoing: number;
+      incoming: number;
+      incoming_missed: number;
       talk_time: number;
       follow_ups_completed: number;
       follow_ups_pending: number;
@@ -624,7 +768,7 @@ export async function employeePerformance(range: DateRange): Promise<EmployeePer
             ${selectList}
        FROM telecaller_users u
       WHERE u.approval_status = 'approved'
-        AND (u.role = 'telecaller' OR EXISTS (SELECT 1 FROM calls c WHERE c.user_id = u.id))
+        AND (u.role = 'telecaller' OR EXISTS (SELECT 1 FROM calls c WHERE c.user_id = u.id AND ${line}))
       ORDER BY u.is_active DESC, u.name ASC`,
     params,
   );
@@ -644,6 +788,9 @@ export async function employeePerformance(range: DateRange): Promise<EmployeePer
       calls: num(row.calls),
       answered,
       missed: num(row.missed),
+      outgoing: num(row.outgoing),
+      incoming: num(row.incoming),
+      incomingMissed: num(row.incoming_missed),
       talkTimeSeconds: talkTime,
       averageDurationSeconds: answered > 0 ? Math.round(talkTime / answered) : 0,
       followUpsCompleted: num(row.follow_ups_completed),
@@ -673,24 +820,31 @@ export type CallTrendPoint = {
  *
  * The grouping expression is chosen from a closed set rather than built from input: it
  * lands in both SELECT and GROUP BY, where a bound parameter is not accepted.
+ *
+ * Periods are read on the IST clock (`localSql`), so a call at 01:00 IST belongs to the
+ * day it was made on, as it does on the dashboard and in the lists. The period strings
+ * keep their shapes, so the Reports screen reads them unchanged.
  */
+/** The most periods one call-trend request returns: the newest ones, oldest first. */
+const CALL_TREND_MAX_PERIODS = 400;
+
 export async function callTrend(
   granularity: 'day' | 'week' | 'month',
   range: DateRange,
   userId?: number,
-): Promise<CallTrendPoint[]> {
+): Promise<{ points: CallTrendPoint[]; truncated: boolean }> {
   const format =
     granularity === 'day' ? "'%Y-%m-%d'" : granularity === 'week' ? "'%x-W%v'" : "'%Y-%m'";
 
   const params: SqlParam[] = [];
-  let where = 'WHERE 1 = 1';
+  let where = `WHERE ${companyLineSql('c')}`;
 
   if (userId) {
-    where += ' AND user_id = ?';
+    where += ' AND c.user_id = ?';
     params.push(userId);
   }
 
-  where += rangeClause('started_at', range, params);
+  where += rangeClause('c.started_at', range, params);
 
   const rows = await query<
     RowDataPacket & {
@@ -701,26 +855,38 @@ export async function callTrend(
       talk_time: number;
     }
   >(
-    `SELECT DATE_FORMAT(started_at, ${format}) AS period,
+    `SELECT DATE_FORMAT(${localSql('c.started_at')}, ${format}) AS period,
             COUNT(*) AS calls,
-            SUM(outcome = 'answered') AS answered,
-            SUM(outcome IN ('missed','rejected','busy','unreachable','no_answer')) AS missed,
-            COALESCE(SUM(CASE WHEN outcome = 'answered' THEN duration_seconds ELSE 0 END), 0) AS talk_time
-       FROM calls
+            SUM(c.outcome = 'answered') AS answered,
+            SUM(c.outcome IN (${UNANSWERED_SQL_LIST})) AS missed,
+            COALESCE(SUM(CASE WHEN c.outcome = 'answered' THEN c.duration_seconds ELSE 0 END), 0) AS talk_time
+       FROM calls c
        ${where}
       GROUP BY period
-      ORDER BY period ASC
-      LIMIT 400`,
+      ORDER BY period DESC
+      LIMIT ${CALL_TREND_MAX_PERIODS + 1}`,
     params,
   );
 
-  return rows.map((row) => ({
-    period: row.period,
-    calls: num(row.calls),
-    answered: num(row.answered),
-    missed: num(row.missed),
-    talkTimeSeconds: num(row.talk_time),
-  }));
+  /*
+   * The NEWEST periods when there are more than the cap — ascending order with a LIMIT
+   * kept the oldest four hundred and silently dropped every recent day (one handset with
+   * a reset clock stamping 1970 is enough to get there). The extra row only says whether
+   * anything older was left out, so the screen can say so.
+   */
+  const truncated = rows.length > CALL_TREND_MAX_PERIODS;
+  const points = rows
+    .slice(0, CALL_TREND_MAX_PERIODS)
+    .reverse()
+    .map((row) => ({
+      period: row.period,
+      calls: num(row.calls),
+      answered: num(row.answered),
+      missed: num(row.missed),
+      talkTimeSeconds: num(row.talk_time),
+    }));
+
+  return { points, truncated };
 }
 
 export type BreakdownRow = {
@@ -733,7 +899,7 @@ export type BreakdownRow = {
 /** Lead counts and conversion grouped by status, source, or owner. */
 export async function leadBreakdown(
   dimension: 'status' | 'source' | 'employee',
-  range: DateRange,
+  range: ReportRange,
 ): Promise<BreakdownRow[]> {
   const params: SqlParam[] = [];
   const where = `WHERE l.is_archived = 0${rangeClause('l.created_at', range, params)}`;
@@ -832,6 +998,308 @@ export async function followUpPerformance(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Dashboard analytics (the trend charts, spec: Admin Module 2)                */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * The grouped queries behind the dashboard charts. Each groups rows by `bucketSql` — the
+ * IST hour, day, ISO week or month a row falls in — and the service zero-fills them
+ * against `bucketFrames`, which produces exactly the same keys. `window` is the instants
+ * the frames cover, so a row can only ever land in one of them.
+ *
+ * `LIMIT MAX_CHART_FRAMES` is a backstop, not a page: rows inside the window fall into at
+ * most that many frames, so it never cuts a real result short.
+ *
+ * `userId` narrows every query to one employee: calls they made or took, leads assigned
+ * to them, follow-ups they owe — the same columns the lists' employee filters use.
+ */
+
+export type CallBucketRow = {
+  bucket: string;
+  total: number;
+  answered: number;
+  notAnswered: number;
+  outgoing: number;
+  incoming: number;
+  incomingNotAnswered: number;
+  talkTimeSeconds: number;
+};
+
+/**
+ * Calls per IST bucket, by outcome and by direction.
+ *
+ * The definitions are the Calls tiles' in `adminDashboard`, so the bars add up to the
+ * tiles for the same range: not answered is the five unanswered outcomes, talk time
+ * counts answered calls only, and only the company line counts.
+ */
+export async function callBuckets(
+  window: InstantRange,
+  granularity: Granularity,
+  userId?: number,
+): Promise<CallBucketRow[]> {
+  const params: SqlParam[] = [window.start, window.end];
+  let where = `WHERE c.started_at >= ? AND c.started_at < ? AND ${companyLineSql('c')}`;
+
+  if (userId !== undefined) {
+    where += ' AND c.user_id = ?';
+    params.push(userId);
+  }
+
+  const rows = await query<
+    RowDataPacket & {
+      bucket: string;
+      total: number;
+      answered: number;
+      not_answered: number;
+      outgoing: number;
+      incoming: number;
+      incoming_not_answered: number;
+      talk_time: number;
+    }
+  >(
+    `SELECT ${bucketSql('c.started_at', granularity)} AS bucket,
+            COUNT(*) AS total,
+            SUM(c.outcome = 'answered') AS answered,
+            SUM(c.outcome IN (${UNANSWERED_SQL_LIST})) AS not_answered,
+            SUM(c.direction = 'outgoing') AS outgoing,
+            SUM(c.direction = 'incoming') AS incoming,
+            SUM(c.direction = 'incoming' AND c.outcome <> 'answered') AS incoming_not_answered,
+            COALESCE(SUM(CASE WHEN c.outcome = 'answered' THEN c.duration_seconds ELSE 0 END), 0) AS talk_time
+       FROM calls c
+       ${where}
+      GROUP BY bucket
+      ORDER BY bucket ASC
+      LIMIT ${MAX_CHART_FRAMES}`,
+    params,
+  );
+
+  return rows.map((row) => ({
+    bucket: String(row.bucket),
+    total: num(row.total),
+    answered: num(row.answered),
+    notAnswered: num(row.not_answered),
+    outgoing: num(row.outgoing),
+    incoming: num(row.incoming),
+    incomingNotAnswered: num(row.incoming_not_answered),
+    talkTimeSeconds: num(row.talk_time),
+  }));
+}
+
+export type CountBucketRow = { bucket: string; count: number };
+
+/**
+ * Non-archived leads created per IST bucket — the same set as the Leads tiles, which
+ * count leads created in the range.
+ */
+export async function leadCreatedBuckets(
+  window: InstantRange,
+  granularity: Granularity,
+  userId?: number,
+): Promise<CountBucketRow[]> {
+  const params: SqlParam[] = [window.start, window.end];
+  let where = 'WHERE l.is_archived = 0 AND l.created_at >= ? AND l.created_at < ?';
+
+  if (userId !== undefined) {
+    where += ' AND l.assigned_to = ?';
+    params.push(userId);
+  }
+
+  return countBuckets(bucketSql('l.created_at', granularity), where, params);
+}
+
+/**
+ * Conversions per IST bucket, counted on the day the lead was marked converted —
+ * whenever it was created. The leads list's conversion-date filter is the same
+ * predicate, so a bucket opens exactly its rows.
+ */
+export async function leadConvertedBuckets(
+  window: InstantRange,
+  granularity: Granularity,
+  userId?: number,
+): Promise<CountBucketRow[]> {
+  const params: SqlParam[] = [window.start, window.end];
+  let where = `WHERE l.is_archived = 0 AND l.status = 'converted'
+                 AND l.converted_at >= ? AND l.converted_at < ?`;
+
+  if (userId !== undefined) {
+    where += ' AND l.assigned_to = ?';
+    params.push(userId);
+  }
+
+  return countBuckets(bucketSql('l.converted_at', granularity), where, params);
+}
+
+/** `bucketExpression` is a `bucketSql` result and `where` is built above — never input. */
+async function countBuckets(
+  bucketExpression: string,
+  where: string,
+  params: SqlParam[],
+): Promise<CountBucketRow[]> {
+  const rows = await query<RowDataPacket & { bucket: string; total: number }>(
+    `SELECT ${bucketExpression} AS bucket, COUNT(*) AS total
+       FROM leads l
+       ${where}
+      GROUP BY bucket
+      ORDER BY bucket ASC
+      LIMIT ${MAX_CHART_FRAMES}`,
+    params,
+  );
+
+  return rows.map((row) => ({ bucket: String(row.bucket), count: num(row.total) }));
+}
+
+/**
+ * The current status of the non-archived leads created in `range` — the same predicate
+ * as the Leads tiles, so the counts add up to "Total leads" for the same range.
+ *
+ * Statuses with no leads are absent; the service puts all of them back, in order.
+ */
+export async function leadStatusCounts(
+  range: DateRange,
+  userId?: number,
+): Promise<{ status: LeadStatus; count: number }[]> {
+  const params: SqlParam[] = [];
+  let where = `WHERE l.is_archived = 0${rangeClause('l.created_at', range, params)}`;
+
+  if (userId !== undefined) {
+    where += ' AND l.assigned_to = ?';
+    params.push(userId);
+  }
+
+  const rows = await query<RowDataPacket & { status: LeadStatus; total: number }>(
+    `SELECT l.status AS status, COUNT(*) AS total
+       FROM leads l
+       ${where}
+      GROUP BY l.status`,
+    params,
+  );
+
+  return rows.map((row) => ({ status: row.status, count: num(row.total) }));
+}
+
+/**
+ * Follow-ups that fall DUE in the range, by what became of them.
+ *
+ * The parts always add up: every follow-up is completed, cancelled or pending, and a
+ * pending one is overdue (due before now) or upcoming. Completed ones are on time when
+ * they were done by the time they were due.
+ */
+export type FollowUpDueSummary = {
+  total: number;
+  completed: number;
+  completedOnTime: number;
+  completedLate: number;
+  overdue: number;
+  upcoming: number;
+  cancelled: number;
+};
+
+/**
+ * The follow-up chart's figures.
+ *
+ * `range` is the range exactly as requested, open ends included: with no `to`, follow-ups
+ * due in the future count as upcoming, which is what "all time" means for work still to
+ * do. Overdue is `due_at < NOW()` on the database clock, the same test as the follow-up
+ * list's Overdue tab, so a slice opens its own rows.
+ */
+export async function followUpDueSummary(
+  range: DateRange,
+  userId?: number,
+): Promise<FollowUpDueSummary> {
+  const params: SqlParam[] = [];
+  let where = `WHERE 1 = 1${rangeClause('f.due_at', range, params)}`;
+
+  if (userId !== undefined) {
+    where += ' AND f.assigned_to = ?';
+    params.push(userId);
+  }
+
+  const row = await queryOne<
+    RowDataPacket & {
+      total: number;
+      completed: number;
+      on_time: number;
+      pending: number;
+      overdue: number;
+      cancelled: number;
+    }
+  >(
+    `SELECT COUNT(*) AS total,
+            SUM(f.state = 'completed') AS completed,
+            SUM(f.state = 'completed' AND f.completed_at <= f.due_at) AS on_time,
+            SUM(f.state = 'pending') AS pending,
+            SUM(f.state = 'pending' AND f.due_at < NOW()) AS overdue,
+            SUM(f.state = 'cancelled') AS cancelled
+       FROM follow_ups f
+       ${where}`,
+    params,
+  );
+
+  const completed = num(row?.completed);
+  const onTime = num(row?.on_time);
+  const pending = num(row?.pending);
+  const overdue = num(row?.overdue);
+
+  return {
+    total: num(row?.total),
+    completed,
+    completedOnTime: onTime,
+    completedLate: completed - onTime,
+    overdue,
+    upcoming: pending - overdue,
+    cancelled: num(row?.cancelled),
+  };
+}
+
+/**
+ * The earliest company-line call or non-archived lead — where "all time" starts.
+ *
+ * Each side reads the first row of an index in order (`ORDER BY ... LIMIT 1`) and stops,
+ * rather than `MIN()` over a filtered set, which the optimiser cannot answer from the
+ * index once the company-line test is in the WHERE.
+ */
+export async function firstActivity(userId?: number): Promise<Date | null> {
+  const params: SqlParam[] = [];
+  let callWhere = `WHERE ${companyLineSql('c')}`;
+  let leadWhere = 'WHERE l.is_archived = 0';
+
+  if (userId !== undefined) {
+    callWhere += ' AND c.user_id = ?';
+    leadWhere += ' AND l.assigned_to = ?';
+    params.push(userId, userId);
+  }
+
+  const row = await queryOne<RowDataPacket & { first_call: unknown; first_lead: unknown }>(
+    `SELECT (SELECT c.started_at FROM calls c ${callWhere}
+              ORDER BY c.started_at ASC LIMIT 1) AS first_call,
+            (SELECT l.created_at FROM leads l ${leadWhere}
+              ORDER BY l.created_at ASC LIMIT 1) AS first_lead`,
+    params,
+  );
+
+  const instants = [instantOf(row?.first_call), instantOf(row?.first_lead)].filter(
+    (value): value is Date => value !== null,
+  );
+
+  return instants.length > 0
+    ? new Date(Math.min(...instants.map((value) => value.getTime())))
+    : null;
+}
+
+/**
+ * A DATETIME/TIMESTAMP read back from a subquery. The driver normally hands over a Date,
+ * but a value it could not type arrives as text — read as UTC, like every stored time.
+ */
+function instantOf(value: unknown): Date | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === 'string' && value.length > 0) {
+    const parsed = new Date(`${value.replace(' ', 'T')}Z`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Overdue alerting (spec: Admin Module 10)                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -842,9 +1310,20 @@ export type OverdueGroup = {
   oldestDueAt: string;
 };
 
-/** Overdue follow-ups per employee, for the admin alert and the dashboard warning. */
-export async function overdueByEmployee(minimumHours: number): Promise<OverdueGroup[]> {
+/**
+ * Overdue follow-ups per employee, for the admin alert and the dashboard warning.
+ *
+ * Overdue is measured against the database clock, unless `asOf` names the moment — for a
+ * report generated about a time that is not now, which must not change when it is
+ * regenerated later.
+ */
+export async function overdueByEmployee(
+  minimumHours: number,
+  asOf?: Date,
+): Promise<OverdueGroup[]> {
   const hours = Math.min(Math.max(Math.trunc(minimumHours), 0), 24 * 90);
+  const params: SqlParam[] = asOf ? [asOf] : [];
+  const reference = asOf ? '?' : 'NOW()';
 
   const rows = await query<
     RowDataPacket & { user_id: number; name: string; overdue: number; oldest: Date }
@@ -853,9 +1332,10 @@ export async function overdueByEmployee(minimumHours: number): Promise<OverdueGr
        FROM follow_ups f
        JOIN telecaller_users u ON u.id = f.assigned_to
       WHERE f.state = 'pending'
-        AND f.due_at < (NOW() - INTERVAL ${hours} HOUR)
+        AND f.due_at < (${reference} - INTERVAL ${hours} HOUR)
       GROUP BY f.assigned_to, u.name
       ORDER BY overdue DESC`,
+    params,
   );
 
   return rows.map((row) => ({
