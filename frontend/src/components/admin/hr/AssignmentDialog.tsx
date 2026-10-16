@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FormAlert } from '@/components/forms/Fields';
 import { ApiError } from '@/lib/api';
 import {
   WORK_MODES,
   WORK_MODE_LABELS,
   attendanceAdminApi,
+  describeWeekdays,
   type HrEmployee,
   type Shift,
   type WorkLocation,
@@ -48,6 +49,17 @@ export function AssignmentDialog({
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const heading = useRef<HTMLHeadingElement | null>(null);
+
+  /*
+   * It opens in the page rather than as a modal, often above a long table — so it is
+   * brought into view and the heading takes focus, or a keyboard user would press the
+   * button and hear nothing happen.
+   */
+  useEffect(() => {
+    heading.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    heading.current?.focus();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +92,12 @@ export function AssignmentDialog({
    */
   const selectableSites = (locations ?? []).filter(
     (site) => site.isActive || site.id === employee.workLocationId,
+  );
+
+  // The same rule for shifts: a switched-off shift stays on whoever has it, but is not
+  // offered to anybody new.
+  const selectableShifts = (shifts ?? []).filter(
+    (shift) => shift.isActive || shift.id === employee.shiftId,
   );
 
   const save = async () => {
@@ -125,8 +143,14 @@ export function AssignmentDialog({
   const chosenSite = selectableSites.find((s) => String(s.id) === locationId);
 
   return (
-    <div className="tc-card tc-form" role="group" aria-label={`Attendance rule for ${employee.name}`}>
-      <h3 className="tc-section-title" style={{ marginTop: 0 }}>
+    <div className="tc-card tc-form" role="group" aria-labelledby={`hr-assign-title-${employee.id}`}>
+      <h3
+        ref={heading}
+        id={`hr-assign-title-${employee.id}`}
+        className="tc-section-title hrp-focus-heading"
+        style={{ marginTop: 0 }}
+        tabIndex={-1}
+      >
         Attendance rule — {employee.name}
       </h3>
 
@@ -201,9 +225,10 @@ export function AssignmentDialog({
             onChange={(event) => setShiftId(event.target.value)}
           >
             <option value="">No shift</option>
-            {(shifts ?? []).map((shift) => (
+            {selectableShifts.map((shift) => (
               <option key={shift.id} value={shift.id}>
-                {shift.name} ({shift.startsAt}–{shift.endsAt})
+                {shift.name} ({shift.startsAt}–{shift.endsAt}, off {describeWeekdays(shift.weeklyOffDays)})
+                {shift.isActive ? '' : ' — switched off'}
               </option>
             ))}
           </select>
@@ -211,7 +236,7 @@ export function AssignmentDialog({
             {/* Says what is lost rather than what is gained — nothing breaks without a
                 shift, but lateness stops being measurable, which is not obvious. */}
             Without a shift there is nothing to measure lateness against, so nobody is
-            ever marked late.
+            ever marked late, and the company’s default weekly off applies.
           </p>
         </div>
       </div>

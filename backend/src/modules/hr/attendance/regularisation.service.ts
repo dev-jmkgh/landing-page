@@ -1,6 +1,9 @@
 import { execute, query, queryOne, type RowDataPacket } from '../../../db/pool';
 import { logger } from '../../../utils/logger';
+import type { Page } from '../hr.schema';
+import { notifyHr } from '../notifications/hrNotifications.repository';
 import {
+  COMPANY_UTC_OFFSET,
   LOCAL_TODAY,
   type Regularisation,
   type RegularisationStatus,
@@ -39,6 +42,7 @@ interface Row extends RowDataPacket {
   status: RegularisationStatus;
   reviewed_at: Date | string | null;
   review_note: string | null;
+  reviewer_name: string | null;
   created_at: Date | string;
 }
 
@@ -57,6 +61,7 @@ function toRecord(row: Row): Regularisation {
     status: row.status,
     reviewedAt: iso(row.reviewed_at),
     reviewNote: row.review_note,
+    reviewerName: row.reviewer_name,
     createdAt: new Date(row.created_at).toISOString(),
   };
 }
@@ -71,7 +76,7 @@ const SELECT = `
          u.name AS employee_name, u.employee_code,
          DATE_FORMAT(r.work_date, '%Y-%m-%d') AS work_date,
          r.requested_check_in_at, r.requested_check_out_at,
-         r.reason, r.status, r.reviewed_at, r.review_note, r.created_at
+         r.reason, r.status, r.reviewed_at, r.review_note, r.reviewer_name, r.created_at
     FROM hr_regularisations r
     JOIN hr_users u ON u.id = r.user_id
 `;
@@ -118,12 +123,23 @@ export async function raise(userId: number, input: RaiseInput): Promise<RaiseRes
   );
   if (Number(open?.total ?? 0) > 0) return { ok: false, reason: 'already_open' };
 
+  /*
+   * The times arrive as the company's WALL CLOCK ("09:00" on the work date) and are
+   * stored as UTC, like every other DATETIME in the module.
+   *
+   * An earlier revision stored the wall clock as-is. The pool reads DATETIME as UTC, so
+   * a corrected 09:00 check-in was read back as 09:00Z — 14:30 in the app — and an
+   * approval wrote a session five and a half hours late. Migration 031 converts the
+   * rows written that way.
+   */
   const result = await execute(
     `INSERT INTO hr_regularisations
        (user_id, work_date, requested_check_in_at, requested_check_out_at, reason)
      VALUES (?, ?,
-             CASE WHEN ? IS NULL THEN NULL ELSE CAST(CONCAT(?, ' ', ?) AS DATETIME) END,
-             CASE WHEN ? IS NULL THEN NULL ELSE CAST(CONCAT(?, ' ', ?) AS DATETIME) END,
+             CASE WHEN ? IS NULL THEN NULL
+                  ELSE CONVERT_TZ(CAST(CONCAT(?, ' ', ?) AS DATETIME), '${COMPANY_UTC_OFFSET}', '+00:00') END,
+             CASE WHEN ? IS NULL THEN NULL
+                  ELSE CONVERT_TZ(CAST(CONCAT(?, ' ', ?) AS DATETIME), '${COMPANY_UTC_OFFSET}', '+00:00') END,
              ?)`,
     [
       userId,
@@ -144,25 +160,53 @@ export async function raise(userId: number, input: RaiseInput): Promise<RaiseRes
   return { ok: true, request: toRecord(row!) };
 }
 
-export async function listForUser(userId: number): Promise<Regularisation[]> {
-  const rows = await query<Row>(
-    `${SELECT} WHERE r.user_id = ? ORDER BY r.created_at DESC LIMIT 100`,
+/** One page of an employee's own requests, newest first. */
+export async function listForUser(
+  userId: number,
+  paging: { page: number; pageSize: number } = { page: 1, pageSize: 20 },
+): Promise<Page<Regularisation>> {
+  const count = await queryOne<RowDataPacket & { total: number }>(
+    'SELECT COUNT(*) AS total FROM hr_regularisations WHERE user_id = ?',
     [userId],
   );
-  return rows.map(toRecord);
+  // LIMIT/OFFSET interpolated: Zod-validated positive integers capped at 100.
+  const rows = await query<Row>(
+    `${SELECT} WHERE r.user_id = ? ORDER BY r.created_at DESC, r.id DESC
+      LIMIT ${Number(paging.pageSize)} OFFSET ${Number((paging.page - 1) * paging.pageSize)}`,
+    [userId],
+  );
+  return {
+    items: rows.map(toRecord),
+    total: Number(count?.total ?? 0),
+    page: paging.page,
+    pageSize: paging.pageSize,
+  };
 }
 
+/** One page of the admin queue: pending first, oldest first within it. */
 export async function listQueue(
   status: RegularisationStatus | 'all',
-): Promise<Regularisation[]> {
+  paging: { page: number; pageSize: number } = { page: 1, pageSize: 25 },
+): Promise<Page<Regularisation>> {
+  const where = status === 'all' ? '' : 'WHERE r.status = ?';
+  const params = status === 'all' ? [] : [status];
+  const count = await queryOne<RowDataPacket & { total: number }>(
+    `SELECT COUNT(*) AS total FROM hr_regularisations r ${where}`,
+    params,
+  );
   const rows = await query<Row>(
     `${SELECT}
-      ${status === 'all' ? '' : 'WHERE r.status = ?'}
-      ORDER BY (r.status = 'pending') DESC, r.created_at ASC
-      LIMIT 500`,
-    status === 'all' ? [] : [status],
+      ${where}
+      ORDER BY (r.status = 'pending') DESC, r.created_at ASC, r.id ASC
+      LIMIT ${Number(paging.pageSize)} OFFSET ${Number((paging.page - 1) * paging.pageSize)}`,
+    params,
   );
-  return rows.map(toRecord);
+  return {
+    items: rows.map(toRecord),
+    total: Number(count?.total ?? 0),
+    page: paging.page,
+    pageSize: paging.pageSize,
+  };
 }
 
 export async function findById(id: number): Promise<Regularisation | null> {
@@ -171,6 +215,12 @@ export async function findById(id: number): Promise<Regularisation | null> {
 }
 
 export type DecisionResult = { ok: true } | { ok: false; reason: 'not_pending' };
+
+/**
+ * Who decided. `type` names the id space: 'admin' is the admin portal's actor, 'manager'
+ * an hr_users id deciding for their team in the app.
+ */
+export type Reviewer = { type: 'admin' | 'manager'; id: number | null; name: string | null };
 
 /**
  * Approves a request and WRITES the correction.
@@ -188,14 +238,15 @@ export type DecisionResult = { ok: true } | { ok: false; reason: 'not_pending' }
  */
 export async function approve(
   id: number,
-  adminId: number | null,
+  reviewer: Reviewer,
   note: string | null,
 ): Promise<DecisionResult> {
   const moved = await execute(
     `UPDATE hr_regularisations
-        SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), review_note = ?
+        SET status = 'approved', reviewed_by = ?, reviewer_type = ?, reviewer_name = ?,
+            reviewed_at = NOW(), review_note = ?
       WHERE id = ? AND status = 'pending'`,
-    [adminId, note, id],
+    [reviewer.id, reviewer.type, reviewer.name, note, id],
   );
 
   if (moved.affectedRows === 0) return { ok: false, reason: 'not_pending' };
@@ -266,23 +317,45 @@ export async function approve(
   const { recomputeDayFor } = await import('./attendance.service');
   await recomputeDayFor(request.userId, request.workDate);
 
+  await notifyHr({
+    userIds: [request.userId],
+    kind: 'regularisation_approved',
+    title: 'Attendance correction approved',
+    body: `Your correction for ${request.workDate} was approved${note ? `: ${note}` : '.'}`,
+    entityType: 'regularisation',
+    entityId: id,
+  });
+
   logger.info('HR regularisation approved', { id, userId: request.userId });
   return { ok: true };
 }
 
 export async function reject(
   id: number,
-  adminId: number | null,
+  reviewer: Reviewer,
   note: string | null,
 ): Promise<DecisionResult> {
   const result = await execute(
     `UPDATE hr_regularisations
-        SET status = 'rejected', reviewed_by = ?, reviewed_at = NOW(), review_note = ?
+        SET status = 'rejected', reviewed_by = ?, reviewer_type = ?, reviewer_name = ?,
+            reviewed_at = NOW(), review_note = ?
       WHERE id = ? AND status = 'pending'`,
-    [adminId, note, id],
+    [reviewer.id, reviewer.type, reviewer.name, note, id],
   );
 
   if (result.affectedRows === 0) return { ok: false, reason: 'not_pending' };
+
+  const request = await findById(id);
+  if (request) {
+    await notifyHr({
+      userIds: [request.userId],
+      kind: 'regularisation_rejected',
+      title: 'Attendance correction not approved',
+      body: `Your correction for ${request.workDate} was not approved${note ? `: ${note}` : '.'}`,
+      entityType: 'regularisation',
+      entityId: id,
+    });
+  }
 
   logger.info('HR regularisation rejected', { id });
   return { ok: true };

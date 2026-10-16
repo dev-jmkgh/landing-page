@@ -2,30 +2,27 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
+import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
 import { formatDateTime } from '@/lib/telecalling';
 import {
-  HR_ROLE_LABELS,
   hrApi,
-  type HrApprovalStatus,
+  pageCount,
   type HrEmployee,
   type HrPaginated,
 } from '@/lib/hr';
 import { EmptyPanel, Pager, Tag, TableSkeleton } from '../telecalling/shared';
-import { WORK_MODE_LABELS } from '@/lib/hr';
-import { AssignmentDialog } from './AssignmentDialog';
+import { AddEmployeeDialog } from './people/AddEmployeeDialog';
+import { EmployeeDetail } from './people/EmployeeDetail';
+import { EmployeeDirectory } from './people/EmployeeDirectory';
+import { isAbort } from './people/shared';
+import { useOrgLists } from './people/useOrgLists';
 
 /**
- * HR employees, and the queue of people waiting to be let in.
- *
- * WHY THIS SCREEN EXISTS
- * ----------------------
- * Employees register themselves in the HR app and cannot sign in until somebody approves
- * them. The backend has enforced that from the start, but there was no surface for it —
- * so an applicant sat on the app's "waiting for approval" screen and the only way to let
- * them in was to call the API by hand. That made HR self-signup unusable in practice.
+ * HR employees: the directory, one employee's full record, and the queue of people
+ * waiting to be let in.
  *
  * WHY IT IS NOT THE TELECALLING EMPLOYEES SCREEN
  * ----------------------------------------------
@@ -36,23 +33,199 @@ import { AssignmentDialog } from './AssignmentDialog';
  * independently: approving here does not approve there, and deactivating here does not
  * touch their lead access.
  *
- * `formatDateTime` is imported from the telecalling lib rather than duplicated. It is a
- * date formatter, not domain vocabulary — the separation is about accounts and tokens,
- * not about owning a second copy of `toLocaleString`.
+ * THE THREE TABS
+ * --------------
+ * Employees is the directory (`GET /employees`), alphabetical and filterable. Pending
+ * approval and Rejected are the signup queue (`GET /registrations`), ordered by who has
+ * waited longest — the order that queue is worked in. Opening anybody, from any tab,
+ * shows their record in place of the list; the list stays mounted behind it so Back
+ * returns to the same page and filters.
+ *
+ * Employees can now also be ADDED here: the backend gained an admin-create endpoint, so an
+ * administrator can vouch for somebody directly instead of waiting for them to sign up.
  */
 
 const PAGE_SIZE = 25;
 
-/**
- * `approved` first and by default: the everyday task here is managing staff, not
- * processing signups. The pending tab carries a count so a waiting applicant is visible
- * without opening it.
- */
-const TABS: { key: HrApprovalStatus; label: string }[] = [
-  { key: 'approved', label: 'Employees' },
+type Tab = 'directory' | 'pending' | 'rejected';
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'directory', label: 'Employees' },
   { key: 'pending', label: 'Pending approval' },
   { key: 'rejected', label: 'Rejected' },
 ];
+
+export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const org = useOrgLists(onUnauthorized);
+
+  const [tab, setTab] = useState<Tab>('directory');
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  /** The employee whose record is open, if any. The list stays mounted underneath. */
+  const [opened, setOpened] = useState<HrEmployee | null>(null);
+  /** Bumped when an employee changed elsewhere, so the list behind re-reads its page. */
+  const [reloadToken, setReloadToken] = useState(0);
+
+  /** Whatever opened the record, to hand focus back to on Back. */
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const tabList = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * The badge count, loaded separately and allowed to fail quietly.
+   *
+   * A missing badge is a far smaller problem than an error banner over a working screen,
+   * and cancelling this on every keystroke would leave it blank more often than not.
+   */
+  const refreshPendingCount = useCallback(async () => {
+    try {
+      setPendingCount(await hrApi.pendingCount());
+    } catch {
+      setPendingCount(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshPendingCount();
+  }, [refreshPendingCount]);
+
+  const open = useCallback((employee: HrEmployee) => {
+    // The name button that was pressed. A row double-click leaves focus on the page
+    // itself, and "returning" there would drop a keyboard user at the top.
+    const active = document.activeElement;
+    returnFocus.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    setNotice(null);
+    setOpened(employee);
+  }, []);
+
+  const back = () => {
+    setOpened(null);
+    window.setTimeout(() => {
+      const target = returnFocus.current;
+      // The row may have left the page while the record was open; fall back to the tabs.
+      if (target && target.isConnected) target.focus();
+      else tabList.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
+    }, 0);
+  };
+
+  const changed = useCallback(() => {
+    setReloadToken((value) => value + 1);
+    void refreshPendingCount();
+  }, [refreshPendingCount]);
+
+  return (
+    <>
+      {/*
+        `hidden`, not unmounted: the list keeps its page, filters and scroll while a
+        record is open, and Back returns to exactly where the administrator was.
+      */}
+      <div hidden={opened !== null}>
+        <div className="admin-toolbar hrp-tabbar">
+          <div className="admin-tabs" role="tablist" aria-label="HR employees" ref={tabList}>
+            {TABS.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                role="tab"
+                className="admin-tab"
+                aria-selected={tab === item.key}
+                onClick={() => {
+                  if (item.key === tab) return;
+                  setNotice(null);
+                  setTab(item.key);
+                }}
+              >
+                {item.label}
+                {/*
+                  Only on Pending, and only when something is waiting. A "0" would be
+                  permanent furniture drawing the eye to an empty tab.
+                */}
+                {item.key === 'pending' && pendingCount !== null && pendingCount > 0 ? (
+                  <span className="tc-tab-count">{pendingCount}</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'directory' ? (
+            <div className="admin-filters">
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => {
+                  setNotice(null);
+                  setAdding(true);
+                }}
+              >
+                <Icon name="users" size={16} />
+                Add employee
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        {org.error ? <FormAlert variant="info">{org.error}</FormAlert> : null}
+        {notice ? <FormAlert variant="success">{notice}</FormAlert> : null}
+
+        {tab === 'directory' ? (
+          <EmployeeDirectory
+            departments={org.departments}
+            designations={org.designations}
+            reloadToken={reloadToken}
+            onOpen={open}
+            onAdd={() => setAdding(true)}
+            onNotice={setNotice}
+            onUnauthorized={onUnauthorized}
+          />
+        ) : (
+          <RegistrationQueue
+            // Keyed so switching between Pending and Rejected starts on page one.
+            key={tab}
+            approval={tab}
+            reloadToken={reloadToken}
+            onOpen={open}
+            onNotice={setNotice}
+            onDecided={changed}
+            onUnauthorized={onUnauthorized}
+          />
+        )}
+      </div>
+
+      {opened ? (
+        <EmployeeDetail
+          key={opened.id}
+          initial={opened}
+          departments={org.departments}
+          designations={org.designations}
+          onBack={back}
+          onChanged={changed}
+          onUnauthorized={onUnauthorized}
+        />
+      ) : null}
+
+      {adding ? (
+        <AddEmployeeDialog
+          departments={org.departments}
+          designations={org.designations}
+          onClose={() => setAdding(false)}
+          onCreated={(employee) => {
+            setAdding(false);
+            setTab('directory');
+            setNotice(
+              `${employee.name} added (${employee.employeeCode}). They can sign in to the HR app now with the password you set — give it to them directly; it cannot be retrieved later.`,
+            );
+            changed();
+          }}
+          onUnauthorized={onUnauthorized}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The signup queue                                                            */
+/* -------------------------------------------------------------------------- */
 
 /**
  * How long somebody has been waiting, in words.
@@ -80,31 +253,42 @@ function waitingFor(registeredAt: string | null): string | null {
   return `waiting ${days} day${days === 1 ? '' : 's'}`;
 }
 
-export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
-  const [tab, setTab] = useState<HrApprovalStatus>('approved');
+function RegistrationQueue({
+  approval,
+  reloadToken,
+  onOpen,
+  onNotice,
+  onDecided,
+  onUnauthorized,
+}: {
+  approval: 'pending' | 'rejected';
+  reloadToken: number;
+  onOpen: (employee: HrEmployee) => void;
+  onNotice: (message: string | null) => void;
+  onDecided: () => void;
+  onUnauthorized: () => void;
+}) {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
 
-  const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [data, setData] = useState<HrPaginated<HrEmployee> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
-  /** The employee whose attendance rule is being edited, if any. */
-  const [assigning, setAssigning] = useState<HrEmployee | null>(null);
 
   const abort = useRef<AbortController | null>(null);
 
+  // The search box, debounced; the page resets only when the settled text changes.
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(search.trim()), 350);
+    const next = search.trim();
+    if (next === debounced) return undefined;
+    const timer = window.setTimeout(() => {
+      setDebounced(next);
+      setPage(1);
+    }, 350);
     return () => window.clearTimeout(timer);
-  }, [search]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [tab, debounced]);
+  }, [search, debounced]);
 
   const load = useCallback(async () => {
     abort.current?.abort();
@@ -115,72 +299,52 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
     setError(null);
 
     try {
-      setData(
-        await hrApi.listEmployees(
-          { page, pageSize: PAGE_SIZE, approval: tab, q: debounced || undefined },
-          controller.signal,
-        ),
+      const result = await hrApi.listEmployees(
+        { page, pageSize: PAGE_SIZE, approval, q: debounced || undefined },
+        controller.signal,
       );
+      // A page past the end — its last applicant was just decided — steps back one.
+      if (result.items.length === 0 && result.total > 0 && page > 1) {
+        setPage(pageCount(result));
+        return;
+      }
+      setData(result);
     } catch (caught) {
-      if (caught instanceof DOMException && caught.name === 'AbortError') return;
+      if (isAbort(caught)) return;
       if (caught instanceof ApiError && caught.status === 401) {
         onUnauthorized();
         return;
       }
-      setError(caught instanceof ApiError ? caught.message : 'Could not load HR employees.');
+      setError(caught instanceof ApiError ? caught.message : 'Could not load registrations.');
     } finally {
-      setLoading(false);
+      if (abort.current === controller) setLoading(false);
     }
-  }, [page, tab, debounced, onUnauthorized]);
+  }, [page, approval, debounced, onUnauthorized]);
 
   useEffect(() => {
     void load();
-  }, [load]);
-
-  /**
-   * The badge count, loaded separately and allowed to fail quietly.
-   *
-   * A missing badge is a far smaller problem than an error banner over a working screen,
-   * and cancelling this on every keystroke would leave it blank more often than not.
-   */
-  const refreshPendingCount = useCallback(async () => {
-    try {
-      setPendingCount(await hrApi.pendingCount());
-    } catch {
-      setPendingCount(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshPendingCount();
-  }, [refreshPendingCount]);
+  }, [load, reloadToken]);
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  /* ------------------------------------------------ decisions */
-
   /**
-   * Runs one action and reloads.
+   * Runs one decision and reloads.
    *
-   * Reloads rather than patching the row in place: the row usually leaves the tab it was
-   * acted on from, and the server refuses a second decision with a 400, which is only
+   * Reloads rather than patching the row in place: the row leaves the tab it was acted
+   * on from, and the server refuses a second decision with a 400, which is only
    * recoverable by re-reading. Two administrators working the queue together is exactly
    * when this screen is busiest.
    */
-  const act = async (
-    employee: HrEmployee,
-    action: () => Promise<HrEmployee>,
-    success: string,
-  ) => {
+  const act = async (employee: HrEmployee, action: () => Promise<HrEmployee>, success: string) => {
     setBusyId(employee.id);
     setError(null);
-    setNotice(null);
+    onNotice(null);
 
     try {
       await action();
-      setNotice(success);
+      onNotice(success);
+      onDecided();
       await load();
-      await refreshPendingCount();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) return onUnauthorized();
 
@@ -196,6 +360,7 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
       }
 
       setError(caught instanceof ApiError ? caught.message : 'Could not update that account.');
+      await load();
     } finally {
       setBusyId(null);
     }
@@ -250,57 +415,22 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
     );
   };
 
-  const setActive = async (employee: HrEmployee, active: boolean) => {
-    if (!active) {
-      const confirmed = window.confirm(
-        `Switch off ${employee.name}'s HR access? They are signed out of the HR app on every device straight away.\n\nThis does NOT affect any telecalling account they hold — that is a separate login.`,
-      );
-      if (!confirmed) return;
-    }
-
-    await act(
-      employee,
-      () => hrApi.setActive(employee.id, active),
-      active
-        ? `${employee.name} can sign in to the HR app again.`
-        : `${employee.name}'s HR access is switched off and their devices are signed out.`,
-    );
-  };
-
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const nameButton = (employee: HrEmployee) => (
+    <button type="button" className="tc-link-button hrp-name-link" onClick={() => onOpen(employee)}>
+      {employee.name}
+    </button>
+  );
 
   return (
     <>
       <div className="admin-toolbar">
-        <div className="admin-tabs" role="tablist" aria-label="HR account approval state">
-          {TABS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              className="admin-tab"
-              aria-selected={tab === item.key}
-              onClick={() => setTab(item.key)}
-            >
-              {item.label}
-              {/*
-                Only on Pending, and only when something is waiting. A "0" would be
-                permanent furniture drawing the eye to an empty tab.
-              */}
-              {item.key === 'pending' && pendingCount !== null && pendingCount > 0 ? (
-                <span className="tc-tab-count">{pendingCount}</span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-
         <div className="admin-filters">
           <div className="field">
-            <label className="field__label" htmlFor="hr-emp-search">
+            <label className="field__label" htmlFor={`hr-queue-search-${approval}`}>
               Search
             </label>
             <input
-              id="hr-emp-search"
+              id={`hr-queue-search-${approval}`}
               className="input"
               type="search"
               value={search}
@@ -317,305 +447,179 @@ export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => voi
         </div>
       </div>
 
-      {/*
-        There is no "Add employee" button, and that is not an omission.
-
-        The HR backend has no admin-create endpoint: every HR account begins as a
-        self-registration, because the flow depends on the person confirming their own
-        email address. A button here would have to invent a password on their behalf and
-        skip the confirmation the approval gate relies on.
-      */}
-
       {error ? <FormAlert variant="error">{error}</FormAlert> : null}
-      {notice ? <FormAlert variant="success">{notice}</FormAlert> : null}
 
-      {assigning ? (
-        <AssignmentDialog
-          employee={assigning}
-          onUnauthorized={onUnauthorized}
-          onClose={() => setAssigning(null)}
-          onSaved={(message) => {
-            setAssigning(null);
-            setNotice(message);
-            void load();
-          }}
-        />
-      ) : null}
-
-      {loading && !data ? (
-        <TableSkeleton />
-      ) : !data || data.items.length === 0 ? (
-        tab === 'pending' ? (
-          <EmptyPanel
-            title="Nobody is waiting for approval"
-            message="When somebody signs up in the HR app they appear here, and cannot sign in until you approve them."
-          />
-        ) : tab === 'rejected' ? (
-          <EmptyPanel
-            title="No rejected registrations"
-            message="Registrations you turn down are kept here so there is a record of the decision and the reason given."
-          />
-        ) : (
-          <EmptyPanel
-            title="No HR employees yet"
-            message="Employees register themselves in the HR app. Approved accounts appear here."
-          />
-        )
-      ) : tab === 'pending' ? (
-        /* ---------------------------------------------- the signup queue */
-        <DataTable
-          rows={data.items}
-          rowKey={(employee) => employee.id}
-          rowBusy={(employee) => busyId === employee.id}
-          minWidth="62rem"
-          caption="People who have signed up in the HR app and are waiting for approval"
-          columns={[
-            {
-              key: 'applicant',
-              header: 'Applicant',
-              render: (employee) => (
-                <CellStack primary={employee.name} secondary={employee.email}>
-                  <span className="tc-muted tc-mono">{employee.employeeCode}</span>
-                </CellStack>
-              ),
-            },
-            {
-              key: 'phone',
-              header: 'Phone',
-              width: '10rem',
-              nowrap: true,
-              render: (employee) => employee.phone ?? <span className="tc-muted">—</span>,
-            },
-            {
-              key: 'email-confirmed',
-              header: 'Email',
-              width: '10rem',
-              nowrap: true,
-              /*
-                The single most useful column on this tab. An unconfirmed address cannot
-                be approved, so without this the administrator clicks Approve, gets a
-                refusal, and has no way to tell whether the queue is theirs to clear or
-                the applicant's.
-              */
-              render: (employee) =>
-                employee.emailVerifiedAt ? (
-                  <Tag tone="good">Confirmed</Tag>
-                ) : (
-                  <Tag tone="bad">Not confirmed</Tag>
-                ),
-            },
-            {
-              key: 'registered',
-              header: 'Signed up',
-              width: '11rem',
-              nowrap: true,
-              render: (employee) => (
-                <CellStack
-                  primary={formatDateTime(employee.registeredAt)}
-                  secondary={waitingFor(employee.registeredAt)}
-                />
-              ),
-            },
-            {
-              key: 'actions',
-              header: 'Actions',
-              align: 'end',
-              width: '15rem',
-              nowrap: true,
-              render: (employee) => (
-                <CellActions>
-                  <button
-                    type="button"
-                    className="btn btn--primary btn--sm"
-                    disabled={busyId === employee.id || employee.emailVerifiedAt === null}
-                    /*
-                      Disabled rather than hidden while the address is unconfirmed: a
-                      missing button reads as a bug, a disabled one plus the Email column
-                      beside it reads as "not yet".
-                    */
-                    title={
-                      employee.emailVerifiedAt === null
-                        ? 'They have not confirmed their email address yet'
-                        : undefined
-                    }
-                    onClick={() => void approve(employee)}
-                  >
-                    <Icon name="check" size={15} />
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    disabled={busyId === employee.id}
-                    onClick={() => void reject(employee)}
-                  >
-                    Reject
-                  </button>
-                </CellActions>
-              ),
-            },
-          ]}
-        />
-      ) : tab === 'rejected' ? (
-        /* -------------------------------------------------- turned down */
-        <DataTable
-          rows={data.items}
-          rowKey={(employee) => employee.id}
-          rowBusy={(employee) => busyId === employee.id}
-          minWidth="58rem"
-          caption="Rejected HR registrations"
-          columns={[
-            {
-              key: 'applicant',
-              header: 'Applicant',
-              width: '18rem',
-              render: (employee) => (
-                <CellStack primary={employee.name} secondary={employee.email}>
-                  <span className="tc-muted tc-mono">{employee.employeeCode}</span>
-                </CellStack>
-              ),
-            },
-            {
-              key: 'decided',
-              header: 'Decided',
-              width: '11rem',
-              nowrap: true,
-              /*
-                `approvedAt` despite the name: the server writes that column on rejection
-                too, so on these rows it is the decision time. Labelled "Decided" for
-                that reason.
-              */
-              render: (employee) => formatDateTime(employee.approvedAt),
-            },
-            {
-              key: 'reason',
-              header: 'Reason given',
-              render: (employee) =>
-                employee.rejectionReason ?? <span className="tc-muted">No reason recorded</span>,
-            },
-          ]}
-        />
+      {data === null ? (
+        loading ? (
+          <TableSkeleton />
+        ) : null
       ) : (
-        /* ----------------------------------------------- approved staff */
-        <DataTable
-          rows={data.items}
-          rowKey={(employee) => employee.id}
-          rowBusy={(employee) => busyId === employee.id}
-          minWidth="76rem"
-          caption="HR app employees"
-          columns={[
-            {
-              key: 'employee',
-              header: 'Employee',
-              render: (employee) => (
-                <CellStack primary={employee.name} secondary={employee.email}>
-                  <span className="tc-muted tc-mono">{employee.employeeCode}</span>
-                </CellStack>
-              ),
-            },
-            {
-              key: 'phone',
-              header: 'Phone',
-              width: '10rem',
-              nowrap: true,
-              render: (employee) => employee.phone ?? <span className="tc-muted">—</span>,
-            },
-            {
-              key: 'role',
-              header: 'Access level',
-              width: '10rem',
-              nowrap: true,
-              render: (employee) => HR_ROLE_LABELS[employee.role] ?? employee.role,
-            },
-            {
-              key: 'rule',
-              header: 'Attendance rule',
-              width: '15rem',
-              render: (employee) => (
-                <CellStack
-                  primary={WORK_MODE_LABELS[employee.workMode] ?? employee.workMode}
+        <LoadingOverlay busy={loading}>
+          {data.items.length === 0 ? (
+            debounced ? (
+              <EmptyPanel
+                title="Nobody matches that search"
+                message="Try another name, email or code."
+                actionLabel="Clear search"
+                onAction={() => {
+                  setSearch('');
+                  setDebounced('');
+                  setPage(1);
+                }}
+              />
+            ) : approval === 'pending' ? (
+              <EmptyPanel
+                title="Nobody is waiting for approval"
+                message="When somebody signs up in the HR app they appear here, and cannot sign in until you approve them."
+              />
+            ) : (
+              <EmptyPanel
+                title="No rejected registrations"
+                message="Registrations you turn down are kept here so there is a record of the decision and the reason given."
+              />
+            )
+          ) : approval === 'pending' ? (
+            <DataTable
+              rows={data.items}
+              rowKey={(employee) => employee.id}
+              rowBusy={(employee) => busyId === employee.id}
+              minWidth="62rem"
+              caption="People who have signed up in the HR app and are waiting for approval"
+              columns={[
+                {
+                  key: 'applicant',
+                  header: 'Applicant',
+                  render: (employee) => (
+                    <CellStack primary={nameButton(employee)} secondary={employee.email}>
+                      <span className="tc-muted tc-mono">{employee.employeeCode}</span>
+                    </CellStack>
+                  ),
+                },
+                {
+                  key: 'phone',
+                  header: 'Phone',
+                  width: '10rem',
+                  nowrap: true,
+                  render: (employee) => employee.phone ?? <span className="tc-muted">—</span>,
+                },
+                {
+                  key: 'email-confirmed',
+                  header: 'Email',
+                  width: '10rem',
+                  nowrap: true,
                   /*
-                    An office worker with no site cannot check in at all, so that gap
-                    is called out here rather than left as a blank cell — this column
-                    is the only place an administrator would notice it before the
-                    employee does.
+                    The single most useful column on this tab. An unconfirmed address
+                    cannot be approved, so without this the administrator clicks Approve,
+                    gets a refusal, and has no way to tell whether the queue is theirs to
+                    clear or the applicant's.
                   */
-                  secondary={
-                    employee.workMode === 'office'
-                      ? (employee.workLocationName ?? 'no site — cannot check in')
-                      : 'no location check'
-                  }
-                >
-                  <span className="tc-muted">{employee.shiftName ?? 'no shift'}</span>
-                </CellStack>
-              ),
-            },
-            {
-              key: 'state',
-              header: 'State',
-              width: '8rem',
-              nowrap: true,
-              render: (employee) =>
-                employee.isActive ? (
-                  <Tag tone="good">Active</Tag>
-                ) : (
-                  <Tag tone="bad">Switched off</Tag>
-                ),
-            },
-            {
-              key: 'last-login',
-              header: 'Last signed in',
-              width: '11rem',
-              nowrap: true,
-              /*
-                Their last sign-in TO THE HR APP. It does not move when they use the
-                telecaller app — that is a different account with its own timestamp.
-              */
-              render: (employee) =>
-                employee.lastLoginAt ? (
-                  formatDateTime(employee.lastLoginAt)
-                ) : (
-                  <span className="tc-muted">Never</span>
-                ),
-            },
-            {
-              key: 'actions',
-              header: 'Actions',
-              align: 'end',
-              width: '14rem',
-              nowrap: true,
-              render: (employee) => (
-                <CellActions>
-                  <button
-                    type="button"
-                    className="btn btn--outline btn--sm"
-                    disabled={busyId === employee.id}
-                    onClick={() => setAssigning(employee)}
-                  >
-                    <Icon name="pin" size={14} />
-                    Rule
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    disabled={busyId === employee.id}
-                    onClick={() => void setActive(employee, !employee.isActive)}
-                  >
-                    {employee.isActive ? 'Switch off' : 'Switch on'}
-                  </button>
-                </CellActions>
-              ),
-            },
-          ]}
-        />
+                  render: (employee) =>
+                    employee.emailVerifiedAt ? (
+                      <Tag tone="good">Confirmed</Tag>
+                    ) : (
+                      <Tag tone="bad">Not confirmed</Tag>
+                    ),
+                },
+                {
+                  key: 'registered',
+                  header: 'Signed up',
+                  width: '11rem',
+                  nowrap: true,
+                  render: (employee) => (
+                    <CellStack
+                      primary={formatDateTime(employee.registeredAt)}
+                      secondary={waitingFor(employee.registeredAt)}
+                    />
+                  ),
+                },
+                {
+                  key: 'actions',
+                  header: 'Actions',
+                  align: 'end',
+                  width: '15rem',
+                  nowrap: true,
+                  render: (employee) => (
+                    <CellActions>
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        disabled={busyId === employee.id || employee.emailVerifiedAt === null}
+                        /*
+                          Disabled rather than hidden while the address is unconfirmed: a
+                          missing button reads as a bug, a disabled one plus the Email
+                          column beside it reads as "not yet".
+                        */
+                        title={
+                          employee.emailVerifiedAt === null
+                            ? 'They have not confirmed their email address yet'
+                            : undefined
+                        }
+                        onClick={() => void approve(employee)}
+                      >
+                        <Icon name="check" size={15} />
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        disabled={busyId === employee.id}
+                        onClick={() => void reject(employee)}
+                      >
+                        Reject
+                      </button>
+                    </CellActions>
+                  ),
+                },
+              ]}
+            />
+          ) : (
+            <DataTable
+              rows={data.items}
+              rowKey={(employee) => employee.id}
+              rowBusy={(employee) => busyId === employee.id}
+              minWidth="58rem"
+              caption="Rejected HR registrations"
+              columns={[
+                {
+                  key: 'applicant',
+                  header: 'Applicant',
+                  width: '18rem',
+                  render: (employee) => (
+                    <CellStack primary={nameButton(employee)} secondary={employee.email}>
+                      <span className="tc-muted tc-mono">{employee.employeeCode}</span>
+                    </CellStack>
+                  ),
+                },
+                {
+                  key: 'decided',
+                  header: 'Decided',
+                  width: '11rem',
+                  nowrap: true,
+                  /*
+                    `approvedAt` despite the name: the server writes that column on
+                    rejection too, so on these rows it is the decision time. Labelled
+                    "Decided" for that reason.
+                  */
+                  render: (employee) => formatDateTime(employee.approvedAt),
+                },
+                {
+                  key: 'reason',
+                  header: 'Reason given',
+                  render: (employee) =>
+                    employee.rejectionReason ?? <span className="tc-muted">No reason recorded</span>,
+                },
+              ]}
+            />
+          )}
+        </LoadingOverlay>
       )}
 
-      {data && data.items.length > 0 ? (
+      {data && data.total > 0 ? (
         <Pager
           page={data.page}
-          totalPages={totalPages}
+          totalPages={pageCount(data)}
           total={data.total}
-          noun={tab === 'approved' ? 'employee' : 'registration'}
+          noun="registration"
           busy={loading}
           onChange={setPage}
         />

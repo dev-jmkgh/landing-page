@@ -1,5 +1,11 @@
 import { execute, query, queryOne, type RowDataPacket } from '../../db/pool';
-import type { HrApprovalStatus, HrEmployeeProfile, HrRole } from './hr.schema';
+import type {
+  HrApprovalStatus,
+  HrEmployeeProfile,
+  HrEmploymentStatus,
+  HrEmploymentType,
+  HrRole,
+} from './hr.schema';
 
 /**
  * Reads and writes against `hr_users`.
@@ -34,19 +40,56 @@ export interface HrUserRow extends RowDataPacket {
   approved_at: Date | string | null;
   last_login_at: Date | string | null;
   created_at: Date | string;
+  department_id: number | null;
+  department_name: string | null;
+  designation_id: number | null;
+  designation_name: string | null;
+  manager_id: number | null;
+  manager_name: string | null;
+  joining_date: string | null;
+  exit_date: string | null;
+  employment_type: HrEmploymentType;
+  employment_status: HrEmploymentStatus;
+  date_of_birth: string | null;
+  address: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
 }
 
+/*
+ * The profile columns, read through the joins in HR_USER_FROM.
+ *
+ * Calendar dates are formatted in SQL: the driver reads a bare DATE through the
+ * UTC-pinned pool as midnight UTC, which renders as the previous day anywhere west of
+ * it. A joining date must stay the date HR typed.
+ */
 const HR_USER_COLUMNS = `
-  id, employee_code, name, email, email_verified_at, phone, role,
-  is_active, approval_status, rejection_reason, registered_at,
-  approved_at, last_login_at, created_at
-`;
-
-/* The same columns prefixed for the join below, plus the assignment. */
-const HR_USER_LIST_COLUMNS = `
   u.id, u.employee_code, u.name, u.email, u.email_verified_at, u.phone, u.role,
   u.is_active, u.approval_status, u.rejection_reason, u.registered_at,
   u.approved_at, u.last_login_at, u.created_at,
+  u.department_id, d.name AS department_name,
+  u.designation_id, g.name AS designation_name,
+  u.manager_id, m.name AS manager_name,
+  DATE_FORMAT(u.joining_date, '%Y-%m-%d')  AS joining_date,
+  DATE_FORMAT(u.exit_date, '%Y-%m-%d')     AS exit_date,
+  u.employment_type, u.employment_status,
+  DATE_FORMAT(u.date_of_birth, '%Y-%m-%d') AS date_of_birth,
+  u.address, u.emergency_contact_name, u.emergency_contact_phone
+`;
+
+/** The joins every profile read goes through. Aliases: d, g, m (manager), l, s. */
+export const HR_USER_FROM = `
+  hr_users u
+  LEFT JOIN hr_departments d    ON d.id = u.department_id
+  LEFT JOIN hr_designations g   ON g.id = u.designation_id
+  LEFT JOIN hr_users m          ON m.id = u.manager_id
+  LEFT JOIN hr_work_locations l ON l.id = u.work_location_id
+  LEFT JOIN hr_shifts s         ON s.id = u.shift_id
+`;
+
+/* The same columns, plus the assignment, for the admin list. */
+const HR_USER_LIST_COLUMNS = `
+  ${HR_USER_COLUMNS},
   u.work_mode, u.work_location_id, u.shift_id,
   l.name AS work_location_name, s.name AS shift_name
 `;
@@ -71,12 +114,26 @@ export function toHrProfile(row: HrUserRow): HrEmployeeProfile {
     approvedAt: iso(row.approved_at),
     lastLoginAt: iso(row.last_login_at),
     createdAt: iso(row.created_at),
+    departmentId: row.department_id,
+    departmentName: row.department_name,
+    designationId: row.designation_id,
+    designationName: row.designation_name,
+    managerId: row.manager_id,
+    managerName: row.manager_name,
+    joiningDate: row.joining_date,
+    exitDate: row.exit_date,
+    employmentType: row.employment_type,
+    employmentStatus: row.employment_status,
+    dateOfBirth: row.date_of_birth,
+    address: row.address,
+    emergencyContactName: row.emergency_contact_name,
+    emergencyContactPhone: row.emergency_contact_phone,
   };
 }
 
 export async function findHrUser(id: number): Promise<HrEmployeeProfile | null> {
   const row = await queryOne<HrUserRow>(
-    `SELECT ${HR_USER_COLUMNS} FROM hr_users WHERE id = ? LIMIT 1`,
+    `SELECT ${HR_USER_COLUMNS} FROM ${HR_USER_FROM} WHERE u.id = ? LIMIT 1`,
     [id],
   );
   return row ? toHrProfile(row) : null;
@@ -84,7 +141,7 @@ export async function findHrUser(id: number): Promise<HrEmployeeProfile | null> 
 
 export async function findHrUserByEmail(email: string): Promise<HrEmployeeProfile | null> {
   const row = await queryOne<HrUserRow>(
-    `SELECT ${HR_USER_COLUMNS} FROM hr_users WHERE email = ? LIMIT 1`,
+    `SELECT ${HR_USER_COLUMNS} FROM ${HR_USER_FROM} WHERE u.email = ? LIMIT 1`,
     [email.trim().toLowerCase()],
   );
   return row ? toHrProfile(row) : null;
@@ -97,6 +154,20 @@ export async function findHrUserByEmail(email: string): Promise<HrEmployeeProfil
 export type HrRegistrationFilters = {
   approval?: HrApprovalStatus;
   q?: string;
+  /* The employee-directory filters (admin `/employees`). Each narrows; absent means any. */
+  departmentId?: number;
+  designationId?: number;
+  /** Direct reports of this hr_users id. */
+  managerId?: number;
+  workMode?: 'office' | 'remote' | 'field';
+  employmentStatus?: HrEmploymentStatus;
+  /** Whether the account may sign in (`is_active`), not the employment status. */
+  active?: boolean;
+  /**
+   * `queue` (the default) is the registrations order: pending first, newest first.
+   * `name` is the directory order — alphabetical, which is how people look a colleague up.
+   */
+  sort?: 'queue' | 'name';
   page: number;
   pageSize: number;
 };
@@ -135,7 +206,41 @@ export async function listHrUsers(
     params.push(term, term, term, term);
   }
 
+  if (filters.departmentId) {
+    conditions.push('u.department_id = ?');
+    params.push(filters.departmentId);
+  }
+  if (filters.designationId) {
+    conditions.push('u.designation_id = ?');
+    params.push(filters.designationId);
+  }
+  if (filters.managerId) {
+    conditions.push('u.manager_id = ?');
+    params.push(filters.managerId);
+  }
+  if (filters.workMode) {
+    conditions.push('u.work_mode = ?');
+    params.push(filters.workMode);
+  }
+  if (filters.employmentStatus) {
+    conditions.push('u.employment_status = ?');
+    params.push(filters.employmentStatus);
+  }
+  if (filters.active !== undefined) {
+    conditions.push('u.is_active = ?');
+    params.push(filters.active ? 1 : 0);
+  }
+
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  /* Fixed strings chosen by a closed union — never caller text. */
+  const orderBy =
+    filters.sort === 'name'
+      ? 'u.name ASC, u.id ASC'
+      : `/* Pending first: the queue exists to be emptied, not browsed. */
+        CASE u.approval_status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END,
+        u.registered_at DESC,
+        u.id DESC`;
 
   const countRow = await queryOne<RowDataPacket & { total: number }>(
     `SELECT COUNT(*) AS total FROM hr_users u ${where}`,
@@ -156,15 +261,9 @@ export async function listHrUsers(
    */
   const rows = await query<HrUserRow & HrAssignmentColumns>(
     `SELECT ${HR_USER_LIST_COLUMNS}
-       FROM hr_users u
-       LEFT JOIN hr_work_locations l ON l.id = u.work_location_id
-       LEFT JOIN hr_shifts s         ON s.id = u.shift_id
+       FROM ${HR_USER_FROM}
        ${where}
-      ORDER BY
-        /* Pending first: the queue exists to be emptied, not browsed. */
-        CASE u.approval_status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END,
-        u.registered_at DESC,
-        u.id DESC
+      ORDER BY ${orderBy}
       LIMIT ${filters.pageSize} OFFSET ${offset}`,
     params,
   );

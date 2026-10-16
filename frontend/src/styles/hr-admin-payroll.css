@@ -1,0 +1,940 @@
+/* ==========================================================================
+   HR admin — payroll (runs, payslips, salary structures)
+
+   Everything here is prefixed `hr-pay-` and builds on components.css, pages.css (the
+   admin shell, tabs, dialogs) and telecalling.css (tags, stat tiles, the admin dialog
+   layout), which are imported before it. Tokens only — no new colours.
+   ========================================================================== */
+
+/* ------------------------------------------------------------------- shell */
+
+/* FormAlert carries no margin of its own; inside payroll it sits above what it is about. */
+.hr-pay .alert {
+  margin-bottom: var(--space-4);
+}
+
+/*
+ * Headings that take focus when a view opens (a run, an employee, the list on the way
+ * back). They are focused by the screen, not by the reader, so the ring is kept for
+ * keyboard focus only.
+ */
+.hr-pay [tabindex='-1']:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* A button that reads as a link: a run's month, an employee's name in a table. */
+.hr-pay-link {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--admin-brand, var(--navy-700));
+  text-align: start;
+  cursor: pointer;
+}
+
+.hr-pay-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hr-pay-link:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Money that is the answer — net pay — reads a step heavier than the figures beside it. */
+.hr-pay-net {
+  font-weight: 700;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A CellStack primary line that is information, not a name. */
+.hr-pay-plain {
+  font-weight: 400;
+}
+
+.hr-pay-search-input {
+  min-width: min(15rem, 100%);
+}
+
+.hr-pay-search {
+  min-width: min(16rem, 100%);
+}
+
+.hr-pay-section {
+  margin-top: var(--space-6);
+}
+
+/* The runs table's dates column: two labelled lines. */
+.hr-pay-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-pay-dates__label {
+  display: inline-block;
+  min-width: 4.75rem;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* ------------------------------------------------------------------ buttons */
+
+/* The confirm button of a delete. */
+.btn.hr-pay-btn--danger {
+  background-color: var(--danger-600);
+  color: var(--color-on-dark);
+}
+
+.btn.hr-pay-btn--danger:hover:not(:disabled) {
+  background-color: var(--danger-600);
+  box-shadow: var(--shadow-md);
+  filter: brightness(0.92);
+}
+
+/* A destructive action that should be reachable but not look like the main choice. */
+.btn.hr-pay-btn--danger-text {
+  color: var(--danger-600);
+}
+
+.btn.hr-pay-btn--danger-text:hover:not(:disabled) {
+  background-color: var(--danger-050);
+  border-color: transparent;
+}
+
+/* ------------------------------------------------------------------ dialogs */
+
+.tc-dialog.hr-pay-dialog--narrow {
+  width: min(32rem, 100%);
+}
+
+/* The form is the dialog's flex child, so head and foot stay put while the body scrolls. */
+.hr-pay-dialog-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.hr-pay-confirm__text > .dialog__text {
+  margin-top: var(--space-3);
+}
+
+.hr-pay-fieldset {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.hr-pay-fieldset > legend {
+  padding: 0;
+  margin-bottom: 0.4rem;
+}
+
+.hr-pay-period {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+/* A label under a group's legend — "Month" under "Pay period", "Name" in a component. */
+.hr-pay-sublabel {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* --------------------------------------------------------------- run detail */
+
+.hr-pay-detail-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.hr-pay-run-head {
+  margin-bottom: var(--space-4);
+}
+
+.hr-pay-run-head__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.hr-pay-run-head__heading {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.hr-pay-run-head__sub {
+  margin: 0.3rem 0 0;
+}
+
+.hr-pay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+
+/* Why a button is disabled, or what a state means — said beside the actions. */
+.hr-pay-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+.hr-pay-hint svg {
+  flex: none;
+  margin-top: 0.15rem;
+}
+
+.hr-pay-missing p {
+  margin: 0;
+}
+
+.hr-pay-missing .tc-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hr-pay-empty-figures p {
+  margin: 0;
+  color: var(--ink-500);
+}
+
+/*
+ * Money in stat tiles. "₹2,67,406.67" at the tiles' usual 3xl overflows a tile at the
+ * narrower widths the grid allows, so these read one step smaller and may wrap at the
+ * comma rather than spill out of the card.
+ */
+.hr-pay-stats .tc-stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+}
+
+.hr-pay-stats .tc-stat__value {
+  font-size: var(--text-2xl);
+  overflow-wrap: anywhere;
+}
+
+/* ----------------------------------------------------------------- timeline */
+
+.hr-pay-timeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  list-style: none;
+}
+
+.hr-pay-timeline__step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.hr-pay-timeline__marker {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid var(--line-200);
+  border-radius: var(--radius-pill);
+  background-color: var(--surface);
+  color: var(--color-on-dark);
+}
+
+.hr-pay-timeline__step[data-state='done'] .hr-pay-timeline__marker {
+  border-color: var(--success-600);
+  background-color: var(--success-600);
+}
+
+.hr-pay-timeline__step[data-state='next'] .hr-pay-timeline__marker {
+  border-color: var(--admin-brand, var(--navy-500));
+  background-color: var(--admin-brand-tint, var(--surface-blue));
+}
+
+.hr-pay-timeline__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.hr-pay-timeline__title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--ink-900);
+}
+
+.hr-pay-timeline__step[data-state='todo'] .hr-pay-timeline__title {
+  color: var(--ink-500);
+}
+
+.hr-pay-timeline__detail {
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+  overflow-wrap: anywhere;
+}
+
+/* ----------------------------------------------------------------- payslips */
+
+/*
+ * The payslip table's scroll box is a size container, so an opened payslip can be
+ * exactly as wide as what is VISIBLE of the table (`100cqi`) and stick to its left edge.
+ * Without this the detail row is as wide as the whole 64rem table, and on a phone the
+ * day counts and lines would sit mostly off-screen behind a sideways scroll.
+ */
+.hr-pay-table-wrap {
+  container-type: inline-size;
+}
+
+.hr-pay-slip-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.hr-pay-slip-head > .tc-mono {
+  padding-left: 1.5rem;
+}
+
+.hr-pay-expander {
+  appearance: none;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--admin-brand, var(--navy-700));
+  text-align: start;
+  cursor: pointer;
+}
+
+.hr-pay-expander:hover .hr-pay-expander__name {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hr-pay-expander:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.hr-pay-expander__icon {
+  flex: none;
+  margin-top: 0.15rem;
+  transform: rotate(-90deg);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.hr-pay-expander[aria-expanded='true'] .hr-pay-expander__icon {
+  transform: rotate(0deg);
+}
+
+.hr-pay-expander__name {
+  overflow-wrap: anywhere;
+}
+
+.data-table tbody tr[data-expanded='true'] > td {
+  background-color: var(--surface-muted);
+  border-bottom-color: transparent;
+}
+
+.data-table tbody tr.hr-pay-detail-row,
+.data-table tbody tr.hr-pay-detail-row:hover {
+  background-color: var(--surface-muted);
+}
+
+.data-table tbody tr.hr-pay-detail-row > td {
+  padding: 0;
+}
+
+.hr-pay-detail {
+  position: sticky;
+  left: 0;
+  box-sizing: border-box;
+  width: 100cqi;
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-2) var(--space-5) var(--space-5);
+  text-align: start;
+  white-space: normal;
+}
+
+.hr-pay-detail__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--ink-900);
+}
+
+.hr-pay-detail__lines {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.hr-pay-detail__block {
+  min-width: 0;
+}
+
+.hr-pay-detail__lop {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--warning-600);
+}
+
+.hr-pay-detail__net {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background-color: var(--success-050);
+  color: var(--success-600);
+  font-weight: 600;
+}
+
+.hr-pay-detail__net strong {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The eleven day counts. */
+.hr-pay-days {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.hr-pay-days__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+}
+
+.hr-pay-days__item dt {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-500);
+}
+
+.hr-pay-days__item dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-pay-days__item[data-tone='warn'] {
+  border-color: var(--warning-600);
+  background-color: var(--warning-050);
+}
+
+.hr-pay-days__item[data-tone='warn'] dd {
+  color: var(--warning-600);
+}
+
+.hr-pay-days__hint {
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--ink-500);
+}
+
+/* ---------------------------------------------------------- line tables */
+
+/* Earnings, deductions and a structure's components: label first, figures right. */
+.hr-pay-lines-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+}
+
+.hr-pay-lines {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.hr-pay-lines th,
+.hr-pay-lines td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line-100);
+  text-align: end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-pay-lines th:first-child,
+.hr-pay-lines td:first-child {
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.hr-pay-lines thead th {
+  background-color: var(--surface-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.hr-pay-lines tbody th {
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.hr-pay-lines tbody td {
+  color: var(--ink-700);
+}
+
+.hr-pay-lines tfoot th,
+.hr-pay-lines tfoot td {
+  font-weight: 700;
+  color: var(--ink-900);
+  border-bottom: 0;
+}
+
+.hr-pay-lines tfoot tr:first-child > * {
+  border-top: 1px solid var(--line-200);
+}
+
+.hr-pay-lines tfoot .hr-pay-lines__net > * {
+  color: var(--success-600);
+}
+
+/* A structure's table: Type and Loss of pay are words, not figures. */
+.hr-pay-lines--structure th:nth-child(2),
+.hr-pay-lines--structure td:nth-child(2),
+.hr-pay-lines--structure th:nth-child(4),
+.hr-pay-lines--structure td:nth-child(4) {
+  text-align: start;
+}
+
+/* ------------------------------------------------------- salary structures */
+
+.hr-pay-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.hr-pay-summary__item {
+  flex: 1 1 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: var(--space-4);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+}
+
+.hr-pay-summary__label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.hr-pay-summary__value {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.hr-pay-summary__none {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 0.2rem;
+}
+
+.hr-pay-structures {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.hr-pay-structure {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* The structure payroll uses today, marked on its edge like a flagged table row. */
+.hr-pay-structure[data-standing='In force'] {
+  box-shadow: inset 3px 0 0 var(--success-600);
+}
+
+.hr-pay-structure__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.hr-pay-structure__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hr-pay-structure__title h4 {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--ink-900);
+}
+
+.hr-pay-structure__net {
+  margin: 0;
+}
+
+.hr-pay-structure__net strong {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-pay-structure__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+}
+
+.hr-pay-structure__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.hr-pay-structure__kept {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* ------------------------------------------------------- the structure form */
+
+.hr-pay-structure-form {
+  margin-bottom: var(--space-6);
+}
+
+.hr-pay-form-title {
+  margin: 0 0 0.25rem;
+}
+
+.hr-pay-structure-form .hr-pay-fieldset {
+  gap: var(--space-3);
+}
+
+.hr-pay-components-help {
+  margin: 0;
+  max-width: 62rem;
+  line-height: var(--leading-normal);
+}
+
+.hr-pay-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hr-pay-chips__label {
+  margin-right: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.hr-pay-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+/* Earnings green, deductions neutral — the same split as the component rows below. */
+.hr-pay-chip[data-kind='earning'] {
+  background-color: var(--success-050);
+  color: var(--success-600);
+}
+
+.hr-pay-chip[data-kind='deduction'] {
+  background-color: var(--surface-sunken);
+  color: var(--ink-700);
+}
+
+.hr-pay-chip:hover:not(:disabled) {
+  border-color: currentColor;
+}
+
+.hr-pay-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hr-pay-chip:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+.hr-pay-components-empty {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px dashed var(--line-200);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+  text-align: center;
+}
+
+.hr-pay-components {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hr-pay-component {
+  /* Anchors the row's visually hidden "Component N" label. */
+  position: relative;
+  display: grid;
+  grid-template-columns:
+    minmax(10rem, 2fr)
+    minmax(8rem, 1fr)
+    minmax(9rem, 1.2fr)
+    minmax(12.5rem, 1.4fr)
+    auto;
+  align-items: end;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-muted);
+  box-shadow: inset 3px 0 0 var(--success-600);
+}
+
+.hr-pay-component[data-kind='deduction'] {
+  box-shadow: inset 3px 0 0 var(--ink-400);
+}
+
+/* Level with the inputs beside it, which sit under a label. */
+.hr-pay-component__prorate {
+  padding-bottom: 0.45rem;
+}
+
+.hr-pay-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+  cursor: pointer;
+}
+
+.hr-pay-check input {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--admin-brand, var(--navy-700));
+}
+
+.hr-pay-amount-input {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-pay-component-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hr-pay-form-totals {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-muted);
+}
+
+.hr-pay-form-totals[data-invalid='true'] {
+  border-color: var(--danger-600);
+  background-color: var(--danger-050);
+}
+
+.hr-pay-form-totals:focus {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+.hr-pay-form-totals dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-8);
+  margin: 0;
+}
+
+.hr-pay-form-totals dt {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.hr-pay-form-totals dd {
+  margin: 0.15rem 0 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-pay-form-totals__net dd {
+  color: var(--success-600);
+}
+
+.hr-pay-form-totals[data-invalid='true'] .hr-pay-form-totals__net dd {
+  color: var(--danger-600);
+}
+
+.hr-pay-form-totals p {
+  margin: 0;
+}
+
+.hr-pay-form-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* --------------------------------------------------------------- responsive */
+
+@media (max-width: 75rem) {
+  /* Name and type on one line, amount and its loss-of-pay rule on the next. */
+  .hr-pay-component {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+  }
+
+  .hr-pay-component__amount {
+    grid-column: 1 / 2;
+  }
+
+  .hr-pay-component__prorate {
+    grid-column: 2 / 4;
+  }
+
+  .hr-pay-component__remove {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 40rem) {
+  .hr-pay-component {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hr-pay-component__amount,
+  .hr-pay-component__prorate,
+  .hr-pay-component__remove {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .hr-pay-component__prorate {
+    padding-bottom: 0;
+  }
+
+  .hr-pay-component__remove {
+    justify-self: start;
+  }
+
+  .hr-pay-detail {
+    padding: var(--space-2) var(--space-4) var(--space-4);
+  }
+
+  .hr-pay-period {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

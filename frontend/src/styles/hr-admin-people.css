@@ -1,0 +1,714 @@
+/* ==========================================================================
+   HR admin — people and attendance
+
+   The Employees, Attendance, Corrections, Workplaces and Organisation sections of the
+   HR admin. Everything is prefixed `hrp-` and builds on the shared admin pieces —
+   `.data-table`, `.tc-dialog`, `.tc-facts`, `.admin-tabs` — rather than restyling them.
+
+   Imported after telecalling.css in globals.css, so these rules can lean on it.
+   Tokens only: no new colours.
+   ========================================================================== */
+
+/* ------------------------------------------------------------------ toolbar */
+
+/* The section's own tabs, a little apart from the filters beneath them. */
+.hrp-tabbar {
+  margin-bottom: var(--space-4);
+}
+
+/*
+ * A filter bar that wraps into an even grid rather than a ragged row. The directory has
+ * eight filters; as a flex row they ran to three uneven lines at 1440px and the Refresh
+ * button floated wherever the last line ended.
+ */
+.hrp-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+  margin-bottom: var(--space-5);
+}
+
+/* When it sits inside `.admin-toolbar` it takes the whole row and the toolbar's margin. */
+.admin-toolbar > .hrp-filters {
+  flex: 1 1 100%;
+  margin-bottom: 0;
+}
+
+.hrp-filters__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+/* "16 Oct 2026 (today) · 6 employees" — the line that says what the table is showing. */
+.hrp-caption {
+  margin: 0 0 var(--space-3);
+}
+
+.hrp-toolbar-note {
+  margin: 0;
+  align-self: center;
+}
+
+/* Tags that sit together in a cell: Missing punch, Flagged, the punch flags. */
+.hrp-markers {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.hrp-markers--stack {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+/* A name that opens the record: link colour, full width of the text, never wrapped mid-name. */
+.hrp-name-link {
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.hrp-name-link:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Headings that receive focus by script are not controls, so they get no ring. */
+.hrp-focus-heading:focus,
+.hrp-detail__name:focus {
+  outline: none;
+}
+
+.hrp-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.hrp-prose {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--ink-700);
+}
+
+/* ---------------------------------------------------------------- weekdays */
+
+.hrp-weekdays {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.hrp-weekdays__day {
+  min-width: 3rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  color: var(--ink-700);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.hrp-weekdays__day:hover:not(:disabled) {
+  border-color: var(--blue-300);
+  background-color: var(--navy-050);
+}
+
+.hrp-weekdays__day[aria-pressed='true'] {
+  border-color: var(--navy-800);
+  background-color: var(--navy-800);
+  color: var(--color-on-dark, #fff);
+}
+
+.hrp-weekdays__day:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+.hrp-weekdays__day:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* ------------------------------------------------------------------ picker */
+
+.hrp-picker {
+  position: relative;
+}
+
+.hrp-picker__box {
+  position: relative;
+}
+
+.hrp-picker__spinner {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  transform: translateY(-50%);
+  display: inline-flex;
+}
+
+.hrp-picker__panel {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* Floats over the content in the filter bar, so choosing does not push the table down. */
+.hrp-picker--popover .hrp-picker__panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-dropdown);
+  width: max(100%, 18rem);
+  margin-top: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.hrp-picker__status {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.hrp-picker__status:empty {
+  display: none;
+}
+
+.hrp-picker__list {
+  display: grid;
+  gap: var(--space-1);
+  max-height: 16rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.hrp-picker__option {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.hrp-picker__option:hover,
+.hrp-picker__option:focus-visible {
+  border-color: var(--admin-brand, var(--navy-700));
+  background-color: var(--admin-brand-tint, var(--surface-blue));
+  outline: none;
+}
+
+.hrp-picker__name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.hrp-picker__meta {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+  overflow-wrap: anywhere;
+}
+
+/* The chosen person, with Change and Remove beside the name. */
+.hrp-picker__chosen {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-height: 2.9rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-muted);
+  font-size: var(--text-sm);
+  color: var(--ink-900);
+}
+
+.hrp-picker__keep {
+  justify-self: start;
+}
+
+/* ----------------------------------------------------------------- dialogs */
+
+/*
+ * A form inside `.tc-dialog`. The dialog is a flex column whose body scrolls between a
+ * fixed head and foot; wrapping body and foot in a <form> would break that unless the
+ * form is itself a flex column that may shrink.
+ */
+.hrp-dialog-form {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.hrp-dialog-form .textarea {
+  min-height: 4.75rem;
+}
+
+.hrp-dialog--narrow {
+  width: min(34rem, 100%);
+}
+
+/* The correction dialog's sessions: label, check-in, check-out, remove. */
+.hrp-sessions {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hrp-sessions__row {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-muted);
+}
+
+.hrp-sessions__label {
+  padding-top: 2.1rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.hrp-sessions__remove {
+  margin-top: 1.75rem;
+}
+
+.hrp-sessions__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* -------------------------------------------------------------- exceptions */
+
+.hrp-evidence {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hrp-evidence__session {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.hrp-evidence__title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--ink-700);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.hrp-evidence__punch {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.hrp-evidence__label {
+  font-weight: 600;
+  color: var(--ink-500);
+}
+
+.hrp-evidence__body {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* An employee's day, session by session, in the attendance tab. */
+.hrp-session-list {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.hrp-session-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ------------------------------------------------------------ detail view */
+
+.hrp-detail {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.hrp-detail__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'back back'
+    'identity actions';
+  align-items: end;
+  gap: var(--space-2) var(--space-4);
+}
+
+/* Pulled left by its own padding, so the arrow lines up with the name beneath it. */
+.hrp-detail__back {
+  grid-area: back;
+  justify-self: start;
+  margin-inline-start: -0.6rem;
+}
+
+.hrp-detail__identity {
+  grid-area: identity;
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.hrp-detail__name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+.hrp-detail__sub {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+.hrp-detail__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.hrp-detail__actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.hrp-detail__tabs {
+  justify-self: start;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.hrp-detail__panel {
+  min-width: 0;
+}
+
+.hrp-tab-body {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.hrp-tab-body > .admin-toolbar {
+  margin-bottom: var(--space-2);
+}
+
+/* The profile: groups of label/value pairs, two or three across where there is room. */
+.hrp-facts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.hrp-facts {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------- calendar */
+
+.hrp-month {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hrp-month__input {
+  width: auto;
+  min-width: 11rem;
+  padding-block: 0.45rem;
+}
+
+/* The month's totals, one chip per status that occurs. */
+.hrp-cal-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.hrp-cal-summary__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-pill);
+  background-color: var(--surface);
+  font-size: var(--text-sm);
+}
+
+.hrp-cal-summary__value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+}
+
+.hrp-cal-summary__label {
+  color: var(--ink-500);
+}
+
+.hrp-cal-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+}
+
+.hrp-cal {
+  width: 100%;
+  min-width: 21rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.hrp-cal th {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--line-200);
+  background-color: var(--surface-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--ink-500);
+  text-align: start;
+}
+
+.hrp-cal th abbr {
+  text-decoration: none;
+}
+
+.hrp-cal__cell {
+  height: 5.75rem;
+  padding: var(--space-2);
+  border: 1px solid var(--line-100);
+  vertical-align: top;
+  font-size: var(--text-xs);
+  color: var(--ink-700);
+}
+
+.hrp-cal__cell > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.hrp-cal__cell--blank {
+  background-color: var(--surface-muted);
+}
+
+.hrp-cal__num {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.hrp-cal__status {
+  margin-top: 0.15rem;
+  font-weight: 600;
+}
+
+.hrp-cal__meta {
+  color: var(--ink-500);
+}
+
+/* Day colours: the same tones the status tags use, as a wash behind the cell. */
+.hrp-cal__cell[data-status='present'] {
+  background-color: var(--success-050);
+}
+
+.hrp-cal__cell[data-status='present'] .hrp-cal__status {
+  color: var(--success-600);
+}
+
+.hrp-cal__cell[data-status='late'],
+.hrp-cal__cell[data-status='half_day'] {
+  background-color: var(--warning-050);
+}
+
+.hrp-cal__cell[data-status='late'] .hrp-cal__status,
+.hrp-cal__cell[data-status='half_day'] .hrp-cal__status {
+  color: var(--warning-600);
+}
+
+.hrp-cal__cell[data-status='absent'] {
+  background-color: var(--danger-050);
+}
+
+.hrp-cal__cell[data-status='absent'] .hrp-cal__status {
+  color: var(--danger-600);
+}
+
+.hrp-cal__cell[data-status='on_leave'] {
+  background-color: var(--info-050);
+}
+
+.hrp-cal__cell[data-status='on_leave'] .hrp-cal__status {
+  color: var(--info-600);
+}
+
+.hrp-cal__cell[data-status='holiday'],
+.hrp-cal__cell[data-status='weekly_off'] {
+  background-color: var(--surface-sunken);
+}
+
+.hrp-cal__cell[data-status='upcoming'] .hrp-cal__status,
+.hrp-cal__cell[data-status='untracked'] .hrp-cal__status,
+.hrp-cal__cell[data-status='not_employed'] .hrp-cal__status {
+  color: var(--ink-400);
+}
+
+.hrp-cal__cell[data-today='true'] {
+  box-shadow: inset 0 0 0 2px var(--accent-500);
+}
+
+/* ------------------------------------------------------------ organisation */
+
+/* Departments and designations side by side where there is room for both tables. */
+.hrp-org-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr));
+  gap: var(--space-6);
+  align-items: start;
+  margin-bottom: var(--space-6);
+}
+
+.hrp-section-head {
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.hrp-settings__field {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
+}
+
+.hrp-settings__field > .field {
+  width: 100%;
+}
+
+/* -------------------------------------------------------------- responsive */
+
+@media (max-width: 720px) {
+  .hrp-detail__head {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'back'
+      'identity'
+      'actions';
+  }
+
+  .hrp-detail__actions {
+    justify-content: flex-start;
+  }
+
+  .hrp-sessions__row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .hrp-sessions__label {
+    grid-column: 1 / -1;
+    padding-top: 0;
+  }
+
+  .hrp-sessions__remove {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin-top: 0;
+  }
+
+  .hrp-facts-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .hrp-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* A phone-width month: number and status only; the detail is a tap away in the list. */
+  .hrp-cal__cell {
+    height: 4rem;
+    padding: var(--space-1);
+  }
+
+  .hrp-cal__meta {
+    display: none;
+  }
+
+  .hrp-cal th {
+    padding: var(--space-1);
+  }
+
+  .hrp-weekdays__day {
+    min-width: 2.6rem;
+    padding-inline: 0.4rem;
+  }
+}

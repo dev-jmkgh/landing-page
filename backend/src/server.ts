@@ -6,6 +6,7 @@ import {
   startTelecallingReportScheduler,
   type TelecallingReportScheduler,
 } from './modules/telecalling/reports/dailyReport.scheduler';
+import { startHrScheduler, type HrScheduler } from './modules/hr/scheduler/hrScheduler';
 import { ensureStorageReady, storageReport } from './services/storage';
 import { verifyMailer } from './services/mailer';
 import { describeError, logger } from './utils/logger';
@@ -67,12 +68,22 @@ async function start(): Promise<void> {
     recipientSource: 'ADMIN_EMAILS',
   });
 
+  /*
+   * The HR reminders and missing-punch sweep. Same rules as the report scheduler: only
+   * here, never in createApp; a per-process switch; every job idempotent.
+   */
+  const hrScheduler: HrScheduler | null = config.hr.schedulerEnabled ? startHrScheduler() : null;
+  logger.info('HR scheduler', { scheduler: hrScheduler ? 'on' : 'off' });
+
   const shutdown = (signal: string) => {
     logger.info(`Received ${signal}, shutting down`);
 
     // Stop scheduling at once; a report already being sent is allowed to finish, within
     // the hard exit below, before the pool it writes its outcome through is closed.
-    const schedulerStopped = reportScheduler ? reportScheduler.stop() : Promise.resolve();
+    const schedulerStopped = Promise.all([
+      reportScheduler ? reportScheduler.stop() : Promise.resolve(),
+      hrScheduler ? hrScheduler.stop() : Promise.resolve(),
+    ]);
 
     server.close(() => {
       void schedulerStopped

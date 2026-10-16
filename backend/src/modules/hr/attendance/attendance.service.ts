@@ -1,12 +1,15 @@
 import { execute, query, queryOne, type RowDataPacket } from '../../../db/pool';
 import { logger } from '../../../utils/logger';
+import { notifyHr } from '../notifications/hrNotifications.repository';
 import {
   LOCAL_NOW,
   LOCAL_TODAY,
+  PUNCH_FLAGS,
   distanceMetres,
   type AttendanceDay,
   type AttendanceSession,
   type AttendanceStatus,
+  type PunchFlag,
   type Shift,
   type WorkLocation,
   type WorkMode,
@@ -57,6 +60,12 @@ export type Assignment = {
   shift: Shift | null;
   /** True when a punch must be inside the geofence to be accepted. */
   geofenced: boolean;
+  /**
+   * Set when an APPROVED work-from-home or field-work request covers today. The day's
+   * punches are then not fenced, and the day is recorded with that work mode — the
+   * request is the permission to be somewhere other than the office.
+   */
+  dayOverride: 'wfh' | 'field' | null;
 };
 
 /**
@@ -86,7 +95,9 @@ export async function assignmentFor(userId: number): Promise<Assignment> {
     [userId],
   );
 
-  if (!row) return { workMode: 'office', location: null, shift: null, geofenced: false };
+  if (!row) {
+    return { workMode: 'office', location: null, shift: null, geofenced: false, dayOverride: null };
+  }
 
   const location: WorkLocation | null =
     row.location_id !== null
@@ -115,11 +126,41 @@ export async function assignmentFor(userId: number): Promise<Assignment> {
         }
       : null;
 
+  /*
+   * An approved wfh / field-work request for today lifts the fence for the day.
+   *
+   * Read here, in the one function every punch and the /today screen go through, so
+   * the app's "you may check in from anywhere today" and the server's acceptance of the
+   * punch cannot disagree.
+   */
+  const override = await queryOne<RowDataPacket & { kind: 'wfh' | 'field' }>(
+    `SELECT t.kind
+       FROM hr_leave_requests r
+       JOIN hr_leave_types t ON t.id = r.leave_type_id
+      WHERE r.user_id = ? AND r.status = 'approved' AND t.kind IN ('wfh','field')
+        AND ${LOCAL_TODAY} BETWEEN r.start_date AND r.end_date
+      ORDER BY r.id DESC
+      LIMIT 1`,
+    [userId],
+  );
+  const dayOverride = override?.kind ?? null;
+
+  if (dayOverride) {
+    return {
+      workMode: dayOverride === 'wfh' ? 'remote' : 'field',
+      location,
+      shift,
+      geofenced: false,
+      dayOverride,
+    };
+  }
+
   return {
     workMode: row.work_mode,
     location,
     shift,
     geofenced: row.work_mode === 'office' && location !== null && location.isActive,
+    dayOverride: null,
   };
 }
 
@@ -150,6 +191,18 @@ export function judgeLocation(
   assignment: Assignment,
   coordinate: { latitude: number; longitude: number; accuracyMetres?: number } | undefined,
 ): GeoVerdict {
+  /*
+   * An office worker with no site is a configuration gap, and it is REFUSED here.
+   *
+   * An earlier revision only tested `geofenced`, which is false without a site — so the
+   * refusal below was unreachable and an unassigned office worker could check in from
+   * anywhere; only the app's own button state stood in the way. An approved wfh or
+   * field-work day is the exception: that request is the permission to be elsewhere.
+   */
+  if (assignment.workMode === 'office' && !assignment.dayOverride && !assignment.location) {
+    return { ok: false, reason: 'no_site_assigned' };
+  }
+
   // Not fenced: record whatever arrived, decide nothing.
   if (!assignment.geofenced) {
     return { ok: true, distanceMetres: null, locationId: assignment.location?.id ?? null };
@@ -198,6 +251,8 @@ interface AttendanceRow extends RowDataPacket {
   shift_ends_at: string | null;
   source: 'app' | 'regularisation' | 'admin';
   note: string | null;
+  missing_punch: number;
+  flagged: number;
   session_count: number;
   open_session_started_at: Date | string | null;
 }
@@ -217,7 +272,7 @@ const DAY_SELECT = `
          a.status, a.work_mode,
          TIME_FORMAT(a.shift_starts_at, '%H:%i') AS shift_starts_at,
          TIME_FORMAT(a.shift_ends_at, '%H:%i')   AS shift_ends_at,
-         a.source, a.note,
+         a.source, a.note, a.missing_punch, a.flagged,
          (SELECT COUNT(*) FROM hr_attendance_sessions s
            WHERE s.attendance_id = a.id AND s.ended_at IS NOT NULL) AS session_count,
          (SELECT s.started_at FROM hr_attendance_sessions s
@@ -246,6 +301,8 @@ function toDay(row: AttendanceRow, sessions: AttendanceSession[] = []): Attendan
     note: row.note,
     completedSessions: Number(row.session_count),
     openSessionStartedAt: iso(row.open_session_started_at),
+    missingPunch: Number(row.missing_punch) === 1,
+    flagged: Number(row.flagged) === 1,
     sessions,
   };
 }
@@ -257,6 +314,20 @@ interface SessionRow extends RowDataPacket {
   ended_at: Date | string | null;
   minutes: number | null;
   source: 'app' | 'regularisation' | 'admin';
+  auto_closed: number;
+  in_flags: string;
+  out_flags: string;
+}
+
+/** A MySQL SET arrives as a comma list; keep only values this code knows. */
+export function parseFlags(...values: Array<string | null | undefined>): PunchFlag[] {
+  const found = new Set<PunchFlag>();
+  for (const value of values) {
+    for (const part of (value ?? '').split(',')) {
+      if ((PUNCH_FLAGS as readonly string[]).includes(part)) found.add(part as PunchFlag);
+    }
+  }
+  return [...found];
 }
 
 function toSession(row: SessionRow): AttendanceSession {
@@ -266,6 +337,8 @@ function toSession(row: SessionRow): AttendanceSession {
     endedAt: iso(row.ended_at),
     minutes: row.minutes === null ? null : Number(row.minutes),
     source: row.source,
+    autoClosed: Number(row.auto_closed) === 1,
+    flags: parseFlags(row.in_flags, row.out_flags),
   };
 }
 
@@ -283,7 +356,8 @@ async function sessionsFor(attendanceIds: number[]): Promise<Map<number, Attenda
    * be expressed with placeholders.
    */
   const rows = await query<SessionRow>(
-    `SELECT id, attendance_id, started_at, ended_at, minutes, source
+    `SELECT id, attendance_id, started_at, ended_at, minutes, source,
+            auto_closed, in_flags, out_flags
        FROM hr_attendance_sessions
       WHERE attendance_id IN (${attendanceIds.map((id) => Number(id)).join(',')})
       ORDER BY started_at ASC`,
@@ -298,13 +372,41 @@ async function sessionsFor(attendanceIds: number[]): Promise<Map<number, Attenda
   return byDay;
 }
 
+/**
+ * The day the attendance screen is about.
+ *
+ * Normally today's row. But a session that is still OPEN belongs to the day it started
+ * on — a night shift that began at 22:00 yesterday is still yesterday's day at 02:00 —
+ * and the screen must show that one, or it would offer "Check in" to somebody who is
+ * mid-shift. Stale sessions are closed before punches (see `closeStaleSessions`), so an
+ * open session from yesterday here is a genuinely running one.
+ */
 export async function todayFor(userId: number): Promise<AttendanceDay | null> {
   const row = await queryOne<AttendanceRow>(
-    `${DAY_SELECT} WHERE a.user_id = ? AND a.work_date = ${LOCAL_TODAY} LIMIT 1`,
-    [userId],
+    `${DAY_SELECT}
+      WHERE a.user_id = ?
+        AND (a.work_date = ${LOCAL_TODAY}
+             OR a.id = (SELECT s.attendance_id FROM hr_attendance_sessions s
+                         WHERE s.user_id = ? AND s.ended_at IS NULL LIMIT 1))
+      ORDER BY (SELECT COUNT(*) FROM hr_attendance_sessions o
+                 WHERE o.attendance_id = a.id AND o.ended_at IS NULL) DESC,
+               a.work_date DESC
+      LIMIT 1`,
+    [userId, userId],
   );
   if (!row) return null;
 
+  const sessions = await sessionsFor([row.id]);
+  return toDay(row, sessions.get(row.id) ?? []);
+}
+
+/** One employee's day by date, or null when nothing was recorded. */
+export async function dayFor(userId: number, workDate: string): Promise<AttendanceDay | null> {
+  const row = await queryOne<AttendanceRow>(
+    `${DAY_SELECT} WHERE a.user_id = ? AND a.work_date = ? LIMIT 1`,
+    [userId, workDate],
+  );
+  if (!row) return null;
   const sessions = await sessionsFor([row.id]);
   return toDay(row, sessions.get(row.id) ?? []);
 }
@@ -365,6 +467,12 @@ export async function recomputeDayFor(userId: number, workDate: string): Promise
                  AND NOT EXISTS (SELECT 1 FROM hr_attendance_sessions o
                                   WHERE o.attendance_id = a.id AND o.ended_at IS NULL)
             ), 0),
+            a.missing_punch = EXISTS (
+              SELECT 1 FROM hr_attendance_sessions s
+               WHERE s.attendance_id = a.id AND s.auto_closed = 1),
+            a.flagged = EXISTS (
+              SELECT 1 FROM hr_attendance_sessions s
+               WHERE s.attendance_id = a.id AND (s.in_flags <> '' OR s.out_flags <> '')),
             a.early_minutes = CASE
               WHEN a.shift_ends_at IS NULL THEN 0
               ELSE COALESCE((
@@ -410,7 +518,150 @@ export async function recomputeDayFor(userId: number, workDate: string): Promise
 export type PunchInput = {
   coordinate?: { latitude: number; longitude: number; accuracyMetres?: number };
   deviceTime?: string;
+  mocked?: boolean;
 };
+
+/* -------------------------------------------------------------------------- */
+/* Suspicious punches                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** A handset clock further than this from the server's is worth a second look. */
+const CLOCK_SKEW_LIMIT_MS = 10 * 60_000;
+
+/**
+ * A fix coarser than this cannot meaningfully place somebody inside a 150m fence.
+ * Above `Balanced` accuracy's usual ~100m, so ordinary indoor fixes are not flagged.
+ */
+const LOW_ACCURACY_LIMIT_M = 200;
+
+/**
+ * What looks wrong about a punch. Flags are evidence for an administrator, never a
+ * reason to refuse — see migration 028.
+ */
+export function punchFlags(input: PunchInput, now: Date = new Date()): PunchFlag[] {
+  const flags: PunchFlag[] = [];
+  if (input.mocked === true) flags.push('mock_location');
+  if (input.deviceTime) {
+    const deviceAt = Date.parse(input.deviceTime);
+    if (!Number.isNaN(deviceAt) && Math.abs(deviceAt - now.getTime()) > CLOCK_SKEW_LIMIT_MS) {
+      flags.push('clock_skew');
+    }
+  }
+  if (
+    input.coordinate?.accuracyMetres !== undefined &&
+    input.coordinate.accuracyMetres > LOW_ACCURACY_LIMIT_M
+  ) {
+    flags.push('low_accuracy');
+  }
+  return flags;
+}
+
+/**
+ * A new flagged punch reopens the day for review: an administrator who cleared the
+ * morning's flag has not seen the evening's.
+ */
+async function reopenFlagReview(userId: number, workDate: string): Promise<void> {
+  await execute(
+    `UPDATE hr_attendance
+        SET flag_reviewed_at = NULL, flag_reviewed_by = NULL, flag_reviewer_name = NULL,
+            flag_review_note = NULL
+      WHERE user_id = ? AND work_date = ?`,
+    [userId, workDate],
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Missing punches                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How long a session may stay open before it is treated as a forgotten check-out.
+ *
+ * Long enough for a night shift that crosses midnight (22:00 to 06:00 is eight hours),
+ * short enough that yesterday's forgotten session never blocks this morning.
+ */
+export const MAX_OPEN_SESSION_HOURS = 16;
+
+/**
+ * Closes sessions nobody checked out of.
+ *
+ * WITHOUT THIS, ONE FORGOTTEN CHECK-OUT LOCKED SOMEBODY OUT FOR GOOD: only one open
+ * session per person can exist (migration 019), so yesterday's open session made every
+ * later check-in a no-op, and checking out today would have credited a day-long session.
+ *
+ * A stale session is closed at its OWN START — zero minutes — and marked `auto_closed`.
+ * Not at the shift end: that would credit hours nobody recorded. The day is flagged as
+ * a missing punch, the employee is told, and a regularisation puts the real times back.
+ *
+ * Stale means: on a day before today, AND open longer than MAX_OPEN_SESSION_HOURS.
+ * Called before every punch for that employee, and for everyone by the scheduler.
+ */
+export async function closeStaleSessions(userId: number | null): Promise<number> {
+  const stale = await query<RowDataPacket & { id: number; user_id: number; work_date: string }>(
+    `SELECT s.id, s.user_id, DATE_FORMAT(a.work_date, '%Y-%m-%d') AS work_date
+       FROM hr_attendance_sessions s
+       JOIN hr_attendance a ON a.id = s.attendance_id
+      WHERE s.ended_at IS NULL
+        AND a.work_date < ${LOCAL_TODAY}
+        AND s.started_at < NOW() - INTERVAL ${MAX_OPEN_SESSION_HOURS} HOUR
+        ${userId === null ? '' : 'AND s.user_id = ?'}
+      LIMIT 500`,
+    userId === null ? [] : [userId],
+  );
+
+  let closed = 0;
+  const days = new Map<string, { userId: number; workDate: string }>();
+
+  for (const session of stale) {
+    const result = await execute(
+      `UPDATE hr_attendance_sessions
+          SET ended_at = started_at, minutes = 0, auto_closed = 1
+        WHERE id = ? AND ended_at IS NULL`,
+      [session.id],
+    );
+    if (result.affectedRows === 0) continue;
+    closed += 1;
+    days.set(`${session.user_id}:${session.work_date}`, {
+      userId: session.user_id,
+      workDate: session.work_date,
+    });
+  }
+
+  for (const { userId: owner, workDate } of days.values()) {
+    await recomputeDayFor(owner, workDate);
+    await notifyHr({
+      userIds: [owner],
+      kind: 'missing_punch',
+      title: 'Missing check-out',
+      body: `You did not check out on ${workDate}. Request a correction so the day shows your real hours.`,
+      entityType: 'attendance_day',
+      dedupeKey: `missing_punch:${workDate}`,
+    });
+  }
+
+  if (closed > 0) logger.info('Closed stale HR sessions', { closed, userId });
+  return closed;
+}
+
+/**
+ * The most recent day, within the correction window, that still has a missing punch
+ * and no correction waiting — the one the app should prompt about.
+ */
+export async function missingPunchFor(userId: number): Promise<{ workDate: string } | null> {
+  const row = await queryOne<RowDataPacket & { work_date: string }>(
+    `SELECT DATE_FORMAT(a.work_date, '%Y-%m-%d') AS work_date
+       FROM hr_attendance a
+      WHERE a.user_id = ? AND a.missing_punch = 1
+        AND a.work_date >= DATE_SUB(${LOCAL_TODAY}, INTERVAL 30 DAY)
+        AND NOT EXISTS (
+          SELECT 1 FROM hr_regularisations r
+           WHERE r.user_id = a.user_id AND r.work_date = a.work_date AND r.status = 'pending')
+      ORDER BY a.work_date DESC
+      LIMIT 1`,
+    [userId],
+  );
+  return row ? { workDate: row.work_date } : null;
+}
 
 export type CheckInResult =
   | { ok: true; day: AttendanceDay; alreadyCheckedIn: boolean }
@@ -437,6 +688,9 @@ function isDuplicateKey(error: unknown): boolean {
  * the punch did not register.
  */
 export async function checkIn(userId: number, input: PunchInput): Promise<CheckInResult> {
+  // Yesterday's forgotten check-out must not block today — see closeStaleSessions.
+  await closeStaleSessions(userId);
+
   const assignment = await assignmentFor(userId);
   const verdict = judgeLocation(assignment, input.coordinate);
 
@@ -444,8 +698,14 @@ export async function checkIn(userId: number, input: PunchInput): Promise<CheckI
 
   const open = await openSessionFor(userId);
   if (open) {
-    return { ok: true, day: (await todayFor(userId))!, alreadyCheckedIn: true };
+    return {
+      ok: true,
+      day: (await dayFor(userId, open.work_date)) ?? (await todayFor(userId))!,
+      alreadyCheckedIn: true,
+    };
   }
+
+  const flags = punchFlags(input);
 
   const shift = assignment.shift;
 
@@ -491,8 +751,9 @@ export async function checkIn(userId: number, input: PunchInput): Promise<CheckI
     await execute(
       `INSERT INTO hr_attendance_sessions
          (attendance_id, user_id, started_at, in_device_at,
-          in_lat, in_lng, in_distance_metres, in_accuracy_metres, in_location_id, source)
-       VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, 'app')`,
+          in_lat, in_lng, in_distance_metres, in_accuracy_metres, in_location_id, source,
+          in_flags)
+       VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, 'app', ?)`,
       [
         day!.id,
         userId,
@@ -504,6 +765,7 @@ export async function checkIn(userId: number, input: PunchInput): Promise<CheckI
           ? null
           : Math.round(input.coordinate.accuracyMetres),
         verdict.locationId,
+        flags.join(','),
       ],
     );
   } catch (error) {
@@ -524,9 +786,10 @@ export async function checkIn(userId: number, input: PunchInput): Promise<CheckI
     [userId, day!.work_date],
   );
 
+  if (flags.length > 0) await reopenFlagReview(userId, day!.work_date);
   await recomputeDayFor(userId, day!.work_date);
 
-  logger.info('HR check-in', { userId, geofenced: assignment.geofenced });
+  logger.info('HR check-in', { userId, geofenced: assignment.geofenced, flags });
   return { ok: true, day: (await todayFor(userId))!, alreadyCheckedIn: false };
 }
 
@@ -563,6 +826,13 @@ async function openSessionFor(userId: number): Promise<OpenSessionRow | null> {
  * check in at the office, drive home, check out at six.
  */
 export async function checkOut(userId: number, input: PunchInput): Promise<CheckOutResult> {
+  /*
+   * A session left open from a previous day is a missing punch, not something to close
+   * now: checking out at 09:00 today would credit a day-long session. It is closed as a
+   * missing punch and the employee is told they are not checked in.
+   */
+  await closeStaleSessions(userId);
+
   const open = await openSessionFor(userId);
 
   if (!open) {
@@ -582,13 +852,16 @@ export async function checkOut(userId: number, input: PunchInput): Promise<Check
   const verdict = judgeLocation(assignment, input.coordinate);
   if (!verdict.ok) return { ok: false, verdict };
 
+  const flags = punchFlags(input);
+
   await execute(
     `UPDATE hr_attendance_sessions
         SET ended_at = NOW(),
             minutes = GREATEST(0, TIMESTAMPDIFF(MINUTE, started_at, NOW())),
             out_device_at = ?,
             out_lat = ?, out_lng = ?,
-            out_distance_metres = ?, out_accuracy_metres = ?
+            out_distance_metres = ?, out_accuracy_metres = ?,
+            out_flags = ?
       WHERE id = ? AND ended_at IS NULL`,
     [
       input.deviceTime ? new Date(input.deviceTime) : null,
@@ -598,13 +871,15 @@ export async function checkOut(userId: number, input: PunchInput): Promise<Check
       input.coordinate?.accuracyMetres === undefined
         ? null
         : Math.round(input.coordinate.accuracyMetres),
+      flags.join(','),
       open.id,
     ],
   );
 
+  if (flags.length > 0) await reopenFlagReview(userId, open.work_date);
   await recomputeDayFor(userId, open.work_date);
 
-  const day = await todayFor(userId);
+  const day = await dayFor(userId, open.work_date);
   logger.info('HR check-out', { userId, workedMinutes: day?.workedMinutes });
 
   return { ok: true, day: day!, alreadyCheckedOut: false };

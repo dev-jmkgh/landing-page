@@ -13,6 +13,19 @@ import { hrAdminRouter } from './modules/hr/hrAdmin.routes';
 import { hrAuthRouter } from './modules/hr/hrAuth.routes';
 import { hrAttendanceRouter } from './modules/hr/attendance/attendance.routes';
 import { hrAttendanceAdminRouter } from './modules/hr/attendance/attendanceAdmin.routes';
+import { hrFilesRouter } from './modules/hr/files/hrFileLinks';
+import { hrLeaveRouter } from './modules/hr/leave/leave.routes';
+import { hrLeaveAdminRouter } from './modules/hr/leave/leaveAdmin.routes';
+import { hrNotificationsRouter } from './modules/hr/notifications/notifications.routes';
+import { hrPayrollAdminRouter } from './modules/hr/payroll/payrollAdmin.routes';
+import { hrPayslipsRouter } from './modules/hr/payroll/payslips.routes';
+import { hrPeopleAdminRouter } from './modules/hr/people/peopleAdmin.routes';
+import { hrDashboardRouter } from './modules/hr/reports/dashboard.routes';
+import { hrReportsAdminRouter } from './modules/hr/reports/reportsAdmin.routes';
+import { hrDocumentsRouter } from './modules/hr/requests/documents.routes';
+import { hrRequestsRouter } from './modules/hr/requests/requests.routes';
+import { hrRequestsAdminRouter } from './modules/hr/requests/requestsAdmin.routes';
+import { hrTeamRouter } from './modules/hr/team/team.routes';
 import { telecallingAdminRouter } from './modules/telecalling/admin.routes';
 import { mobileRouter } from './modules/telecalling/mobile.routes';
 import { logger } from './utils/logger';
@@ -95,6 +108,18 @@ export function createApp(): Express {
    */
   app.use('/api/hr/auth', hrAuthRouter);
   app.use('/api/hr/attendance', hrAttendanceRouter);
+  app.use('/api/hr/leave', hrLeaveRouter);
+  app.use('/api/hr/team', hrTeamRouter);
+  app.use('/api/hr/requests', hrRequestsRouter);
+  app.use('/api/hr/documents', hrDocumentsRouter);
+  app.use('/api/hr/notifications', hrNotificationsRouter);
+  app.use('/api/hr/payslips', hrPayslipsRouter);
+  app.use('/api/hr/dashboard', hrDashboardRouter);
+  /*
+   * Download links. NOT behind the HR actor: the short-lived token in the path is the
+   * credential, because the phone's browser that follows it cannot send our header.
+   */
+  app.use('/api/hr/files', hrFilesRouter);
 
   /*
    * Two routers at one prefix, in declaration order. Express tries each in turn, so
@@ -105,6 +130,11 @@ export function createApp(): Express {
    */
   app.use('/api/admin/hr', hrAdminRouter);
   app.use('/api/admin/hr', hrAttendanceAdminRouter);
+  app.use('/api/admin/hr', hrPeopleAdminRouter);
+  app.use('/api/admin/hr', hrLeaveAdminRouter);
+  app.use('/api/admin/hr', hrRequestsAdminRouter);
+  app.use('/api/admin/hr', hrPayrollAdminRouter);
+  app.use('/api/admin/hr', hrReportsAdminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -210,6 +210,24 @@ const outline = {
       <path d="M12 7v5.4l3.4 2" />
     </>
   ),
+  calendar: (
+    <>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+      <path d="M3.5 10h17M8 3v4M16 3v4" />
+    </>
+  ),
+  wallet: (
+    <>
+      <path d="M4 7.5h14.5a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H17" />
+      <path d="M16.5 14h1.5" />
+    </>
+  ),
+  megaphone: (
+    <>
+      <path d="M4 10v4a1 1 0 0 0 1 1h2l6 4V5L7 9H5a1 1 0 0 0-1 1Z" />
+      <path d="M17 9.5a3.5 3.5 0 0 1 0 5" />
+    </>
+  ),
   menu: <path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17" />,
   close: <path d="m6 6 12 12M18 6 6 18" />,
   chevronDown: <path d="m6 9.5 6 6 6-6" />,

@@ -79,6 +79,18 @@ function bearerToken(header: string | undefined): string | null {
  * browser that happens to have one.
  */
 export const requireActor: RequestHandler = (request, _response, next) => {
+  /*
+   * Already resolved by an earlier router on the same request.
+   *
+   * Several admin routers share one prefix (`/api/admin/hr` has seven) and each applies
+   * this middleware; a request falls through the ones that do not match. Without this
+   * check a cookie session paid one `telecaller_users` lookup per router it passed.
+   */
+  if (request.actor) {
+    next();
+    return;
+  }
+
   void (async () => {
     const token = bearerToken(request.get('Authorization'));
 

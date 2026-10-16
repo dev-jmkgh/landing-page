@@ -2925,6 +2925,46 @@ async function main(): Promise<void> {
         client.setToken(accessToken);
         return { client, id, refreshToken };
       },
+      async createSignedInHrEmployee(options) {
+        fixtureCount += 1;
+        const code = options.code ?? `HX-${String(fixtureCount).padStart(4, '0')}`;
+        const email = options.email.trim().toLowerCase();
+
+        const [inserted] = await db.execute(
+          `INSERT INTO hr_users
+             (employee_code, name, email, email_verified_at, password_hash, role,
+              is_active, approval_status, approved_at, registered_at, manager_id, joining_date)
+           VALUES (?, ?, ?, UTC_TIMESTAMP(), ?, ?, 1, 'approved', UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?)`,
+          [
+            code,
+            options.name,
+            email,
+            passwordHash,
+            options.role ?? 'employee',
+            options.managerId ?? null,
+            options.joiningDate ?? null,
+          ],
+        );
+        const id = (inserted as mysql.ResultSetHeader).insertId;
+
+        const client = makeClient(base);
+        const login = await client.post('/hr/auth/login', {
+          email,
+          password: E2E_PASSWORD,
+          device: { name: 'e2e', platform: 'android' },
+        });
+        const accessToken = login.json.accessToken as unknown;
+        const refreshToken = login.json.refreshToken as unknown;
+
+        if (login.status !== 200 || typeof accessToken !== 'string' || typeof refreshToken !== 'string') {
+          throw new Error(
+            `createSignedInHrEmployee could not sign in ${email}: ${login.status} ${JSON.stringify(login.json)}`,
+          );
+        }
+
+        client.setToken(accessToken);
+        return { client, id, refreshToken };
+      },
     };
 
     const sections: [string, () => Promise<{ run: (ctx: E2EContext) => Promise<void> }>][] = [
@@ -2935,9 +2975,26 @@ async function main(): Promise<void> {
       ['people', () => import('./e2e/people')],
       ['dailyReport', () => import('./e2e/dailyReport')],
       ['leadImport', () => import('./e2e/leadImport')],
+      ['hrCore', () => import('./e2e/hrCore')],
+      ['hrPeople', () => import('./e2e/hrPeople')],
+      ['hrLeave', () => import('./e2e/hrLeave')],
+      ['hrRequests', () => import('./e2e/hrRequests')],
+      ['hrPayroll', () => import('./e2e/hrPayroll')],
+      ['hrReports', () => import('./e2e/hrReports')],
     ];
 
+    /*
+     * `E2E_SECTIONS=hrLeave,hrPayroll` runs only those section files (the linear part
+     * above always runs — the sections lean on the fixtures it leaves). For iterating on
+     * one module; a release check runs everything.
+     */
+    const only = (process.env.E2E_SECTIONS ?? '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean);
+
     for (const [name, load] of sections) {
+      if (only.length > 0 && !only.includes(name)) continue;
       try {
         const section = await load();
         await section.run(context);

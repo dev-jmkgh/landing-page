@@ -13,6 +13,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:telecalling": "tsx scripts/seed-telecalling-demo.ts",
+    "db:seed:hr": "tsx scripts/seed-hr-demo.ts",
     "db:migrate:prod": "node dist/db/migrate.js",
     "config:check": "node scripts/check-production-config.mjs",
     "admin:link": "node scripts/link-admin-employee.mjs",

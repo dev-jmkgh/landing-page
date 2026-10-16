@@ -26,6 +26,29 @@ export type HrApprovalStatus = (typeof HR_APPROVAL_STATUSES)[number];
 export const DEVICE_PLATFORMS = ['android', 'ios', 'unknown'] as const;
 export type DevicePlatform = (typeof DEVICE_PLATFORMS)[number];
 
+/** Employment facts HR records — migration 027. */
+export const HR_EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'intern'] as const;
+export type HrEmploymentType = (typeof HR_EMPLOYMENT_TYPES)[number];
+
+export const HR_EMPLOYMENT_STATUSES = ['probation', 'active', 'notice_period', 'exited'] as const;
+export type HrEmploymentStatus = (typeof HR_EMPLOYMENT_STATUSES)[number];
+
+/** A calendar date as the API carries it: `YYYY-MM-DD`, never a timestamp. */
+export const isoDateField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD.');
+
+/**
+ * Page parameters for every HR list. Small default, hard ceiling — see the standing rule
+ * that no list or history is ever fetched whole.
+ */
+export const pageQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(20),
+});
+export type PageQuery = z.infer<typeof pageQuerySchema>;
+
+/** The envelope every paginated HR endpoint returns, beside `success: true`. */
+export type Page<T> = { items: T[]; total: number; page: number; pageSize: number };
+
 /**
  * A phone number, or nothing, in every shape a client can express "nothing".
  *
@@ -77,4 +100,25 @@ export type HrEmployeeProfile = {
   approvedAt: string | null;
   lastLoginAt: string | null;
   createdAt: string | null;
+
+  /*
+   * The employee record (migration 027). Every one may be null: an account created
+   * before HR recorded these facts has none of them, and the app says "not recorded"
+   * rather than substituting something adjacent.
+   */
+  departmentId: number | null;
+  departmentName: string | null;
+  designationId: number | null;
+  designationName: string | null;
+  managerId: number | null;
+  managerName: string | null;
+  /** `YYYY-MM-DD`. The employment fact HR entered — not when the account was created. */
+  joiningDate: string | null;
+  exitDate: string | null;
+  employmentType: HrEmploymentType;
+  employmentStatus: HrEmploymentStatus;
+  dateOfBirth: string | null;
+  address: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
 };

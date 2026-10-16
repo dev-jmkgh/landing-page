@@ -84,6 +84,23 @@ export type CreateEmployeeOptions = {
   code?: string;
 };
 
+export type CreateHrEmployeeOptions = {
+  name: string;
+  /** Must be unique across the run. */
+  email: string;
+  /** Defaults to 'employee'. */
+  role?: 'employee' | 'hr_manager' | 'hr_admin';
+  /** Another hr_users id, for the reporting line. */
+  managerId?: number | null;
+  /** `YYYY-MM-DD`. Left NULL when omitted. */
+  joiningDate?: string | null;
+  /**
+   * Employee code. Defaults to the next `HX-####`, a series nothing else generates;
+   * never pass an `EMP-####` code, which would shift the sequence signup allocates.
+   */
+  code?: string;
+};
+
 export type E2EContext = {
   /** The API root, `http://127.0.0.1:<port>/api`. */
   base: string;
@@ -116,5 +133,15 @@ export type E2EContext = {
    */
   createSignedInEmployee: (
     options: CreateEmployeeOptions,
+  ) => Promise<{ client: Client; id: number; refreshToken: string }>;
+
+  /**
+   * The HR app's equivalent: inserts an approved, active, email-verified `hr_users` row
+   * and signs it in through `/hr/auth/login`. The client carries an HR (`jmk-hr`) token.
+   * Password is the seed password. Unassigned (no site, shift or department) unless the
+   * caller sets one through the admin API.
+   */
+  createSignedInHrEmployee: (
+    options: CreateHrEmployeeOptions,
   ) => Promise<{ client: Client; id: number; refreshToken: string }>;
 };

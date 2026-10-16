@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Weekday } from '../settings/hrSettings';
 
 /**
  * Attendance vocabulary, and the one piece of arithmetic the whole module rests on.
@@ -133,6 +134,26 @@ export const punchSchema = z.object({
    * on a flaky connection is indistinguishable from a bug.
    */
   idempotencyKey: z.string().trim().min(8).max(64).optional(),
+  /**
+   * The handset's own report that the fix came from a mock location provider
+   * (Android's `isFromMockProvider`, surfaced by expo-location as `mocked`).
+   *
+   * Recorded as a flag for review, never used to refuse: the requirement is to flag
+   * suspicious punches, and a refusal on a false positive would strand an honest person.
+   */
+  mocked: z.boolean().optional(),
+});
+
+/** Why a punch was flagged for review — the `in_flags` / `out_flags` SET (migration 028). */
+export const PUNCH_FLAGS = ['mock_location', 'clock_skew', 'low_accuracy'] as const;
+export type PunchFlag = (typeof PUNCH_FLAGS)[number];
+
+/** A calendar month, `YYYY-MM`. Defaults to the company's current month. */
+export const calendarQuerySchema = z.object({
+  month: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Use YYYY-MM.')
+    .optional(),
 });
 
 export const historyQuerySchema = z.object({
@@ -193,6 +214,15 @@ export const workLocationSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+/**
+ * The weekday tokens a shift's `weekly_off_days` SET accepts (migration 028).
+ *
+ * Spelled out here rather than imported from `settings/hrSettings`, because this file is
+ * pure vocabulary and that one reaches the database pool — importing it would make every
+ * schema consumer load the pool. `satisfies` keeps the two lists from drifting.
+ */
+const SHIFT_WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const satisfies readonly Weekday[];
+
 export const shiftSchema = z.object({
   name: z.string().trim().min(2, 'Name the shift.').max(120),
   startsAt: z.string().regex(/^\d{2}:\d{2}$/, 'Use HH:MM.'),
@@ -201,6 +231,16 @@ export const shiftSchema = z.object({
   graceMinutes: z.coerce.number().int().min(0).max(240),
   halfDayMinutes: z.coerce.number().int().min(0).max(1440),
   isActive: z.boolean().optional(),
+  /*
+   * The shift's rest days. Optional on create (the column defaults to Sunday) and an
+   * EMPTY list is a real answer — a seven-day rota — so it is not refused. Duplicates
+   * are dropped rather than refused; the SET would collapse them anyway.
+   */
+  weeklyOffDays: z
+    .array(z.enum(SHIFT_WEEKDAYS, { message: 'Use sun, mon, tue, wed, thu, fri or sat.' }))
+    .max(7)
+    .transform((days) => SHIFT_WEEKDAYS.filter((day) => days.includes(day)))
+    .optional(),
 });
 
 export const assignmentSchema = z.object({
@@ -232,6 +272,12 @@ export type Shift = {
   graceMinutes: number;
   halfDayMinutes: number;
   isActive: boolean;
+  /**
+   * Rest days, Sunday-first order. Always present on the admin shift endpoints.
+   * Optional in the TYPE only because the attendance service builds a `Shift` for the
+   * punch path without reading the column — the calendar reads weekly offs itself.
+   */
+  weeklyOffDays?: Weekday[];
 };
 
 /** One check-in / check-out pair. A day has as many as the employee worked. */
@@ -243,6 +289,10 @@ export type AttendanceSession = {
   /** Null while open — "still working" is not "worked nothing". */
   minutes: number | null;
   source: 'app' | 'regularisation' | 'admin';
+  /** Closed by the system because nobody checked out before the day ended. */
+  autoClosed: boolean;
+  /** What looked wrong about the punches, if anything. Empty for a clean session. */
+  flags: PunchFlag[];
 };
 
 /**
@@ -275,6 +325,13 @@ export type AttendanceDay = {
   completedSessions: number;
   /** Set while a session is running — this is the app's "checked in" state. */
   openSessionStartedAt: string | null;
+  /**
+   * True when a session on this day was closed by the system because nobody checked
+   * out. The hours for it are zero until a correction is approved.
+   */
+  missingPunch: boolean;
+  /** True when a punch on this day was flagged for review (see `PunchFlag`). */
+  flagged: boolean;
   sessions: AttendanceSession[];
 };
 
@@ -290,5 +347,7 @@ export type Regularisation = {
   status: RegularisationStatus;
   reviewedAt: string | null;
   reviewNote: string | null;
+  /** Who decided — an administrator or the employee's manager. */
+  reviewerName: string | null;
   createdAt: string;
 };

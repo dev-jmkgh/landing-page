@@ -83,10 +83,18 @@ export const AREAS: NavGroup[] = [
     path: '/admin/hr/',
     param: 'section',
     items: [
+      { key: 'dashboard', label: 'Dashboard', icon: 'chart', param: 'section' },
       { key: 'people', label: 'Employees', icon: 'award', param: 'section' },
       { key: 'attendance', label: 'Attendance', icon: 'clock', param: 'section' },
       { key: 'corrections', label: 'Corrections', icon: 'file', param: 'section' },
+      { key: 'leave', label: 'Leave', icon: 'calendar', param: 'section' },
+      { key: 'requests', label: 'Requests', icon: 'inbox', param: 'section' },
+      { key: 'documents', label: 'Documents', icon: 'briefcase', param: 'section' },
+      { key: 'payroll', label: 'Payroll', icon: 'wallet', param: 'section' },
+      { key: 'reports', label: 'Reports', icon: 'ledger', param: 'section' },
       { key: 'workplaces', label: 'Workplaces', icon: 'pin', param: 'section' },
+      { key: 'organisation', label: 'Organisation', icon: 'building', param: 'section' },
+      { key: 'audit', label: 'Audit log', icon: 'shield', param: 'section' },
     ],
   },
 ];

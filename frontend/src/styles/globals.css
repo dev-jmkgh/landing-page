@@ -8,3 +8,7 @@
 /* Telecalling admin. Last, so it can build on components.css and is never overridden
    by a marketing page rule of equal specificity. */
 @import './telecalling.css';
+@import './hr-admin-people.css';
+@import './hr-admin-leave.css';
+@import './hr-admin-payroll.css';
+@import './hr-admin-reports.css';

@@ -78,6 +78,16 @@ export type HrSession = {
   refreshExpiresAt: string;
 };
 
+/**
+ * Hashes an HR account password at the module's cost factor.
+ *
+ * Exported so an account an administrator creates is hashed exactly like a
+ * self-registered one; a second call site with its own cost would drift.
+ */
+export function hashHrPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_COST);
+}
+
 function hashRefreshToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -235,8 +245,11 @@ function isDuplicateKey(error: unknown): boolean {
  * prefix with `LENGTH()` rather than hard-coded — a literal would be wrong the moment
  * the prefix changed length, and the failure mode is handing every registration the
  * same code until the unique index rejects it three times and signup fails.
+ *
+ * Exported for the admin portal's "create employee", which must allocate from the SAME
+ * series — a second generator would hand out a code signup is about to use.
  */
-async function nextHrEmployeeCode(): Promise<string> {
+export async function nextHrEmployeeCode(): Promise<string> {
   const row = await queryOne<RowDataPacket & { highest: number | null }>(
     `SELECT MAX(CAST(SUBSTRING(employee_code, LENGTH(?) + 1) AS UNSIGNED)) AS highest
        FROM hr_users

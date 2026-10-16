@@ -137,6 +137,8 @@ const schema = z.object({
    * stop a second database from sending its own copy.
    */
   TELECALLING_REPORT_SCHEDULER: optionalSwitch,
+  /** HR reminders and the missing-punch sweep. On by default only in production. */
+  HR_SCHEDULER: optionalSwitch,
 
   /**
    * Sign-in identity for the fallback admin account. This is a *credential*, not a
@@ -499,6 +501,10 @@ export const config = {
    * this process. The database decides whether a given day's report has been sent, so
    * several processes with it on still send once. It is sent to ADMIN_EMAILS.
    */
+  hr: {
+    schedulerEnabled: raw.HR_SCHEDULER ?? isProduction,
+  },
+
   telecallingReport: {
     schedulerEnabled: raw.TELECALLING_REPORT_SCHEDULER ?? isProduction,
     recipients: adminEmails,

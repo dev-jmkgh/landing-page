@@ -1,0 +1,574 @@
+/* ==========================================================================
+   HR admin — Dashboard, Reports and Audit log
+   (components/admin/hr/HrDashboardPanel, HrReportsPanel, HrAuditPanel and
+   their dashboard/ and reports/ folders)
+
+   Builds on the shared admin pieces — stat tiles, chart cards, segmented controls,
+   badges and empty states from telecalling.css; fields, tables and the pager from
+   components.css — and adds only what those three screens need beyond them.
+
+   Everything is built from the tokens in tokens.css. No new colours.
+   Prefixes: `hr-dash-` (dashboard), `hr-rep-` (reports and their filters),
+   `hr-picker` (the employee search), `hr-audit-` (the audit trail).
+   ========================================================================== */
+
+/* ------------------------------------------------------------------ filters */
+
+/*
+ * A row of report filters. Fields keep a readable width on a wide screen and take the
+ * whole row on a phone, where a date field squeezed to a third of 390px cannot show
+ * its own value.
+ */
+.hr-rep-toolbar {
+  align-items: flex-end;
+}
+
+.hr-rep-toolbar__hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.hr-rep-field--date {
+  width: 10.5rem;
+}
+
+.hr-rep-field--select {
+  width: 12.5rem;
+}
+
+.hr-rep-field--wide {
+  width: 16rem;
+}
+
+.hr-rep-field--year {
+  width: 7.5rem;
+}
+
+.hr-rep-field--search {
+  width: 15rem;
+}
+
+/* The two dates of a range, as one group with its own (visually hidden) legend. */
+.hr-rep-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+@media (max-width: 40rem) {
+  .hr-rep-toolbar .admin-filters,
+  .hr-rep-toolbar .admin-filters > * {
+    width: 100%;
+  }
+
+  .hr-rep-range > .field {
+    flex: 1 1 8.5rem;
+    width: auto;
+  }
+
+  .hr-rep-toolbar .admin-filters > .btn {
+    width: auto;
+  }
+}
+
+/* Five report tabs scroll sideways on a phone rather than wrapping into a ragged block. */
+.hr-rep-tabs {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.hr-rep-tabs .admin-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- the result */
+
+/* What the report covers on the left, the download on the right. */
+.hr-rep-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.hr-rep-head__caption {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+.hr-rep-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* A download the range does not allow: the button greyed, the reason beside it. */
+.hr-rep-csv {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hr-rep-csv__hint {
+  max-width: 22rem;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* "Too long to show on screen, but it can be downloaded." */
+.hr-rep-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+}
+
+.hr-rep-gap {
+  height: var(--space-4);
+}
+
+/* Long unbroken values (an email address) wrap inside their column instead of widening it. */
+.hr-rep-wrap {
+  overflow-wrap: anywhere;
+}
+
+.hr-rep-times {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-rep-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* A leave type's column heading: its name, and the short code people say. */
+.hr-rep-type-head {
+  display: grid;
+  gap: 0.1rem;
+  white-space: normal;
+}
+
+.hr-rep-type-head__code {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-400);
+}
+
+/*
+ * Money in stat tiles. The tiles' figure size suits a count; a rupee amount in lakhs at
+ * that size is wider than a tile and would be cut off.
+ */
+.hr-rep-money .tc-stat__value {
+  font-size: var(--text-xl);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------- employee search */
+
+.hr-picker {
+  width: 16rem;
+}
+
+.hr-picker__box {
+  position: relative;
+}
+
+.hr-picker__list {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 30;
+  margin: 0;
+  padding: var(--space-1) 0;
+  list-style: none;
+  max-height: 18rem;
+  overflow-y: auto;
+  background-color: var(--surface);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
+.hr-picker__option {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
+.hr-picker__option[aria-selected='true'] {
+  background-color: var(--admin-brand-tint, var(--surface-blue));
+}
+
+.hr-picker__option-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.hr-picker__option-meta {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.hr-picker__empty {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 30;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+  background-color: var(--surface);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
+/* The chosen employee, sized like the input it replaces so the row does not jump. */
+.hr-picker__chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 2.9rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.85rem;
+  border: 1px solid var(--admin-brand, var(--navy-500));
+  border-radius: var(--radius-sm);
+  background-color: var(--admin-brand-tint, var(--surface-blue));
+}
+
+.hr-picker__chip-name {
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+.hr-picker__chip-code {
+  font-weight: 400;
+  color: var(--ink-500);
+}
+
+.hr-picker__clear {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--ink-700);
+  cursor: pointer;
+}
+
+.hr-picker__clear:hover {
+  background-color: var(--surface);
+}
+
+.hr-picker__clear:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- dashboard */
+
+.hr-dash-caption {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+/*
+ * A holiday or a company-wide weekly off, said at the top in words. Prominent but calm:
+ * it is information about the day, not a problem.
+ */
+.hr-dash-daytype {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--accent-200);
+  border-radius: var(--radius-lg);
+  background-color: var(--accent-050);
+}
+
+.hr-dash-daytype__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--surface);
+  color: var(--accent-700);
+}
+
+.hr-dash-daytype__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.hr-dash-daytype__text {
+  margin: 0.2rem 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+}
+
+/* The four queues, each a link to the section that clears it. */
+.hr-dash-attention {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hr-dash-attention__card {
+  display: flex;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-lg);
+  background-color: var(--surface);
+  box-shadow: var(--shadow-xs);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    box-shadow var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.hr-dash-attention__card:hover {
+  border-color: var(--blue-300);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.hr-dash-attention__card:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+
+.hr-dash-attention__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-md);
+  background-color: var(--surface-sunken);
+  color: var(--ink-500);
+}
+
+.hr-dash-attention__card--waiting .hr-dash-attention__icon {
+  background-color: var(--warning-050);
+  color: var(--warning-600);
+}
+
+.hr-dash-attention__body {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.hr-dash-attention__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.hr-dash-attention__count {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-400);
+}
+
+.hr-dash-attention__card--waiting .hr-dash-attention__count {
+  color: var(--warning-600);
+}
+
+.hr-dash-attention__text {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.hr-dash-attention__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--admin-brand, var(--navy-700));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hr-dash-attention__card:hover {
+    transform: none;
+  }
+}
+
+/* The payroll card's three facts. */
+.hr-dash-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.hr-dash-facts dt {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.hr-dash-facts dd {
+  margin: 0.2rem 0 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-dash-facts__money {
+  color: var(--success-600);
+}
+
+/* ---------------------------------------------------------------- audit log */
+
+.hr-audit-summary {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.hr-audit-summary__text {
+  margin: 0;
+  color: var(--ink-900);
+  overflow-wrap: anywhere;
+}
+
+.hr-audit-details > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--admin-brand, var(--navy-700));
+  cursor: pointer;
+}
+
+.hr-audit-details > summary:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hr-audit-details > summary:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.hr-audit-details__body {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line-100);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-muted);
+}
+
+.hr-audit-details__json {
+  margin: 0;
+  max-height: 20rem;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--ink-700);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hr-audit-details__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.hr-audit-details__ip {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* Before and after, side by side; the fields that changed are marked. */
+.hr-audit-changes {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.hr-audit-changes th,
+.hr-audit-changes td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line-100);
+  text-align: start;
+  vertical-align: top;
+}
+
+.hr-audit-changes thead th {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.hr-audit-changes tbody th {
+  font-weight: 600;
+  color: var(--ink-700);
+  white-space: nowrap;
+}
+
+.hr-audit-changes tr[data-changed='true'] td:last-child {
+  font-weight: 600;
+  color: var(--ink-900);
+  background-color: var(--accent-050);
+}

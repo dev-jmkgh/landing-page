@@ -2,43 +2,64 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
+import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/telecalling';
-import { attendanceAdminApi, type Regularisation } from '@/lib/hr';
-import { EmptyPanel, Tag, TableSkeleton } from '../telecalling/shared';
+import {
+  attendanceAdminApi,
+  companyClock,
+  pageCount,
+  type HrPaginated,
+  type Regularisation,
+} from '@/lib/hr';
+import { EmptyPanel, Pager, Tag, TableSkeleton } from '../telecalling/shared';
+import { isAbort } from './people/shared';
 
 /**
- * Attendance corrections waiting on a decision.
+ * Attendance corrections employees have asked for, one page at a time.
  *
  * Approving one WRITES the attendance day, which is why it is confirmed: the corrected
- * hours feed anything built on attendance later, and the request's own record is the
- * only trace of who asked for them and why.
+ * hours feed everything built on attendance later — reports, payroll — and the request's
+ * own record is the only trace of who asked for them and why.
+ *
+ * A request may be decided here or by the employee's manager in the HR app; the outcome
+ * column names whoever it was, so two people working the same queue can see who acted.
  */
 
-const TABS: { key: 'pending' | 'approved' | 'rejected'; label: string }[] = [
+const PAGE_SIZE = 25;
+
+type StatusTab = 'pending' | 'approved' | 'rejected' | 'all';
+
+const TABS: { key: StatusTab; label: string }[] = [
   { key: 'pending', label: 'Waiting' },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
+  { key: 'all', label: 'All' },
 ];
 
-const TONE: Record<string, 'good' | 'bad' | 'progress'> = {
+const TONE: Record<Regularisation['status'], 'good' | 'bad' | 'progress'> = {
   pending: 'progress',
   approved: 'good',
   rejected: 'bad',
 };
 
-/** `HH:MM` from an ISO timestamp, for the requested punch times. */
+const STATUS_LABEL: Record<Regularisation['status'], string> = {
+  pending: 'Waiting',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
+
+/** `HH:MM` (IST) from a requested punch time, or a dash when that half was not asked for. */
 function timeOf(iso: string | null): string {
-  if (!iso) return '—';
-  const parts = formatDateTime(iso).split(', ');
-  return parts[1] ?? '—';
+  return companyClock(iso) || '—';
 }
 
 export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
-  const [tab, setTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
-  const [items, setItems] = useState<Regularisation[] | null>(null);
+  const [tab, setTab] = useState<StatusTab>('pending');
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<HrPaginated<Regularisation> | null>(null);
   const [pending, setPending] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,18 +77,27 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
     setError(null);
 
     try {
-      setItems(await attendanceAdminApi.listRegularisations(tab, controller.signal));
+      const result = await attendanceAdminApi.listRegularisations(
+        { status: tab, page, pageSize: PAGE_SIZE },
+        controller.signal,
+      );
+      // A page past the end — its last request was just decided — steps back one.
+      if (result.items.length === 0 && result.total > 0 && page > 1) {
+        setPage(pageCount(result));
+        return;
+      }
+      setData(result);
     } catch (caught) {
-      if (caught instanceof DOMException && caught.name === 'AbortError') return;
+      if (isAbort(caught)) return;
       if (caught instanceof ApiError && caught.status === 401) {
         onUnauthorized();
         return;
       }
       setError(caught instanceof ApiError ? caught.message : 'Could not load corrections.');
     } finally {
-      setLoading(false);
+      if (abort.current === controller) setLoading(false);
     }
-  }, [tab, onUnauthorized]);
+  }, [tab, page, onUnauthorized]);
 
   const refreshCount = useCallback(async () => {
     try {
@@ -108,6 +138,9 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
         return;
       }
       setError(caught instanceof ApiError ? caught.message : 'Could not update that request.');
+      // "Already decided" means somebody else got there first — show what they did.
+      await load();
+      await refreshCount();
     } finally {
       setBusyId(null);
     }
@@ -149,10 +182,12 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
     );
   };
 
+  const items = data?.items ?? [];
+
   return (
     <>
       <div className="admin-toolbar">
-        <div className="admin-tabs" role="tablist" aria-label="Correction state">
+        <div className="admin-tabs" role="tablist" aria-label="Correction status">
           {TABS.map((item) => (
             <button
               key={item.key}
@@ -160,7 +195,11 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
               role="tab"
               className="admin-tab"
               aria-selected={tab === item.key}
-              onClick={() => setTab(item.key)}
+              onClick={() => {
+                if (item.key === tab) return;
+                setTab(item.key);
+                setPage(1);
+              }}
             >
               {item.label}
               {item.key === 'pending' && pending !== null && pending > 0 ? (
@@ -181,95 +220,128 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
       {error ? <FormAlert variant="error">{error}</FormAlert> : null}
       {notice ? <FormAlert variant="success">{notice}</FormAlert> : null}
 
-      {loading && !items ? (
-        <TableSkeleton />
-      ) : !items || items.length === 0 ? (
-        <EmptyPanel
-          title={tab === 'pending' ? 'Nothing waiting' : 'Nothing here'}
-          message={
-            tab === 'pending'
-              ? 'When somebody asks for a missing punch to be corrected, it appears here.'
-              : 'Decisions you have made appear here.'
-          }
-        />
+      {data === null ? (
+        loading ? (
+          <TableSkeleton />
+        ) : null
       ) : (
-        <DataTable
-          rows={items}
-          rowKey={(row) => row.id}
-          rowBusy={(row) => busyId === row.id}
-          minWidth="62rem"
-          caption="Attendance correction requests"
-          columns={[
-            {
-              key: 'who',
-              header: 'Employee',
-              render: (row) => (
-                <CellStack primary={row.employeeName ?? '—'}>
-                  <span className="tc-muted tc-mono">{row.employeeCode}</span>
-                </CellStack>
-              ),
-            },
-            {
-              key: 'day',
-              header: 'Day',
-              width: '9rem',
-              nowrap: true,
-              render: (row) => formatDate(row.workDate),
-            },
-            {
-              key: 'times',
-              header: 'Asked for',
-              width: '11rem',
-              nowrap: true,
-              render: (row) => (
-                <CellStack
-                  primary={`${timeOf(row.requestedCheckInAt)} → ${timeOf(row.requestedCheckOutAt)}`}
-                  secondary={`raised ${formatDate(row.createdAt)}`}
-                />
-              ),
-            },
-            {
-              key: 'reason',
-              header: 'Why',
-              render: (row) => row.reason,
-            },
-            {
-              key: 'actions',
-              header: tab === 'pending' ? 'Actions' : 'Outcome',
-              align: 'end',
-              width: '15rem',
-              nowrap: true,
-              render: (row) =>
-                row.status === 'pending' ? (
-                  <CellActions>
-                    <button
-                      type="button"
-                      className="btn btn--primary btn--sm"
-                      disabled={busyId === row.id}
-                      onClick={() => void approve(row)}
-                    >
-                      <Icon name="check" size={15} />
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      disabled={busyId === row.id}
-                      onClick={() => void reject(row)}
-                    >
-                      Reject
-                    </button>
-                  </CellActions>
-                ) : (
-                  <CellStack
-                    primary={<Tag tone={TONE[row.status] ?? 'progress'}>{row.status}</Tag>}
-                    secondary={row.reviewNote ?? undefined}
-                  />
-                ),
-            },
-          ]}
-        />
+        <LoadingOverlay busy={loading}>
+          {items.length === 0 ? (
+            <EmptyPanel
+              title={tab === 'pending' ? 'Nothing waiting' : 'Nothing here'}
+              message={
+                tab === 'pending'
+                  ? 'When somebody asks for a missing punch to be corrected, it appears here.'
+                  : 'Decisions made here or by managers in the HR app appear here.'
+              }
+            />
+          ) : (
+            <DataTable
+              rows={items}
+              rowKey={(row) => row.id}
+              rowBusy={(row) => busyId === row.id}
+              minWidth="64rem"
+              caption="Attendance correction requests"
+              columns={[
+                {
+                  key: 'who',
+                  header: 'Employee',
+                  width: '14rem',
+                  render: (row) => (
+                    <CellStack primary={row.employeeName ?? '—'}>
+                      <span className="tc-muted tc-mono">{row.employeeCode}</span>
+                    </CellStack>
+                  ),
+                },
+                {
+                  key: 'day',
+                  header: 'Day',
+                  width: '8.5rem',
+                  nowrap: true,
+                  render: (row) => formatDate(row.workDate),
+                },
+                {
+                  key: 'times',
+                  header: 'Asked for',
+                  width: '10rem',
+                  nowrap: true,
+                  render: (row) => (
+                    <CellStack
+                      primary={`${timeOf(row.requestedCheckInAt)} → ${timeOf(row.requestedCheckOutAt)}`}
+                      secondary={`raised ${formatDate(row.createdAt)}`}
+                    />
+                  ),
+                },
+                {
+                  key: 'reason',
+                  header: 'Why',
+                  render: (row) => <span className="tc-prewrap">{row.reason}</span>,
+                },
+                {
+                  key: 'actions',
+                  header: lastColumnHeader(tab),
+                  align: 'end',
+                  width: '15rem',
+                  render: (row) =>
+                    row.status === 'pending' ? (
+                      <CellActions>
+                        <button
+                          type="button"
+                          className="btn btn--primary btn--sm"
+                          disabled={busyId === row.id}
+                          onClick={() => void approve(row)}
+                        >
+                          <Icon name="check" size={15} />
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          disabled={busyId === row.id}
+                          onClick={() => void reject(row)}
+                        >
+                          Reject
+                        </button>
+                      </CellActions>
+                    ) : (
+                      <CellStack
+                        primary={<Tag tone={TONE[row.status]}>{STATUS_LABEL[row.status]}</Tag>}
+                        secondary={
+                          [
+                            row.reviewerName ? `by ${row.reviewerName}` : null,
+                            row.reviewedAt ? formatDateTime(row.reviewedAt) : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || undefined
+                        }
+                      >
+                        {row.reviewNote ? <span className="tc-muted">“{row.reviewNote}”</span> : null}
+                      </CellStack>
+                    ),
+                },
+              ]}
+            />
+          )}
+        </LoadingOverlay>
       )}
+
+      {data && data.total > 0 ? (
+        <Pager
+          page={data.page}
+          totalPages={pageCount(data)}
+          total={data.total}
+          noun="request"
+          busy={loading}
+          onChange={setPage}
+        />
+      ) : null}
     </>
   );
+}
+
+/** The last column decides on Waiting and reports on the other tabs. */
+function lastColumnHeader(tab: StatusTab): string {
+  if (tab === 'pending') return 'Actions';
+  if (tab === 'all') return 'Outcome or action';
+  return 'Outcome';
 }

@@ -1,17 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { CellStack, DataTable } from '@/components/admin/DataTable';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
+import { ButtonSpinner } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
 import {
   attendanceAdminApi,
+  describeWeekdays,
   minutesAsHours,
   type Shift,
+  type Weekday,
   type WorkLocation,
 } from '@/lib/hr';
 import { EmptyPanel, Tag, TableSkeleton } from '../telecalling/shared';
+import { WeekdayPicker } from './people/WeekdayPicker';
 import { SitePicker } from './SitePicker';
 
 /**
@@ -27,14 +31,39 @@ import { SitePicker } from './SitePicker';
  */
 
 const BLANK_SITE = { name: '', address: '', latitude: '', longitude: '', radiusMetres: '150' };
-const BLANK_SHIFT = {
+
+type ShiftForm = {
+  name: string;
+  startsAt: string;
+  endsAt: string;
+  breakMinutes: string;
+  graceMinutes: string;
+  halfDayMinutes: string;
+  /** Sunday by default — the column's own default, chosen visibly rather than implied. */
+  weeklyOffDays: Weekday[];
+};
+
+const BLANK_SHIFT: ShiftForm = {
   name: '',
   startsAt: '09:00',
   endsAt: '18:00',
   breakMinutes: '60',
   graceMinutes: '10',
   halfDayMinutes: '240',
+  weeklyOffDays: ['sun'],
 };
+
+function shiftFormFrom(shift: Shift): ShiftForm {
+  return {
+    name: shift.name,
+    startsAt: shift.startsAt,
+    endsAt: shift.endsAt,
+    breakMinutes: String(shift.breakMinutes),
+    graceMinutes: String(shift.graceMinutes),
+    halfDayMinutes: String(shift.halfDayMinutes),
+    weeklyOffDays: [...(shift.weeklyOffDays ?? [])],
+  };
+}
 
 export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [locations, setLocations] = useState<WorkLocation[] | null>(null);
@@ -44,10 +73,38 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
   const [notice, setNotice] = useState<string | null>(null);
 
   const [siteForm, setSiteForm] = useState(BLANK_SITE);
-  const [shiftForm, setShiftForm] = useState(BLANK_SHIFT);
+  const [shiftForm, setShiftForm] = useState<ShiftForm>(BLANK_SHIFT);
   const [showSite, setShowSite] = useState(false);
   const [showShift, setShowShift] = useState(false);
+  /** The shift being edited, or null while the form adds a new one. */
+  const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [saving, setSaving] = useState(false);
+  const shiftFormRef = useRef<HTMLDivElement | null>(null);
+
+  /** The name field of the shift form, focused when the form opens for an edit. */
+  useEffect(() => {
+    if (!showShift) return;
+    shiftFormRef.current?.querySelector<HTMLInputElement>('input')?.focus();
+    shiftFormRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [showShift, editingShift]);
+
+  /** Writes are administrator-only; a supervisor gets a named role gate, not a fault. */
+  const writeError = (caught: unknown, fallback: string): void => {
+    if (caught instanceof ApiError && caught.status === 401) {
+      onUnauthorized();
+      return;
+    }
+    if (caught instanceof ApiError && caught.status === 403) {
+      setError('Only an administrator can change work locations and shifts.');
+      return;
+    }
+    // These forms mark no field of their own, so a validation refusal spells its reasons
+    // out rather than pointing at highlighting that is not there.
+    const reasons = caught instanceof ApiError ? Object.values(caught.fieldErrors) : [];
+    setError(
+      reasons.length > 0 ? reasons.join(' ') : caught instanceof ApiError ? caught.message : fallback,
+    );
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,43 +168,74 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
       setShowSite(false);
       await load();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Could not save that site.');
+      writeError(caught, 'Could not save that site.');
     } finally {
       setSaving(false);
     }
   };
 
-  const createShift = async () => {
+  const openShiftForm = (shift: Shift | null) => {
     setError(null);
     setNotice(null);
+    setEditingShift(shift);
+    setShiftForm(shift ? shiftFormFrom(shift) : BLANK_SHIFT);
+    setShowShift(true);
+  };
+
+  const closeShiftForm = () => {
+    setShowShift(false);
+    setEditingShift(null);
+    setShiftForm(BLANK_SHIFT);
+  };
+
+  const saveShift = async () => {
+    setError(null);
+    setNotice(null);
+
+    const body = {
+      name: shiftForm.name.trim(),
+      startsAt: shiftForm.startsAt,
+      endsAt: shiftForm.endsAt,
+      breakMinutes: Number(shiftForm.breakMinutes),
+      graceMinutes: Number(shiftForm.graceMinutes),
+      halfDayMinutes: Number(shiftForm.halfDayMinutes),
+      weeklyOffDays: shiftForm.weeklyOffDays,
+    };
+
+    if (body.name.length < 2) {
+      setError('Name the shift.');
+      return;
+    }
+
     setSaving(true);
 
     try {
-      await attendanceAdminApi.createShift({
-        name: shiftForm.name.trim(),
-        startsAt: shiftForm.startsAt,
-        endsAt: shiftForm.endsAt,
-        breakMinutes: Number(shiftForm.breakMinutes),
-        graceMinutes: Number(shiftForm.graceMinutes),
-        halfDayMinutes: Number(shiftForm.halfDayMinutes),
-      });
-      setNotice(`${shiftForm.name.trim()} added.`);
-      setShiftForm(BLANK_SHIFT);
-      setShowShift(false);
+      if (editingShift) {
+        await attendanceAdminApi.updateShift(editingShift.id, body);
+        setNotice(
+          `${body.name} saved. Weekly off: ${describeWeekdays(body.weeklyOffDays)}. Days already recorded keep their hours; how days are classified follows the new weekly off.`,
+        );
+      } else {
+        await attendanceAdminApi.createShift(body);
+        setNotice(`${body.name} added. Weekly off: ${describeWeekdays(body.weeklyOffDays)}.`);
+      }
+      closeShiftForm();
       await load();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Could not save that shift.');
+      writeError(caught, 'Could not save that shift.');
     } finally {
       setSaving(false);
     }
   };
 
   const toggleSite = async (site: WorkLocation) => {
+    setError(null);
+    setNotice(null);
     try {
       await attendanceAdminApi.updateLocation(site.id, { isActive: !site.isActive });
       await load();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Could not update that site.');
+      writeError(caught, 'Could not update that site.');
     }
   };
 
@@ -363,7 +451,7 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
           <button
             type="button"
             className="btn btn--primary"
-            onClick={() => setShowShift((value) => !value)}
+            onClick={() => (showShift ? closeShiftForm() : openShiftForm(null))}
           >
             <Icon name="clock" size={16} />
             {showShift ? 'Cancel' : 'Add a shift'}
@@ -372,7 +460,15 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
       </div>
 
       {showShift ? (
-        <div className="tc-card tc-form">
+        <div
+          ref={shiftFormRef}
+          className="tc-card tc-form"
+          role="group"
+          aria-labelledby="hr-shift-form-title"
+        >
+          <h4 className="tc-dialog__section-title" id="hr-shift-form-title">
+            {editingShift ? `Edit ${editingShift.name}` : 'New shift'}
+          </h4>
           <div className="tc-form__grid">
             <div className="field">
               <label className="field__label" htmlFor="hr-shift-name">
@@ -457,14 +553,28 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
             </div>
           </div>
 
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => void createShift()}
-            disabled={saving}
-          >
-            {saving ? 'Saving…' : 'Add shift'}
-          </button>
+          <WeekdayPicker
+            label="Weekly off"
+            value={shiftForm.weeklyOffDays}
+            onChange={(weeklyOffDays) => setShiftForm({ ...shiftForm, weeklyOffDays })}
+            hint="Days people on this shift are not expected in. They are never counted as absences, and leave taken across them does not use up days."
+          />
+
+          <div className="hrp-form-actions">
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => void saveShift()}
+              disabled={saving}
+              aria-busy={saving || undefined}
+            >
+              {saving ? <ButtonSpinner /> : null}
+              {editingShift ? 'Save shift' : 'Add shift'}
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={closeShiftForm} disabled={saving}>
+              Cancel
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -476,16 +586,35 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
         <DataTable
           rows={shifts}
           rowKey={(row) => row.id}
-          minWidth="48rem"
+          minWidth="62rem"
           caption="Shifts"
           columns={[
-            { key: 'name', header: 'Shift', render: (row) => row.name },
+            {
+              key: 'name',
+              header: 'Shift',
+              render: (row) => (
+                <CellStack primary={row.name}>
+                  {row.isActive ? null : <Tag tone="bad">Off</Tag>}
+                </CellStack>
+              ),
+            },
             {
               key: 'hours',
               header: 'Hours',
-              width: '11rem',
+              width: '9rem',
               nowrap: true,
               render: (row) => `${row.startsAt} – ${row.endsAt}`,
+            },
+            {
+              key: 'weekly-off',
+              header: 'Weekly off',
+              width: '10rem',
+              render: (row) =>
+                (row.weeklyOffDays ?? []).length === 0 ? (
+                  <span className="tc-muted">None — 7-day rota</span>
+                ) : (
+                  describeWeekdays(row.weeklyOffDays)
+                ),
             },
             {
               key: 'grace',
@@ -506,10 +635,29 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
             {
               key: 'half',
               header: 'Half day under',
-              width: '10rem',
+              width: '9rem',
               align: 'end',
               nowrap: true,
               render: (row) => minutesAsHours(row.halfDayMinutes),
+            },
+            {
+              key: 'actions',
+              header: <span className="sr-only">Actions</span>,
+              align: 'end',
+              width: '6rem',
+              nowrap: true,
+              render: (row) => (
+                <CellActions>
+                  <button
+                    type="button"
+                    className="btn btn--outline btn--sm"
+                    onClick={() => openShiftForm(row)}
+                    aria-label={`Edit ${row.name}`}
+                  >
+                    Edit
+                  </button>
+                </CellActions>
+              ),
             },
           ]}
         />

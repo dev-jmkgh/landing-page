@@ -7,8 +7,16 @@ import { AdminSessionLoader } from '@/components/admin/Loader';
 import { useAdminSession } from '@/components/admin/useAdminSession';
 import { FormAlert } from '@/components/forms/Fields';
 import { HrAttendancePanel } from './HrAttendancePanel';
+import { HrAuditPanel } from './HrAuditPanel';
 import { HrCorrectionsPanel } from './HrCorrectionsPanel';
+import { HrDashboardPanel } from './HrDashboardPanel';
+import { HrDocumentsPanel } from './HrDocumentsPanel';
 import { HrEmployeesPanel } from './HrEmployeesPanel';
+import { HrLeavePanel } from './HrLeavePanel';
+import { HrOrganisationPanel } from './HrOrganisationPanel';
+import { HrPayrollPanel } from './HrPayrollPanel';
+import { HrReportsPanel } from './HrReportsPanel';
+import { HrRequestsPanel } from './HrRequestsPanel';
 import { HrWorkplacesPanel } from './HrWorkplacesPanel';
 
 /**
@@ -31,7 +39,22 @@ if (!HR) {
 
 const SECTIONS = HR.items;
 
-type Section = 'people' | 'attendance' | 'corrections' | 'workplaces';
+type Section =
+  | 'dashboard'
+  | 'people'
+  | 'attendance'
+  | 'corrections'
+  | 'leave'
+  | 'requests'
+  | 'documents'
+  | 'payroll'
+  | 'reports'
+  | 'workplaces'
+  | 'organisation'
+  | 'audit';
+
+/** Where HR opens: the day at a glance, then whatever needs a decision. */
+const DEFAULT_SECTION: Section = 'dashboard';
 
 function isSection(value: string | null): value is Section {
   return value !== null && SECTIONS.some((section) => section.key === value);
@@ -45,7 +68,7 @@ function isSection(value: string | null): value is Section {
  * links and a working Back button without one.
  */
 function useSection(): [Section, (next: Section) => void] {
-  const [section, setSection] = useState<Section>('people');
+  const [section, setSection] = useState<Section>(DEFAULT_SECTION);
 
   // Read on mount rather than during render — `window` does not exist while the page
   // is prerendered at build time.
@@ -55,7 +78,7 @@ function useSection(): [Section, (next: Section) => void] {
 
     const onPop = () => {
       const value = new URLSearchParams(window.location.search).get('section');
-      setSection(isSection(value) ? value : 'people');
+      setSection(isSection(value) ? value : DEFAULT_SECTION);
     };
 
     window.addEventListener('popstate', onPop);
@@ -65,6 +88,12 @@ function useSection(): [Section, (next: Section) => void] {
   const go = useCallback((next: Section) => {
     setSection(next);
     const url = new URL(window.location.href);
+    /*
+     * Only `section` survives a switch. Panels keep their own state in the query string
+     * (`?leaveTab=`, `?request=`), and carrying one panel's parameters into another would
+     * leave them to be misread there — or restored on a later visit nobody asked for.
+     */
+    url.search = '';
     url.searchParams.set('section', next);
     window.history.pushState({ section: next }, '', url);
   }, []);
@@ -115,6 +144,9 @@ export function HrApp() {
         Each panel is mounted only while visible and unmounts on switch, so its
         in-flight requests are aborted and it refetches on return.
       */}
+      {section === 'dashboard' ? (
+        <HrDashboardPanel onUnauthorized={handleUnauthorized} />
+      ) : null}
       {section === 'people' ? <HrEmployeesPanel onUnauthorized={handleUnauthorized} /> : null}
       {section === 'attendance' ? (
         <HrAttendancePanel onUnauthorized={handleUnauthorized} />
@@ -122,9 +154,20 @@ export function HrApp() {
       {section === 'corrections' ? (
         <HrCorrectionsPanel onUnauthorized={handleUnauthorized} />
       ) : null}
+      {section === 'leave' ? <HrLeavePanel onUnauthorized={handleUnauthorized} /> : null}
+      {section === 'requests' ? <HrRequestsPanel onUnauthorized={handleUnauthorized} /> : null}
+      {section === 'documents' ? (
+        <HrDocumentsPanel onUnauthorized={handleUnauthorized} />
+      ) : null}
+      {section === 'payroll' ? <HrPayrollPanel onUnauthorized={handleUnauthorized} /> : null}
+      {section === 'reports' ? <HrReportsPanel onUnauthorized={handleUnauthorized} /> : null}
       {section === 'workplaces' ? (
         <HrWorkplacesPanel onUnauthorized={handleUnauthorized} />
       ) : null}
+      {section === 'organisation' ? (
+        <HrOrganisationPanel onUnauthorized={handleUnauthorized} />
+      ) : null}
+      {section === 'audit' ? <HrAuditPanel onUnauthorized={handleUnauthorized} /> : null}
     </AdminShell>
   );
 }

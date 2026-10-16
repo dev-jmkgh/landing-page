@@ -6,8 +6,11 @@ import { asyncHandler } from '../../../middleware/errorHandler';
 import { mobileSyncLimiter } from '../../../middleware/rateLimit';
 import { validateBody, validateQuery } from '../../../middleware/validate';
 import { HttpError, badRequest } from '../../../utils/httpError';
+import { pageQuerySchema } from '../hr.schema';
+import { calendarFor, companyToday, monthBounds } from '../calendar/calendar.service';
 import {
   LOCAL_TODAY,
+  calendarQuerySchema,
   historyQuerySchema,
   punchSchema,
   regularisationSchema,
@@ -16,7 +19,9 @@ import {
   assignmentFor,
   checkIn,
   checkOut,
+  closeStaleSessions,
   historyFor,
+  missingPunchFor,
   summaryFor,
   todayFor,
   type GeoVerdict,
@@ -94,14 +99,26 @@ hrAttendanceRouter.get(
   '/today',
   asyncHandler(async (request, response) => {
     const userId = request.hrActor!.id;
-    const [day, assignment] = await Promise.all([todayFor(userId), assignmentFor(userId)]);
+
+    // A session forgotten yesterday is closed first, so the screen offers Check in
+    // rather than showing a day that started yesterday morning as still running.
+    await closeStaleSessions(userId);
+
+    const [day, assignment, missingPunch] = await Promise.all([
+      todayFor(userId),
+      assignmentFor(userId),
+      missingPunchFor(userId),
+    ]);
 
     response.json({
       success: true,
       day,
+      /** The latest day still needing a correction, so the app can prompt for it. */
+      missingPunch,
       assignment: {
         workMode: assignment.workMode,
         geofenced: assignment.geofenced,
+        dayOverride: assignment.dayOverride,
         location: assignment.location
           ? {
               id: assignment.location.id,
@@ -143,6 +160,7 @@ hrAttendanceRouter.post(
     const result = await checkIn(request.hrActor!.id, {
       coordinate: input.coordinate,
       deviceTime: input.deviceTime,
+      mocked: input.mocked,
     });
 
     if (!result.ok) throw geoError(result.verdict);
@@ -165,6 +183,7 @@ hrAttendanceRouter.post(
     const result = await checkOut(request.hrActor!.id, {
       coordinate: input.coordinate,
       deviceTime: input.deviceTime,
+      mocked: input.mocked,
     });
 
     if (!result.ok) {
@@ -235,14 +254,38 @@ async function resolveRange(
   return { from: String(row?.f), to: String(row?.t) };
 }
 
+/**
+ * One month as a calendar: every date, with what it was — present, late, on leave, a
+ * holiday, a weekly off, absent, or still to come.
+ *
+ * This is the view the history list cannot give: a day with no attendance row is
+ * invisible there, and an employee checking "was I marked absent on the 12th?" needs
+ * to see the 12th. Bounded by construction — one month is at most 31 entries — and
+ * pending leave is included so the employee sees what they have asked for.
+ */
+hrAttendanceRouter.get(
+  '/calendar',
+  validateQuery(calendarQuerySchema),
+  asyncHandler(async (request, response) => {
+    const { month } = response.locals.query as z.infer<typeof calendarQuerySchema>;
+    const period = month ?? companyToday().slice(0, 7);
+    const { start, end } = monthBounds(period);
+
+    const days = await calendarFor(request.hrActor!.id, start, end, { includePending: true });
+    response.json({ success: true, month: period, days });
+  }),
+);
+
 /* -------------------------------------------------------------------------- */
 /* Regularisation                                                              */
 /* -------------------------------------------------------------------------- */
 
 hrAttendanceRouter.get(
   '/regularisations',
+  validateQuery(pageQuerySchema),
   asyncHandler(async (request, response) => {
-    response.json({ success: true, items: await listForUser(request.hrActor!.id) });
+    const paging = response.locals.query as z.infer<typeof pageQuerySchema>;
+    response.json({ success: true, ...(await listForUser(request.hrActor!.id, paging)) });
   }),
 );
 
