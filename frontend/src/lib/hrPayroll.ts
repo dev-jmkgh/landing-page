@@ -1,7 +1,10 @@
 import { adminRequest, apiBaseUrl } from './api';
 
 /**
- * The HR payroll admin API: salary structures, monthly runs and payslips.
+ * The HR payroll admin API: salary structures, pay periods and payslips.
+ *
+ * A PAY PERIOD is what the API calls a payroll "run" (`/payroll/runs`). The screens say
+ * "pay period" throughout; the code keeps the API's word so it can be traced to it.
  *
  * Its own module rather than a section of `hr.ts`, for the same reason `hr.ts` is not a
  * section of `telecalling.ts`: payroll is the one HR surface that is ADMINISTRATOR-ONLY
@@ -26,21 +29,158 @@ import { adminRequest, apiBaseUrl } from './api';
 export const PAYROLL_RUN_STATUSES = ['draft', 'processed', 'approved'] as const;
 export type PayrollRunStatus = (typeof PAYROLL_RUN_STATUSES)[number];
 
+/**
+ * The API's three statuses in words, for the list's status FILTER only — the server can
+ * filter by these and nothing finer. What a period shows as its status is its `RunStage`
+ * (below), which splits "processed" by whether the figures are final yet.
+ */
 export const PAYROLL_RUN_STATUS_LABELS: Record<PayrollRunStatus, string> = {
-  draft: 'Draft',
-  processed: 'Processed',
-  approved: 'Approved',
+  draft: 'Not calculated yet',
+  processed: 'Calculated, not approved',
+  approved: 'Approved · published',
 };
 
 /**
- * Tones from the shared `Tag`. Approved is the only "done" state; processed is work in
- * progress (figures exist but nobody can see them yet); a draft has no figures at all.
+ * Where a pay period is, in the words an administrator who is not an accountant reads.
+ * Display only: the API statuses are unchanged, and the server still decides every
+ * action.
+ *
+ *   not_calculated  draft — no figures at all
+ *   so_far          calculated while the period was running: figures up to a day,
+ *                   the days after it not counted yet; cannot be approved as it is
+ *   ready           calculated after the period ended, with payslips: can be approved
+ *   nobody          calculated after the period ended, but nobody was included
+ *   approved        frozen, and the payslips are published in the HR app
+ *
+ * `so_far` is also what a calculation made before the period ended reads as AFTER it has
+ * ended — the figures still stop short, and the server refuses to approve them until a
+ * recalculation covers every day (`calculatedThrough >= periodEnd`).
  */
-export const PAYROLL_RUN_STATUS_TONE: Record<PayrollRunStatus, 'neutral' | 'progress' | 'good'> = {
-  draft: 'neutral',
-  processed: 'progress',
+export type RunStage = 'not_calculated' | 'so_far' | 'ready' | 'nobody' | 'approved';
+
+export function runStage(run: PayrollRun): RunStage {
+  if (run.status === 'approved') return 'approved';
+  if (run.status === 'draft') return 'not_calculated';
+  // `calculatedThrough` null on a processed period is the server's "recalculate first".
+  if (run.provisional || run.calculatedThrough === null || run.calculatedThrough < run.periodEnd) {
+    return 'so_far';
+  }
+  return run.employeeCount > 0 ? 'ready' : 'nobody';
+}
+
+export const RUN_STAGE_LABELS: Record<RunStage, string> = {
+  not_calculated: 'Not calculated yet',
+  so_far: 'Calculated so far',
+  ready: 'Ready to approve',
+  nobody: 'Nobody included',
+  approved: 'Approved · published',
+};
+
+/**
+ * Tones from the shared `Tag`: grey before anything is worked out, blue while figures
+ * are still moving, amber when the next step is the administrator's (approve, or set up
+ * salaries), green once published.
+ */
+export const RUN_STAGE_TONE: Record<RunStage, 'neutral' | 'progress' | 'good' | 'warn'> = {
+  not_calculated: 'neutral',
+  so_far: 'progress',
+  ready: 'warn',
+  nobody: 'warn',
   approved: 'good',
 };
+
+/** "Calculated so far · to 16 Oct", or the stage's plain label. */
+export function runStageLabel(run: PayrollRun): string {
+  const stage = runStage(run);
+  if (stage === 'so_far' && run.calculatedThrough) {
+    return `${RUN_STAGE_LABELS.so_far} · to ${dayMonth(run.calculatedThrough)}`;
+  }
+  return RUN_STAGE_LABELS[stage];
+}
+
+/**
+ * Whether the server would approve this period now — the same four conditions
+ * `approveRun` checks, so the button is only enabled when the click can succeed.
+ * `today` is the company (IST) date.
+ */
+export function canApprove(run: PayrollRun, today: string): boolean {
+  return (
+    run.status === 'processed' &&
+    !run.provisional &&
+    run.calculatedThrough !== null &&
+    run.calculatedThrough >= run.periodEnd &&
+    run.employeeCount > 0 &&
+    today >= run.approvableFrom
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The pay cycle                                                               */
+/* -------------------------------------------------------------------------- */
+
+/** The HR setting `payrollCycleStartDay`: 1 to 28 (28 so that every month has the day). */
+export const CYCLE_START_DAYS: readonly number[] = Array.from({ length: 28 }, (_, index) => index + 1);
+
+/** 1 → "1st", 22 → "22nd", 26 → "26th". */
+export function ordinal(day: number): string {
+  const tens = day % 100;
+  if (tens >= 11 && tens <= 13) return `${day}th`;
+  const suffix = day % 10 === 1 ? 'st' : day % 10 === 2 ? 'nd' : day % 10 === 3 ? 'rd' : 'th';
+  return `${day}${suffix}`;
+}
+
+/** "the calendar month" / "the 26th to the 25th" — the cycle inside a sentence. */
+export function cycleSpan(startDay: number): string {
+  if (startDay <= 1) return 'the calendar month';
+  return `the ${ordinal(startDay)} to the ${ordinal(startDay - 1)}`;
+}
+
+/** "Pay periods follow the calendar month" / "Pay periods run from the 26th to the 25th". */
+export function describeCycle(startDay: number): string {
+  if (startDay <= 1) return 'Pay periods follow the calendar month';
+  return `Pay periods run from ${cycleSpan(startDay)}`;
+}
+
+/** "October 2026 would be 26 Sep – 25 Oct 2026" — the live example beside the setting. */
+export function cycleExample(startDay: number, today: string): string {
+  const period = periodContaining(today, startDay);
+  const { start, end } = payPeriodBounds(period, startDay);
+  return `${monthLabel(period)} would be ${formatPeriodRange(start, end)}`;
+}
+
+function isoDate(year: number, month: number, day: number): string {
+  // Date.UTC rolls month 0 and month 13 over into the neighbouring year, and day 0 back
+  // to the last day of the previous month — which is what both branches below lean on.
+  return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
+}
+
+/**
+ * The first and last day of the pay period named `period` (`YYYY-MM`) under a cycle that
+ * starts on `startDay`. MIRRORS `payPeriodBounds` in the server's payroll.schema.ts —
+ * used only to preview dates; the server works out the real ones when a period is
+ * created, and stores them on it.
+ *
+ * A period is named after the month it ENDS in: start day 1 is the calendar month; 26
+ * makes "2026-10" run 26 September to 25 October.
+ */
+export function payPeriodBounds(period: string, startDay: number): { start: string; end: string } {
+  const [year, month] = period.split('-').map(Number) as [number, number];
+  if (startDay <= 1) return { start: isoDate(year, month, 1), end: isoDate(year, month + 1, 0) };
+  return { start: isoDate(year, month - 1, startDay), end: isoDate(year, month, startDay - 1) };
+}
+
+/**
+ * The `YYYY-MM` of the pay period that contains `date` (`YYYY-MM-DD`): the period an
+ * administrator is in today. On or after the start day, today belongs to the period that
+ * ends next month — 27 October under a 26th cycle is in "November".
+ */
+export function periodContaining(date: string, startDay: number): string {
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  if (startDay > 1 && day >= startDay) {
+    return month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;
+  }
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
 
 export const COMPONENT_KINDS = ['earning', 'deduction'] as const;
 export type ComponentKind = (typeof COMPONENT_KINDS)[number];
@@ -114,8 +254,40 @@ export type PayrollRun = {
   approvedAt: string | null;
   approvedByName: string | null;
   createdAt: string;
-  /** The first company date the run may be processed on (the day after the period). */
+  /**
+   * The first company date the period may be CALCULATED on: the day it starts. It may be
+   * calculated again at any time until it is approved.
+   */
   processableFrom: string;
+  /**
+   * The first date it may be APPROVED on: the day after it ends. Approval also needs a
+   * calculation made on or after that day.
+   */
+  approvableFrom: string;
+  /** The last day the current figures cover, or null before the first calculation. */
+  calculatedThrough: string | null;
+  /**
+   * True when the figures stop short of the period end — calculated while it was still
+   * running. Days after `calculatedThrough` are neither paid nor loss of pay yet.
+   */
+  provisional: boolean;
+  /** Employed people the last calculation left out, and why. Empty before it ran. */
+  exclusions: PayrollExclusion[];
+};
+
+/**
+ * Somebody employed during the period who has no payslip in it.
+ *
+ *   no_structure            no salary structure at all
+ *   structure_starts_later  their structure starts after the period ends
+ */
+export type PayrollExclusion = {
+  userId: number;
+  employeeCode: string;
+  employeeName: string;
+  reason: 'no_structure' | 'structure_starts_later';
+  /** For `structure_starts_later`: the `YYYY-MM-DD` it starts. */
+  structureFrom: string | null;
 };
 
 export type PayslipLine = {
@@ -148,6 +320,12 @@ export type Payslip = {
   unpaidLeaveDays: number;
   absentDays: number;
   untrackedDays: number;
+  /**
+   * Days of the period still to come when it was calculated — only ever above zero on a
+   * calculation made while the period was running. Neither paid nor loss of pay, so the
+   * paid days and amounts beside it are "so far".
+   */
+  remainingDays: number;
   lopDays: number;
   paidDays: number;
   grossEarnings: number;
@@ -225,21 +403,27 @@ export const payrollApi = {
   getRun: (id: number, signal?: AbortSignal) =>
     adminRequest<{ run: PayrollRun }>(`${PAYROLL}/runs/${id}`, { signal }).then((r) => r.run),
 
-  /** A draft run. The server refuses a future month or a duplicate, with `errors.period`. */
+  /**
+   * Opens a pay period (a draft), with dates from the pay cycle as it is now. The server
+   * refuses a period that has not started yet, or a duplicate, with `errors.period`.
+   */
   createRun: (body: { period: string; note: string | null }) =>
     adminRequest<{ run: PayrollRun }>(`${PAYROLL}/runs`, { method: 'POST', body }).then((r) => r.run),
 
   /**
-   * (Re)computes every payslip. `missingStructure` is how many employed people were left
-   * out for having no salary structure — returned only here, never stored, so the
-   * screen says it straight after processing or not at all.
+   * (Re)calculates every payslip — any time after the period starts, until it is
+   * approved. `missingStructure` counts the people left out; who they are, and why, is
+   * `run.exclusions`, which is stored with the run.
    */
   processRun: (id: number) =>
     adminRequest<{ run: PayrollRun; missingStructure: number }>(`${PAYROLL}/runs/${id}/process`, {
       method: 'POST',
     }),
 
-  /** Freezes the run and publishes its payslips. `notified` counts new notifications. */
+  /**
+   * Freezes the period and publishes its payslips. Only after the period has ended AND
+   * been recalculated since (`canApprove`). `notified` counts new notifications.
+   */
   approveRun: (id: number) =>
     adminRequest<{ run: PayrollRun; notified: number }>(`${PAYROLL}/runs/${id}/approve`, {
       method: 'POST',
@@ -306,7 +490,34 @@ export const payrollApi = {
     adminRequest<{ items: PayrollDepartment[] }>(`${BASE}/departments`, { signal }).then(
       (r) => r.items,
     ),
+
+  /* ----------------------------------------------------------- pay cycle */
+
+  /**
+   * The pay cycle's start day, from the HR settings. Read and written here, not through
+   * `hr.ts`, for the same reason as the departments above; Organisation → HR settings
+   * edits the same value through `peopleApi`.
+   */
+  cycleStartDay: (signal?: AbortSignal) =>
+    adminRequest<{ settings: { payrollCycleStartDay?: number } }>(`${BASE}/settings`, { signal }).then(
+      (r) => validCycleDay(r.settings.payrollCycleStartDay),
+    ),
+
+  /** Administrator only. Periods already opened keep their dates. Field error: `payrollCycleStartDay`. */
+  setCycleStartDay: (payrollCycleStartDay: number) =>
+    adminRequest<{ settings: { payrollCycleStartDay?: number } }>(`${BASE}/settings`, {
+      method: 'PATCH',
+      body: { payrollCycleStartDay },
+    }).then((r) => validCycleDay(r.settings.payrollCycleStartDay)),
 };
+
+/**
+ * The start day as the server's `validCycleDay` reads it: 1 to 28, else 1. Also covers an
+ * API from before the setting existed, which sends none — that is the calendar month.
+ */
+function validCycleDay(value: number | undefined): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 28 ? value : 1;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Formatting                                                                  */
@@ -389,15 +600,32 @@ export function formatCalendarDate(value: string | null | undefined): string {
   });
 }
 
-/** A pay period as "01 Sept – 30 Sept 2026": the year once when both ends share it. */
+/**
+ * Three-letter months for the short dates in sentences and ranges. Fixed rather than
+ * `toLocaleDateString`, whose en-IN style writes "Sept" for September but "Oct" for
+ * October.
+ */
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/** `2026-10-16` → "16 Oct". */
+export function dayMonth(value: string): string {
+  const date = calendarDate(value);
+  if (!date) return value;
+  return `${date.getUTCDate()} ${SHORT_MONTHS[date.getUTCMonth()] ?? ''}`;
+}
+
+/** `2026-10-16` → "16 Oct 2026" — for sentences ("calculated up to 16 Oct 2026"). */
+export function shortCalendarDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = calendarDate(value);
+  if (!date) return value;
+  return `${dayMonth(value)} ${date.getUTCFullYear()}`;
+}
+
+/** A pay period as "26 Sep – 25 Oct 2026": the year once when both ends share it. */
 export function formatPeriodRange(start: string, end: string): string {
-  const from = formatCalendarDate(start);
-  const to = formatCalendarDate(end);
-  if (start.slice(0, 4) === end.slice(0, 4)) {
-    const fromWithoutYear = from.replace(/\s\d{4}$/, '');
-    if (fromWithoutYear !== from) return `${fromWithoutYear} – ${to}`;
-  }
-  return `${from} – ${to}`;
+  if (start.slice(0, 4) === end.slice(0, 4)) return `${dayMonth(start)} – ${shortCalendarDate(end)}`;
+  return `${shortCalendarDate(start)} – ${shortCalendarDate(end)}`;
 }
 
 /** A `YYYY-MM-DD` calendar date as "1 November 2026" — for sentences, like the server's. */

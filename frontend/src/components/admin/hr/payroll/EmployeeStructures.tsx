@@ -276,7 +276,7 @@ export function EmployeeStructures({
       ) : data.items.length === 0 ? (
         <EmptyPanel
           title="No salary structure yet"
-          message={`${user.name} is left out of payroll runs until they have one. Add the components they are paid each month and the date it starts.`}
+          message={`${user.name} is left out of pay periods until they have one. Add the components they are paid each month and the date it starts — a pay period uses the structure in force on its last day.`}
           actionLabel={formOpen ? undefined : 'New structure'}
           onAction={formOpen ? undefined : () => setFormOpen(true)}
         />

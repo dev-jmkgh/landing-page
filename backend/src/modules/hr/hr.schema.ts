@@ -72,6 +72,43 @@ export const optionalPhoneField = z
   });
 
 /**
+ * The 10-digit national number of an Indian mobile, or null if `value` is not one.
+ *
+ * Accepts what people type — `+91 98765 43210`, `919876543210`, `09876543210`,
+ * `98765-43210` — and requires a mobile (`[6-9]` then nine digits). The same rule the
+ * telecalling signup applies to the company SIM, copied rather than imported for the
+ * reason given on `optionalPhoneField`.
+ */
+export function hrMobileKey(value: string): string | null {
+  let digits = value.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2);
+  else if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
+  return /^[6-9]\d{9}$/.test(digits) ? digits : null;
+}
+
+/**
+ * A required mobile number, stored canonical as `+91XXXXXXXXXX`.
+ *
+ * Required at self-registration so the person approving an account has a number to
+ * reach the applicant on, and canonical so the duplicate check compares like with like.
+ */
+export const mobileNumberField = z
+  .string({
+    required_error: 'Enter your mobile number.',
+    invalid_type_error: 'Enter your mobile number.',
+  })
+  .trim()
+  .pipe(z.string().min(1, 'Enter your mobile number.'))
+  .transform((value, context) => {
+    const key = hrMobileKey(value);
+    if (!key) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter a 10-digit mobile number.' });
+      return z.NEVER;
+    }
+    return `+91${key}`;
+  });
+
+/**
  * The employee record the HR app renders.
  *
  * `approvalStatus` and `isActive` are included because the app's launch check branches

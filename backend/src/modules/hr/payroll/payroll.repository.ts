@@ -16,6 +16,7 @@ import {
   toPaise,
   type ComponentKind,
   type PayrollEmployee,
+  type PayrollExclusion,
   type PayrollRun,
   type PayrollRunStatus,
   type Payslip,
@@ -421,6 +422,8 @@ interface RunRow extends RowDataPacket {
   approved_at: Date | string | null;
   approved_by_name: string | null;
   created_at: Date | string;
+  calculated_through: string | null;
+  exclusions: unknown;
 }
 
 const RUN_COLUMNS = `
@@ -428,8 +431,23 @@ const RUN_COLUMNS = `
   DATE_FORMAT(period_start, '%Y-%m-%d') AS period_start,
   DATE_FORMAT(period_end, '%Y-%m-%d')   AS period_end,
   status, employee_count, total_gross, total_deductions, total_net, note,
-  processed_at, approved_at, approved_by_name, created_at
+  processed_at, approved_at, approved_by_name, created_at,
+  DATE_FORMAT(calculated_through, '%Y-%m-%d') AS calculated_through,
+  exclusions
 `;
+
+/** The driver returns JSON columns parsed or as text depending on version; accept both. */
+function parseExclusions(value: unknown): PayrollExclusion[] {
+  let list: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      list = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(list) ? (list as PayrollExclusion[]) : [];
+}
 
 function toRun(row: RunRow): PayrollRun {
   return {
@@ -447,7 +465,11 @@ function toRun(row: RunRow): PayrollRun {
     approvedAt: iso(row.approved_at),
     approvedByName: row.approved_by_name,
     createdAt: iso(row.created_at) ?? '',
-    processableFrom: addDays(row.period_end, 1),
+    processableFrom: row.period_start,
+    approvableFrom: addDays(row.period_end, 1),
+    calculatedThrough: row.calculated_through,
+    provisional: row.calculated_through !== null && row.calculated_through < row.period_end,
+    exclusions: parseExclusions(row.exclusions),
   };
 }
 
@@ -528,7 +550,8 @@ export async function approveRunRow(
   const result = await execute(
     `UPDATE hr_payroll_runs
         SET status = 'approved', approved_by = ?, approved_by_name = ?, approved_at = NOW()
-      WHERE id = ? AND status = 'processed' AND employee_count > 0`,
+      WHERE id = ? AND status = 'processed' AND employee_count > 0
+        AND calculated_through IS NOT NULL AND calculated_through >= period_end`,
     [approver.id, approver.name.slice(0, 120), id],
   );
   return result.affectedRows > 0;
@@ -554,6 +577,7 @@ interface EligibleRow extends RowDataPacket {
   department_name: string | null;
   designation_name: string | null;
   structure_id: number | null;
+  next_structure_from: string | null;
 }
 
 export type PayrollCandidate = {
@@ -564,6 +588,8 @@ export type PayrollCandidate = {
   designationName: string | null;
   /** The structure in force at the period end, or null when there is none. */
   structureId: number | null;
+  /** When there is none in force: the first one that starts after the period, if any. */
+  nextStructureFrom: string | null;
 };
 
 /**
@@ -580,7 +606,9 @@ export async function payrollCandidates(periodStart: string, periodEnd: string):
     `SELECT u.id, u.employee_code, u.name, d.name AS department_name, g.name AS designation_name,
             (SELECT s.id FROM hr_salary_structures s
               WHERE s.user_id = u.id AND s.effective_from <= ?
-              ORDER BY s.effective_from DESC LIMIT 1) AS structure_id
+              ORDER BY s.effective_from DESC LIMIT 1) AS structure_id,
+            (SELECT DATE_FORMAT(MIN(s.effective_from), '%Y-%m-%d') FROM hr_salary_structures s
+              WHERE s.user_id = u.id AND s.effective_from > ?) AS next_structure_from
        FROM hr_users u
        LEFT JOIN hr_departments d  ON d.id = u.department_id
        LEFT JOIN hr_designations g ON g.id = u.designation_id
@@ -588,7 +616,7 @@ export async function payrollCandidates(periodStart: string, periodEnd: string):
         AND (u.joining_date IS NULL OR u.joining_date <= ?)
         AND (u.exit_date IS NULL OR u.exit_date >= ?)
       ORDER BY u.id ASC`,
-    [periodEnd, periodEnd, periodStart],
+    [periodEnd, periodEnd, periodEnd, periodStart],
   );
   return rows.map((row) => ({
     userId: row.id,
@@ -597,6 +625,7 @@ export async function payrollCandidates(periodStart: string, periodEnd: string):
     departmentName: row.department_name,
     designationName: row.designation_name,
     structureId: row.structure_id === null ? null : Number(row.structure_id),
+    nextStructureFrom: row.next_structure_from,
   }));
 }
 
@@ -611,6 +640,8 @@ export type DayTenths = {
   unpaidLeave: number;
   absent: number;
   untracked: number;
+  /** Days after the calculation date: not yet paid, not loss of pay. */
+  remaining: number;
   lop: number;
   paid: number;
 };
@@ -651,6 +682,7 @@ export async function replacePayslips(
   runId: number,
   slips: ComputedPayslip[],
   processedBy: number | null,
+  outcome: { calculatedThrough: string; exclusions: PayrollExclusion[] },
 ): Promise<void> {
   await withTransaction(async (connection: PoolConnection) => {
     const [locked] = await connection.execute<RowDataPacket[]>(
@@ -692,6 +724,7 @@ export async function replacePayslips(
           tenths(slip.days.unpaidLeave),
           tenths(slip.days.absent),
           tenths(slip.days.untracked),
+          tenths(slip.days.remaining),
           tenths(slip.days.lop),
           tenths(slip.days.paid),
           paiseToDecimal(slip.grossPaise),
@@ -699,14 +732,14 @@ export async function replacePayslips(
           paiseToDecimal(slip.deductionsPaise),
           paiseToDecimal(slip.netPaise),
         );
-        return `(${new Array(22).fill('?').join(', ')})`;
+        return `(${new Array(23).fill('?').join(', ')})`;
       });
       await connection.execute(
         `INSERT INTO hr_payslips
            (run_id, user_id, structure_id, employee_code, employee_name, department_name,
             designation_name, days_in_period, unemployed_days, weekly_off_days, holiday_days,
             present_days, paid_leave_days, unpaid_leave_days, absent_days, untracked_days,
-            lop_days, paid_days, gross_earnings, lop_amount, total_deductions, net_pay)
+            remaining_days, lop_days, paid_days, gross_earnings, lop_amount, total_deductions, net_pay)
          VALUES ${values.join(', ')}`,
         params,
       );
@@ -745,7 +778,8 @@ export async function replacePayslips(
     await connection.execute(
       `UPDATE hr_payroll_runs
           SET status = 'processed', employee_count = ?, total_gross = ?, total_deductions = ?,
-              total_net = ?, processed_by = ?, processed_at = NOW()
+              total_net = ?, processed_by = ?, processed_at = NOW(),
+              calculated_through = ?, exclusions = ?
         WHERE id = ?`,
       [
         slips.length,
@@ -753,6 +787,8 @@ export async function replacePayslips(
         paiseToDecimal(total((slip) => slip.deductionsPaise)),
         paiseToDecimal(total((slip) => slip.netPaise)),
         processedBy,
+        outcome.calculatedThrough,
+        JSON.stringify(outcome.exclusions),
         runId,
       ],
     );
@@ -786,6 +822,7 @@ interface PayslipRow extends RowDataPacket {
   unpaid_leave_days: string;
   absent_days: string;
   untracked_days: string;
+  remaining_days: string;
   lop_days: string;
   paid_days: string;
   gross_earnings: string;
@@ -803,7 +840,7 @@ const PAYSLIP_SELECT = `
          p.department_name, p.designation_name,
          p.days_in_period, p.unemployed_days, p.weekly_off_days, p.holiday_days,
          p.present_days, p.paid_leave_days, p.unpaid_leave_days, p.absent_days,
-         p.untracked_days, p.lop_days, p.paid_days,
+         p.untracked_days, p.remaining_days, p.lop_days, p.paid_days,
          p.gross_earnings, p.lop_amount, p.total_deductions, p.net_pay
     FROM hr_payslips p
     JOIN hr_payroll_runs r ON r.id = p.run_id
@@ -866,6 +903,7 @@ function toPayslip(row: PayslipRow, lines: PayslipLine[]): Payslip {
     unpaidLeaveDays: days(row.unpaid_leave_days),
     absentDays: days(row.absent_days),
     untrackedDays: days(row.untracked_days),
+    remainingDays: days(row.remaining_days),
     lopDays: days(row.lop_days),
     paidDays: days(row.paid_days),
     grossEarnings: money(row.gross_earnings),

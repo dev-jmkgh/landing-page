@@ -1220,13 +1220,58 @@ async function main(): Promise<void> {
      */
     console.log('\nhr app — separation from telecalling');
 
-    const hrSignup = await makeClient(base).post('/hr/auth/signup', {
-      name: 'Meera HR',
-      email: 'meera.hr@example.test',
+    /* --- the mobile number is required and must be a real Indian mobile --- */
+    const hrNoPhone = await makeClient(base).post('/hr/auth/signup', {
+      name: 'No Phone',
+      email: 'no.phone.hr@example.test',
       phone: null,
       password: 'correct-horse-battery',
     });
+    check(
+      'an HR signup without a mobile number is refused, naming the field',
+      hrNoPhone.status === 422 && typeof (hrNoPhone.json.errors as Json)?.phone === 'string',
+      hrNoPhone.json,
+    );
+    const hrBadPhone = await makeClient(base).post('/hr/auth/signup', {
+      name: 'Bad Phone',
+      email: 'bad.phone.hr@example.test',
+      phone: '12345',
+      password: 'correct-horse-battery',
+    });
+    check(
+      'and so is a number that is not a 10-digit mobile',
+      hrBadPhone.status === 422 && (hrBadPhone.json.errors as Json)?.phone === 'Enter a 10-digit mobile number.',
+      hrBadPhone.json,
+    );
+
+    const hrSignup = await makeClient(base).post('/hr/auth/signup', {
+      name: 'Meera HR',
+      email: 'meera.hr@example.test',
+      phone: '098470 11223',
+      password: 'correct-horse-battery',
+    });
     check('an employee can self-register in the HR app', hrSignup.status === 201, hrSignup.json);
+
+    const [meeraPhone] = (await db.query(
+      "SELECT phone FROM hr_users WHERE email = 'meera.hr@example.test'",
+    )) as [Json[], unknown];
+    check(
+      'the mobile number is stored in one canonical form',
+      (meeraPhone as Json[])[0]?.phone === '+919847011223',
+      meeraPhone,
+    );
+
+    const samePhone = await makeClient(base).post('/hr/auth/signup', {
+      name: 'Meera Again',
+      email: 'meera.second@example.test',
+      phone: '+91 98470 11223',
+      password: 'correct-horse-battery',
+    });
+    check(
+      'a second account on the same mobile number is refused, however it is typed',
+      samePhone.status === 422 && typeof (samePhone.json.errors as Json)?.phone === 'string',
+      samePhone.json,
+    );
     check(
       'and is issued an EMP- code, not a telecalling one',
       /^EMP-\d{4}$/.test(String(hrSignup.json.employeeCode)),
@@ -1278,6 +1323,8 @@ async function main(): Promise<void> {
     const dualSignup = await makeClient(base).post('/hr/auth/signup', {
       name: 'Ravi Telecaller',
       email: 'ravi@example.test',
+      // His company SIM number: HR's duplicate check is HR's own, and must not see it.
+      phone: '+919876500002',
       password: 'a-different-hr-password',
     });
     check(
@@ -1406,6 +1453,7 @@ async function main(): Promise<void> {
       const parsed = hrSignupSchema.safeParse({
         name: 'Sneaky HR',
         email: 'sneaky.hr@example.test',
+        phone: '98000 00019',
         password: 'correct-horse-battery',
         ...sneaky,
       });
@@ -2105,6 +2153,7 @@ async function main(): Promise<void> {
     const remoteSignup = await makeClient(base).post('/hr/auth/signup', {
       name: 'Remote Riya',
       email: 'riya.remote@example.test',
+      phone: '98470 33445',
       password: 'correct-horse-battery',
     });
     check('a second HR employee registers', remoteSignup.status === 201, remoteSignup.json);

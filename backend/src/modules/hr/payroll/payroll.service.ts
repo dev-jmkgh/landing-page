@@ -3,7 +3,6 @@ import {
   addDays,
   calendarForUsers,
   companyToday,
-  monthBounds,
   payrollSplit,
   type CalendarDay,
 } from '../calendar/calendar.service';
@@ -47,12 +46,14 @@ import {
   longDate,
   monthLabel,
   paiseToDecimal,
+  payPeriodBounds,
   periodField,
   prorate,
   toPaise,
   type CreateStructureInput,
   type PayrollEmployee,
   type PayrollEmployeesQuery,
+  type PayrollExclusion,
   type PayrollRun,
   type PayrollRunStatus,
   type Payslip,
@@ -61,18 +62,28 @@ import {
 } from './payroll.schema';
 
 /**
- * Payroll: salary structures, monthly runs, and the arithmetic that turns a month of
+ * Payroll: salary structures, pay periods, and the arithmetic that turns a period of
  * attendance into a payslip.
  *
- * THE COMPUTATION, per employee, for a period that has ENDED:
+ * A PAY PERIOD follows the HR setting `payrollCycleStartDay` — the calendar month by
+ * default, or e.g. 26th to 25th — and is named after the month it ends in. Its dates are
+ * fixed when it is created.
  *
- *   days      every day of the period is classified by the HR calendar
- *             (`calendarForUsers`, with "today" set to the day after the period so every
- *             day is judged) and split for pay by `payrollSplit` — the SAME two functions
- *             the leave balance and the attendance report use, so a payslip can never
- *             disagree with them about a day.
+ * It may be CALCULATED as soon as it has started, and again as often as wanted until it
+ * is approved. While it is still running the figures are PROVISIONAL: they cover up to
+ * today, and the days still to come are counted as `remaining` — neither paid nor loss
+ * of pay. It may be APPROVED only after it has ended AND been calculated since, so every
+ * published payslip covers every day of its period.
+ *
+ * THE COMPUTATION, per employee:
+ *
+ *   days      every day of the period up to the calculation date is classified by the
+ *             HR calendar (`calendarForUsers`) and split for pay by `payrollSplit` — the
+ *             SAME two functions the leave balance and the attendance report use, so a
+ *             payslip can never disagree with them about a day. Days after it are
+ *             `remaining` (see `sumDays`); once the period has ended there are none.
  *               lopDays  = unpaidLeave + absent
- *               paidDays = daysInPeriod − unemployed − lopDays
+ *               paidDays = daysInPeriod − unemployed − lopDays − remaining
  *   earnings  prorated: round_half_up(full × paidDays / daysInPeriod), per line, in paise.
  *             not prorated: the full amount.
  *   deductions  fixed: the full amount, whatever the attendance.
@@ -111,7 +122,17 @@ export type PayrollOperator = { id: number | null; name: string };
  * summing them as integers rather than floats is what keeps "27.5" from becoming
  * 27.499999999.
  */
-export function sumDays(days: CalendarDay[], trackedFrom: string | null): DayTenths {
+export function sumDays(
+  days: CalendarDay[],
+  trackedFrom: string | null,
+  /**
+   * The calculation date for a period still running; omitted once it has ended. Days
+   * after it have not happened. Today itself counts as worked if there is attendance
+   * for it — somebody who has checked in today has worked today — and as still to come
+   * if there is none yet.
+   */
+  asOf?: string,
+): DayTenths {
   const totals: DayTenths = {
     daysInPeriod: days.length * 10,
     unemployed: 0,
@@ -122,10 +143,18 @@ export function sumDays(days: CalendarDay[], trackedFrom: string | null): DayTen
     unpaidLeave: 0,
     absent: 0,
     untracked: 0,
+    remaining: 0,
     lop: 0,
     paid: 0,
   };
   for (const day of days) {
+    const attended = Boolean(
+      day.attendance && ['present', 'late', 'half_day'].includes(day.attendance.status),
+    );
+    if (asOf && day.employed && (day.date > asOf || (day.date === asOf && !attended))) {
+      totals.remaining += 10;
+      continue;
+    }
     const split = payrollSplit(day, trackedFrom);
     totals.unemployed += Math.round(split.unemployed * 10);
     totals.weeklyOff += Math.round(split.weeklyOff * 10);
@@ -137,7 +166,7 @@ export function sumDays(days: CalendarDay[], trackedFrom: string | null): DayTen
     totals.untracked += Math.round(split.untracked * 10);
   }
   totals.lop = totals.unpaidLeave + totals.absent;
-  totals.paid = Math.max(0, totals.daysInPeriod - totals.unemployed - totals.lop);
+  totals.paid = Math.max(0, totals.daysInPeriod - totals.unemployed - totals.lop - totals.remaining);
   return totals;
 }
 
@@ -156,7 +185,11 @@ export function computePay(
   components: ComponentRecord[],
   days: DayTenths,
 ): Pick<ComputedPayslip, 'grossPaise' | 'lopPaise' | 'deductionsPaise' | 'netPaise' | 'lines'> {
-  const employedTenths = days.daysInPeriod - days.unemployed;
+  /*
+   * The days a person could have been paid for so far: employed, and already happened.
+   * Days still to come in a provisional calculation are not loss of pay.
+   */
+  const employedTenths = days.daysInPeriod - days.unemployed - days.remaining;
   let gross = 0;
   let lop = 0;
   let deductions = 0;
@@ -266,25 +299,26 @@ export async function listRuns(filters: {
 
 export async function getRun(id: number): Promise<PayrollRun> {
   const run = await findRun(id);
-  if (!run) throw notFound('Payroll run not found.');
+  if (!run) throw notFound('Pay period not found.');
   return run;
 }
 
 export async function createRun(input: { period: string; note: string | null }, actor: PayrollOperator): Promise<PayrollRun> {
+  const { payrollCycleStartDay } = await getHrSettings();
+  const { start, end } = payPeriodBounds(input.period, payrollCycleStartDay);
+
   /*
-   * This month or earlier. A run for a month that has not started has nothing to
-   * compute and could only ever be a typo; the current month's run may be created (as
-   * a draft) but not processed until the month is over.
+   * Started, or in the past. A period that has not begun has nothing to calculate and
+   * could only be a typo.
    */
-  if (input.period > companyToday().slice(0, 7)) {
-    const message = 'Payroll runs can be created for this month or an earlier one.';
+  if (start > companyToday()) {
+    const message = `The ${monthLabel(input.period)} pay period starts on ${longDate(start)}.`;
     throw badRequest(message, { period: message });
   }
 
-  const duplicateMessage = `There is already a payroll run for ${monthLabel(input.period)}.`;
+  const duplicateMessage = `There is already a pay period for ${monthLabel(input.period)}.`;
   if (await findRunByPeriod(input.period)) throw badRequest(duplicateMessage, { period: duplicateMessage });
 
-  const { start, end } = monthBounds(input.period);
   let id: number;
   try {
     id = await insertRun({ period: input.period, periodStart: start, periodEnd: end, note: input.note, createdBy: actor.id });
@@ -315,15 +349,20 @@ export async function processRun(
 ): Promise<{ run: PayrollRun; missingStructure: number }> {
   const run = await getRun(runId);
   if (run.status === 'approved') {
-    throw badRequest('This run has been approved, so its payslips can no longer change.');
+    throw badRequest('This pay period has been approved, so its payslips can no longer change.');
   }
 
   const today = companyToday();
-  if (!(run.periodEnd < today)) {
-    throw badRequest(
-      `Payroll for ${monthLabel(run.period)} can be processed from ${longDate(addDays(run.periodEnd, 1))}.`,
-    );
+  if (run.periodStart > today) {
+    throw badRequest(`This pay period starts on ${longDate(run.periodStart)}.`);
   }
+
+  /*
+   * Ended: every day is judged. Still running: judged up to today, the rest is
+   * `remaining` — see the note at the top of this file.
+   */
+  const ended = run.periodEnd < today;
+  const calculatedThrough = ended ? run.periodEnd : today;
 
   const [settings, candidates] = await Promise.all([
     getHrSettings(),
@@ -335,6 +374,20 @@ export async function processRun(
   );
   const missingStructure = candidates.length - withStructure.length;
 
+  /*
+   * Everybody employed in the period who will get no payslip, by name and with the
+   * reason — "0 employees" on its own sent people looking for a bug.
+   */
+  const exclusions: PayrollExclusion[] = candidates
+    .filter((candidate) => candidate.structureId === null)
+    .map((candidate) => ({
+      userId: candidate.userId,
+      employeeCode: candidate.employeeCode,
+      employeeName: candidate.employeeName,
+      reason: candidate.nextStructureFrom ? 'structure_starts_later' : 'no_structure',
+      structureFrom: candidate.nextStructureFrom,
+    }));
+
   const components = await componentsFor([...new Set(withStructure.map((c) => c.structureId))]);
 
   const slips: ComputedPayslip[] = [];
@@ -344,12 +397,16 @@ export async function processRun(
       batch.map((candidate) => candidate.userId),
       run.periodStart,
       run.periodEnd,
-      // The day after the period: every day in it is in the past, so every day is judged.
-      { today: addDays(run.periodEnd, 1) },
+      // Ended: the day after the period, so every day in it is judged. Running: today.
+      { today: ended ? addDays(run.periodEnd, 1) : today },
     );
 
     for (const candidate of batch) {
-      const days = sumDays(calendars.get(candidate.userId) ?? [], settings.attendanceTrackedFrom);
+      const days = sumDays(
+        calendars.get(candidate.userId) ?? [],
+        settings.attendanceTrackedFrom,
+        ended ? undefined : today,
+      );
       // The SQL filter and the calendar agree on employment dates; this is the backstop.
       if (days.daysInPeriod === 0 || days.unemployed >= days.daysInPeriod) continue;
       slips.push({
@@ -361,15 +418,15 @@ export async function processRun(
   }
 
   try {
-    await replacePayslips(runId, slips, actor.id);
+    await replacePayslips(runId, slips, actor.id, { calculatedThrough, exclusions });
   } catch (error) {
     if (error instanceof RunChangedError) {
-      if (error.reason === 'missing') throw notFound('Payroll run not found.');
+      if (error.reason === 'missing') throw notFound('Pay period not found.');
       if (error.reason === 'approved') {
-        throw badRequest('This run was approved while it was being processed, so its payslips were not changed.');
+        throw badRequest('This pay period was approved while it was being calculated, so its payslips were not changed.');
       }
       throw conflict(
-        'A salary structure was removed while this run was being processed. Process it again.',
+        'A salary structure was removed while this pay period was being calculated. Calculate it again.',
         'structures_changed',
       );
     }
@@ -389,14 +446,27 @@ export async function processRun(
  */
 export async function approveRun(runId: number, actor: PayrollOperator): Promise<{ run: PayrollRun; notified: number }> {
   const run = await getRun(runId);
-  if (run.status === 'approved') throw badRequest('This run has already been approved.');
-  if (run.status === 'draft') throw badRequest('Process the run before approving it.');
+  if (run.status === 'approved') throw badRequest('This pay period has already been approved.');
+  if (run.status === 'draft') throw badRequest('Calculate the payslips before approving them.');
+  /*
+   * Only figures that cover the whole period are published. A calculation made while
+   * the period was running is a preview: approving it would freeze pay for days nobody
+   * had worked yet.
+   */
+  if (companyToday() <= run.periodEnd) {
+    throw badRequest(
+      `This pay period runs until ${longDate(run.periodEnd)}. Recalculate on or after ${longDate(addDays(run.periodEnd, 1))}, then approve.`,
+    );
+  }
+  if (run.provisional || run.calculatedThrough === null) {
+    throw badRequest('These figures were calculated before the period ended. Recalculate, then approve.');
+  }
   if (run.employeeCount === 0) {
-    throw badRequest('There are no payslips in this run to approve. Add salary structures and process it again.');
+    throw badRequest('There are no payslips in this pay period to approve. Add salary structures and calculate again.');
   }
 
   const applied = await approveRunRow(runId, { id: actor.id, name: actor.name });
-  if (!applied) throw badRequest('This run could not be approved. Reload it and try again.');
+  if (!applied) throw badRequest('This pay period could not be approved. Reload it and try again.');
 
   const label = monthLabel(run.period);
   let notified = 0;
@@ -418,11 +488,11 @@ export async function approveRun(runId: number, actor: PayrollOperator): Promise
 export async function deleteRun(runId: number): Promise<PayrollRun> {
   const run = await getRun(runId);
   if (run.status === 'approved') {
-    throw badRequest('An approved run is the record of what was paid and cannot be deleted.');
+    throw badRequest('An approved pay period is the record of what was paid and cannot be deleted.');
   }
   if (!(await deleteRunRow(runId))) {
     // Approved between the read and the delete.
-    throw badRequest('An approved run is the record of what was paid and cannot be deleted.');
+    throw badRequest('An approved pay period is the record of what was paid and cannot be deleted.');
   }
   return run;
 }

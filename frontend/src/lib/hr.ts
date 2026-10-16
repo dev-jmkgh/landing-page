@@ -198,6 +198,12 @@ export type HrSettings = {
   attendanceTrackedFrom: string | null;
   /** Weekly-off days for an employee with no shift. */
   defaultWeeklyOff: Weekday[];
+  /**
+   * The day of the month a pay period starts on, 1 to 28. 1 is the calendar month; 26
+   * is "26th to 25th", with the period named after the month it ends in. Changing it
+   * affects pay periods opened afterwards; existing ones keep their dates.
+   */
+  payrollCycleStartDay: number;
 };
 
 /* -------------------------------------------------------------------------- */

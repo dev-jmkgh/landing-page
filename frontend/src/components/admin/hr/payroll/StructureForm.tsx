@@ -367,8 +367,9 @@ export function StructureForm({
           />
           {fieldError('effectiveFrom', id('effective')) ?? (
             <p className="field__hint" id={`${id('effective')}-hint`}>
-              Each month is paid by the latest structure starting on or before its last day, for
-              the whole month — a structure from the 20th also pays the 1st to the 19th.
+              Each pay period is paid by the latest structure starting on or before its last day,
+              for the whole period — a structure from the 20th also pays the period’s days
+              before the 20th.
             </p>
           )}
         </div>

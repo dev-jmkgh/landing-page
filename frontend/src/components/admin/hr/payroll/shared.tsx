@@ -1,27 +1,48 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ButtonSpinner } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
-import {
-  PAYROLL_RUN_STATUS_LABELS,
-  PAYROLL_RUN_STATUS_TONE,
-  type PayrollRunStatus,
-} from '@/lib/hrPayroll';
+import { RUN_STAGE_LABELS, RUN_STAGE_TONE, runStage, runStageLabel, type PayrollRun } from '@/lib/hrPayroll';
 import { Tag } from '../../telecalling/shared';
 
 /**
- * Pieces shared by the payroll screens (runs, run detail, salary structures).
+ * Pieces shared by the payroll screens (pay periods, one period, salary structures).
  *
  * Kept to what at least two of them use; anything used once lives with its screen.
  */
 
-/** The run's status, coloured the same way in the list and on the detail. */
-export function RunStatusTag({ status }: { status: PayrollRunStatus }) {
-  return <Tag tone={PAYROLL_RUN_STATUS_TONE[status]}>{PAYROLL_RUN_STATUS_LABELS[status]}</Tag>;
+/**
+ * Where a pay period is — "Not calculated yet", "Calculated so far · to 16 Oct", "Ready
+ * to approve", "Approved · published" — coloured the same way in the list and on the
+ * period itself. Worked out from the run by `runStage`; the API status is unchanged.
+ *
+ * `compact` leaves the date off, for the list, whose status column says it on the line
+ * beneath — a badge does not wrap, and the full label would push the column wide.
+ */
+export function RunStatusTag({ run, compact = false }: { run: PayrollRun; compact?: boolean }) {
+  const stage = runStage(run);
+  return <Tag tone={RUN_STAGE_TONE[stage]}>{compact ? RUN_STAGE_LABELS[stage] : runStageLabel(run)}</Tag>;
+}
+
+/**
+ * A close handler whose identity never changes.
+ *
+ * `Dialog` re-runs its open effect — which moves focus to the panel — whenever `onClose`
+ * changes identity. Every payroll dialog re-renders as it is used (a select changes, a
+ * button goes busy), so an inline handler would pull focus out of the control being
+ * used on every change. The latest handler lives in a ref and `Dialog` gets one stable
+ * function. The same fix as `useStableClose` in the people screens.
+ */
+export function useStableClose(onClose: () => void): () => void {
+  const ref = useRef(onClose);
+  useEffect(() => {
+    ref.current = onClose;
+  });
+  return useCallback(() => ref.current(), []);
 }
 
 /** An aborted request is a request somebody replaced, not a failure to report. */
@@ -77,7 +98,7 @@ export function RestrictedState() {
           Payroll is restricted to administrators.
         </p>
         <p>
-          Salary structures, payroll runs and payslips can only be opened by an administrator
+          Salary structures, pay periods and payslips can only be opened by an administrator
           account. Ask an administrator if you need a figure from payroll.
         </p>
       </div>
@@ -127,12 +148,14 @@ export function ConfirmDialog({
   // Restore focus when this unmounts, however it was closed.
   useRestoreFocus(opener);
 
+  const close = useStableClose(() => {
+    if (!busy) onCancel();
+  });
+
   return (
     <Dialog
       open
-      onClose={() => {
-        if (!busy) onCancel();
-      }}
+      onClose={close}
       title={title}
       className="tc-confirm-dialog"
       dismissOnBackdrop={!busy}

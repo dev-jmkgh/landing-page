@@ -234,8 +234,22 @@ export const settingsPatchSchema = z
       .array(z.enum(WEEKDAYS, { message: 'Use sun, mon, tue, wed, thu, fri or sat.' }))
       .max(7)
       .optional(),
+    /*
+     * The day a pay period starts on. 28 at most, so every month has it. Changing it
+     * affects pay periods created afterwards; existing ones keep the dates they were
+     * created with.
+     */
+    payrollCycleStartDay: z.coerce
+      .number()
+      .int('Use a whole day of the month.')
+      .min(1, 'Use a day from 1 to 28.')
+      .max(28, 'Use a day from 1 to 28.')
+      .optional(),
   })
   .refine(
-    (value) => value.attendanceTrackedFrom !== undefined || value.defaultWeeklyOff !== undefined,
+    (value) =>
+      value.attendanceTrackedFrom !== undefined ||
+      value.defaultWeeklyOff !== undefined ||
+      value.payrollCycleStartDay !== undefined,
     { message: 'Nothing to change.', path: ['form'] },
   );

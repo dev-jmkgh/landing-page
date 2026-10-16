@@ -68,7 +68,13 @@ export function buildPayslipPdf(slip: Payslip): Buffer {
   /* ---------------------------------------------------------------- header */
   page.rect(0, 0, A4.width, 88, { fill: BRAND });
   page.text(LEFT, 40, COMPANY_NAME, { font: 'bold', size: 18, color: WHITE });
-  page.text(LEFT, 64, `Payslip for ${monthLabel(slip.period)}`, { size: 12, color: WHITE });
+  // A preview made while the period was running says so in its own heading.
+  page.text(
+    LEFT,
+    64,
+    `${slip.remainingDays > 0 ? 'PROVISIONAL payslip' : 'Payslip'} for ${monthLabel(slip.period)}`,
+    { size: 12, color: WHITE },
+  );
   page.text(RIGHT, 40, 'Net pay', { size: 9, color: WHITE, align: 'right' });
   page.text(RIGHT, 64, `INR ${inr(slip.netPay)}`, { font: 'bold', size: 15, color: WHITE, align: 'right' });
   y = 120;
@@ -106,6 +112,7 @@ export function buildPayslipPdf(slip: Payslip): Buffer {
   // Shown only when they apply, so the counts above still add up to the month for the reader.
   if (slip.unemployedDays > 0) cells.push(['Not employed', slip.unemployedDays]);
   if (slip.untrackedDays > 0) cells.push(['Not tracked (paid)', slip.untrackedDays]);
+  if (slip.remainingDays > 0) cells.push(['Still to come', slip.remainingDays]);
 
   const columnWidth = WIDTH / 3;
   const rows = Math.ceil(cells.length / 3);
@@ -208,7 +215,14 @@ export function buildPayslipPdf(slip: Payslip): Buffer {
   /* --------------------------------------------------------------- footer */
   pages.forEach((each, index) => {
     each.line(LEFT, 796, RIGHT, 796, { color: RULE, width: 0.5 });
-    each.text(LEFT, 812, 'This is a system-generated payslip.', { size: 8.5, color: MUTED });
+    each.text(
+      LEFT,
+      812,
+      slip.remainingDays > 0
+        ? 'Provisional: calculated before the period ended. Not a final payslip.'
+        : 'This is a system-generated payslip.',
+      { size: 8.5, color: MUTED },
+    );
     if (pages.length > 1) {
       each.text(RIGHT, 812, `Page ${index + 1} of ${pages.length}`, { size: 8.5, color: MUTED, align: 'right' });
     }

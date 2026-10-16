@@ -6,28 +6,48 @@ import { FormAlert } from '@/components/forms/Fields';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
-import { MONTH_NAMES, RUN_NOTE_LENGTH, monthLabel, payrollApi, type PayrollRun } from '@/lib/hrPayroll';
+import {
+  MONTH_NAMES,
+  RUN_NOTE_LENGTH,
+  describeCycle,
+  formatPeriodRange,
+  payPeriodBounds,
+  payrollApi,
+  periodContaining,
+  shortCalendarDate,
+  type PayrollRun,
+} from '@/lib/hrPayroll';
 import { todayIso } from '@/lib/telecalling';
-import { useRestoreFocus } from './shared';
+import { useRestoreFocus, useStableClose } from './shared';
 
 /**
- * Starts a payroll run for one month, as a draft.
+ * Opens a pay period for one month (a draft — no figures until it is calculated).
  *
  * MONTH AND YEAR ARE TWO SELECTS, not `<input type="month">`. Firefox and Safari render a
  * month input as a bare text box, which would leave half the administrators typing
  * "2026-09" by hand; two selects work the same everywhere and cannot hold an impossible
  * month.
  *
- * The default is LAST month — the run an administrator usually creates, since a month
- * can only be processed once it is over. The current month is allowed (a draft can be
- * prepared early); a future one is refused by the server, and its sentence is shown here
- * rather than re-implemented.
+ * THE DEFAULT IS THE PERIOD RUNNING TODAY. A period can be calculated as soon as it has
+ * started, so the one an administrator opens is usually the current one — not last
+ * month, as when a period could only be worked on after it ended. Under a 26th cycle
+ * "today" can belong to next month's period (27 October is in November's), which is why
+ * the default comes from `periodContaining` rather than from the calendar.
+ *
+ * THE DATES ARE PREVIEWED with the server's own rule (`payPeriodBounds`, mirrored), from
+ * the cycle as it was read when the list loaded. The server fixes the real dates when it
+ * creates the period, and refuses one that has not started — its sentence is shown under
+ * the month rather than re-implemented as a disabled button, so a cycle changed elsewhere
+ * since cannot block a period that is in fact valid.
  */
 export function NewRunDialog({
+  startDay,
   onClose,
   onCreated,
   onUnauthorized,
 }: {
+  /** The pay cycle's start day, or null when it could not be read (then no preview). */
+  startDay: number | null;
   onClose: () => void;
   onCreated: (run: PayrollRun) => void;
   onUnauthorized: () => void;
@@ -40,24 +60,32 @@ export function NewRunDialog({
 
   // Read once, when the dialog opens: the IST date, which is the server's calendar.
   const [defaults] = useState(() => {
-    const [year, month] = todayIso().split('-').map(Number) as [number, number];
-    const previous = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
-    return { currentYear: year, ...previous };
+    const today = todayIso();
+    const [year, month] = periodContaining(today, startDay ?? 1).split('-') as [string, string];
+    return { today, year, month, currentYear: Number(today.slice(0, 4)) };
   });
 
-  const [month, setMonth] = useState(String(defaults.month).padStart(2, '0'));
-  const [year, setYear] = useState(String(defaults.year));
+  const [month, setMonth] = useState(defaults.month);
+  const [year, setYear] = useState(defaults.year);
   const [note, setNote] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // This year and the ten before it. The server accepts any month from 2000 onwards,
-  // but a run for a month more than a decade old is not something anyone creates here.
-  const years = Array.from({ length: 11 }, (_, index) => defaults.currentYear - index);
+  const close = useStableClose(() => {
+    if (!saving) onClose();
+  });
+
+  // This year and the ten before it — plus next year when today already falls in its
+  // first period (late December under a 26th cycle). The server accepts any month from
+  // 2000 on, but a period more than a decade old is not something anyone opens here.
+  const newestYear = Math.max(defaults.currentYear, Number(defaults.year));
+  const years = Array.from({ length: newestYear - defaults.currentYear + 11 }, (_, index) => newestYear - index);
 
   const period = `${year}-${month}`;
+  const bounds = startDay !== null ? payPeriodBounds(period, startDay) : null;
+  const today = defaults.today;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -75,10 +103,15 @@ export function NewRunDialog({
         onUnauthorized();
         return;
       }
-      if (caught instanceof ApiError && Object.keys(caught.fieldErrors).length > 0) {
-        setFieldErrors(caught.fieldErrors);
-      } else {
-        setError(caught instanceof ApiError ? caught.message : 'Could not create the payroll run.');
+      const fields = caught instanceof ApiError ? caught.fieldErrors : {};
+      setFieldErrors(fields);
+      // Anything not about the month or the note goes in the banner, so no refusal is lost.
+      const unplaced = Object.entries(fields)
+        .filter(([key]) => key !== 'period' && key !== 'note')
+        .map(([, message]) => message);
+      if (unplaced.length > 0) setError(unplaced.join(' '));
+      else if (Object.keys(fields).length === 0) {
+        setError(caught instanceof ApiError ? caught.message : 'Could not open the pay period.');
       }
     } finally {
       setSaving(false);
@@ -91,19 +124,18 @@ export function NewRunDialog({
   return (
     <Dialog
       open
-      onClose={() => {
-        if (!saving) onClose();
-      }}
-      title="New payroll run"
+      onClose={close}
+      title="New pay period"
       className="tc-dialog hr-pay-dialog--narrow"
       dismissOnBackdrop={false}
     >
       <form className="hr-pay-dialog-form" onSubmit={(event) => void submit(event)} noValidate>
         <div className="tc-dialog__head">
           <p className="tc-dialog__eyebrow">Payroll</p>
-          <h2 className="tc-dialog__title">New payroll run</h2>
+          <h2 className="tc-dialog__title">New pay period</h2>
           <p className="tc-dialog__sub">
-            Creates a draft. Process it once the month is over to compute the payslips.
+            Once it is open you can calculate payslips any time to see the figures so far, and
+            approve them after the period ends.
           </p>
         </div>
 
@@ -112,7 +144,7 @@ export function NewRunDialog({
 
           <fieldset
             className={`hr-pay-fieldset${periodError ? ' field--invalid' : ''}`}
-            aria-describedby={periodError ? `${uid}-period-error` : `${uid}-period-hint`}
+            aria-describedby={`${periodError ? `${uid}-period-error` : `${uid}-period-hint`} ${uid}-preview`}
           >
             <legend className="field__label">Pay period</legend>
             <div className="hr-pay-period">
@@ -155,6 +187,7 @@ export function NewRunDialog({
                 </select>
               </div>
             </div>
+
             {periodError ? (
               <p className="field__error" id={`${uid}-period-error`} role="alert">
                 <Icon name="alert" size={14} />
@@ -162,9 +195,29 @@ export function NewRunDialog({
               </p>
             ) : (
               <p className="field__hint" id={`${uid}-period-hint`}>
-                {monthLabel(period)}. One run per month; this month or an earlier one.
+                {startDay !== null ? `${describeCycle(startDay)}. ` : 'The dates follow your pay cycle. '}
+                A pay period is named after the month it ends in.
               </p>
             )}
+
+            {/* What the chosen month means, said as the selects change. */}
+            <div className="hr-pay-preview" id={`${uid}-preview`} aria-live="polite">
+              <Icon name="calendar" size={16} />
+              {bounds ? (
+                <span>
+                  <strong className="hr-pay-preview__range">{formatPeriodRange(bounds.start, bounds.end)}</strong>
+                  <span className="hr-pay-preview__state" data-tone={bounds.start > today ? 'warn' : undefined}>
+                    {bounds.start > today
+                      ? `Has not started yet. You can open it from ${shortCalendarDate(bounds.start)}.`
+                      : bounds.end < today
+                        ? `Ended on ${shortCalendarDate(bounds.end)}. You can calculate and approve it straight away.`
+                        : `Running now, until ${shortCalendarDate(bounds.end)}. Calculate any time to see the figures so far.`}
+                  </span>
+                </span>
+              ) : (
+                <span>The exact dates are set from your pay cycle when the period is opened.</span>
+              )}
+            </div>
           </fieldset>
 
           <div className={`field${noteError ? ' field--invalid' : ''}`}>
@@ -179,7 +232,7 @@ export function NewRunDialog({
               disabled={saving}
               placeholder="e.g. Includes the festival bonus month"
               aria-invalid={noteError ? true : undefined}
-              aria-describedby={noteError ? `${uid}-note-error` : undefined}
+              aria-describedby={noteError ? `${uid}-note-error` : `${uid}-note-hint`}
               onChange={(event) => setNote(event.target.value)}
             />
             {noteError ? (
@@ -188,7 +241,9 @@ export function NewRunDialog({
                 {noteError}
               </p>
             ) : (
-              <p className="field__hint">Shown on the run for administrators. Employees do not see it.</p>
+              <p className="field__hint" id={`${uid}-note-hint`}>
+                Shown on the pay period for administrators. Employees do not see it.
+              </p>
             )}
           </div>
         </div>
@@ -199,7 +254,7 @@ export function NewRunDialog({
           </button>
           <button type="submit" className="btn btn--primary" disabled={saving} aria-busy={saving || undefined}>
             {saving ? <ButtonSpinner /> : <Icon name="add" size={16} />}
-            {saving ? 'Creating…' : 'Create draft run'}
+            {saving ? 'Opening…' : 'Open pay period'}
           </button>
         </div>
       </form>

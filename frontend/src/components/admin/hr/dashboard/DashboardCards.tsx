@@ -174,7 +174,7 @@ export function PayrollCard({ payroll }: { payroll: NonNullable<HrAdminDashboard
           <h3 id={titleId} className="tc-chart-card__title">
             Payroll
           </h3>
-          <p className="tc-chart-card__sub">The most recent approved payroll run. Visible to administrators only.</p>
+          <p className="tc-chart-card__sub">The most recent approved pay period. Visible to administrators only.</p>
         </div>
       </header>
       <div className="tc-chart-card__body">
@@ -194,7 +194,7 @@ export function PayrollCard({ payroll }: { payroll: NonNullable<HrAdminDashboard
             </div>
           </dl>
         ) : (
-          <p className="tc-muted">No payroll run has been approved yet.</p>
+          <p className="tc-muted">No pay period has been approved yet.</p>
         )}
       </div>
       <footer className="tc-chart-card__foot">

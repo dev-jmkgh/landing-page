@@ -424,14 +424,68 @@ export async function run(ctx: E2EContext): Promise<void> {
     const current = await admin.post('/admin/hr/payroll/runs', { period: thisMonth });
     must('payroll: a draft run for the current month can be created', current.status === 201, current.json);
     const currentId = Number(current.json.run?.id);
+
+    /*
+     * The current period is CALCULATED while it runs — figures so far, the rest still to
+     * come — but cannot be approved until it has ended and been calculated again.
+     */
     const early = await admin.post(`/admin/hr/payroll/runs/${currentId}/process`);
     check(
-      'payroll: the current month cannot be processed before it ends',
-      early.status === 400 && /can be processed from/.test(String(early.json.message)),
+      'payroll: the current period can be calculated while it is still running',
+      early.status === 200 && early.json.run?.status === 'processed',
       early.json,
     );
+    check(
+      'payroll: and the figures are marked provisional, calculated up to today',
+      early.json.run?.provisional === true && early.json.run?.calculatedThrough === today,
+      early.json.run,
+    );
+    check(
+      'payroll: everybody left out is named, with the reason',
+      Array.isArray(early.json.run?.exclusions) &&
+        (early.json.run.exclusions as Json[]).some(
+          (entry) => entry.userId === charlie.id && entry.reason === 'no_structure',
+        ),
+      early.json.run?.exclusions,
+    );
+    const currentSlip = items(
+      await admin.get(`/admin/hr/payroll/runs/${currentId}/payslips?q=${encodeURIComponent('PRL-0001')}`),
+    )[0];
+    const lastDayOfMonth = monthBounds(thisMonth).end;
+    check(
+      'payroll: days after today are still to come, not paid and not loss of pay',
+      today < lastDayOfMonth ? Number(currentSlip?.remainingDays) > 0 : Number(currentSlip?.remainingDays) >= 0,
+      currentSlip && { remaining: currentSlip.remainingDays, lop: currentSlip.lopDays, paid: currentSlip.paidDays },
+    );
+    const earlyApprove = await admin.post(`/admin/hr/payroll/runs/${currentId}/approve`);
+    check(
+      'payroll: a period still running cannot be approved',
+      earlyApprove.status === 400 && /runs until/.test(String(earlyApprove.json.message)),
+      earlyApprove.json,
+    );
     const dropCurrent = await admin.del(`/admin/hr/payroll/runs/${currentId}`);
-    check('payroll: a draft run can be deleted', dropCurrent.status === 200, dropCurrent.json);
+    check('payroll: an unapproved pay period can be deleted', dropCurrent.status === 200, dropCurrent.json);
+
+    /* --- a common pay cycle: 26th to 25th --- */
+    const cycle = await admin.patch('/admin/hr/settings', { payrollCycleStartDay: 26 });
+    check(
+      'payroll: the pay cycle start day is a setting',
+      cycle.status === 200 && cycle.json.settings?.payrollCycleStartDay === 26,
+      cycle.json,
+    );
+    const cycleRun = await admin.post('/admin/hr/payroll/runs', { period: '2001-03' });
+    check(
+      'payroll: a period then runs from the 26th of the month before to the 25th',
+      cycleRun.status === 201 &&
+        cycleRun.json.run?.periodStart === '2001-02-26' &&
+        cycleRun.json.run?.periodEnd === '2001-03-25',
+      cycleRun.json.run,
+    );
+    if (cycleRun.json.run?.id) await admin.del(`/admin/hr/payroll/runs/${Number(cycleRun.json.run.id)}`);
+    const badCycle = await admin.patch('/admin/hr/settings', { payrollCycleStartDay: 31 });
+    check('payroll: a start day past the 28th is refused', badCycle.status === 422, badCycle.json);
+    const resetCycle = await admin.patch('/admin/hr/settings', { payrollCycleStartDay: 1 });
+    must('payroll: the cycle goes back to the calendar month', resetCycle.json.settings?.payrollCycleStartDay === 1, resetCycle.json);
 
     /* ------------------------------------------------ last month: process */
     const created = await admin.post('/admin/hr/payroll/runs', { period, note: 'Payroll fixture run' });
@@ -454,6 +508,11 @@ export async function run(ctx: E2EContext): Promise<void> {
       'payroll: people with no structure in force are counted, not paid',
       Number(processed.json.missingStructure) >= 2,
       processed.json.missingStructure,
+    );
+    check(
+      'payroll: a past period is not provisional and covers every day',
+      processed.json.run?.provisional === false && processed.json.run?.calculatedThrough === end,
+      processed.json.run,
     );
 
     const payslipOf = async (code: string): Promise<Json | undefined> => {

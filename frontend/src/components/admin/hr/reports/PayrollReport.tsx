@@ -19,14 +19,14 @@ import { CsvLink, RestrictedPanel, ResultsHead, companyToday, count, plural, use
  * error, because no retry will change it. At most twelve runs a year, so the report is
  * bounded and not paged.
  *
- * The year's totals count APPROVED runs only. A draft or processed run can still be
- * recomputed, so adding it to the year would report money nobody has signed off; those
- * runs are listed, with their status, but are not in the totals.
+ * The year's totals count APPROVED pay periods only. One not yet approved can still be
+ * recalculated, so adding it to the year would report money nobody has signed off; those
+ * periods are listed, with their status, but are not in the totals.
  */
 
 const STATUS_LABELS: Record<PayrollRunStatus, string> = {
-  draft: 'Draft',
-  processed: 'Processed',
+  draft: 'Not calculated',
+  processed: 'Calculated',
   approved: 'Approved',
 };
 
@@ -113,13 +113,13 @@ export function PayrollReport({ filters, onFilters, lookups, onUnauthorized }: R
         <LoadingOverlay busy={result.loading} label="Updating the report…">
           <div>
             <ResultsHead actions={<CsvLink href={hrReportsApi.csvUrl('payroll', { year })} />}>
-              {plural(data.items.length, 'payroll run')} in {data.year} · totals count approved runs only
+              {plural(data.items.length, 'pay period')} in {data.year} · totals count approved pay periods only
             </ResultsHead>
 
             {/* Money tiles: a smaller figure, so ₹ amounts in lakhs fit the tile instead of being cut. */}
             <div className="hr-rep-money">
               <StatGrid>
-                <StatCard value={count(data.approvedTotals.runs)} label="Approved runs" tone="good" icon="check" />
+                <StatCard value={count(data.approvedTotals.runs)} label="Approved pay periods" tone="good" icon="check" />
                 <StatCard
                   value={count(data.approvedTotals.payslips)}
                   label="Payslips issued"
@@ -134,14 +134,17 @@ export function PayrollReport({ filters, onFilters, lookups, onUnauthorized }: R
             <div className="hr-rep-gap" />
 
             {data.items.length === 0 ? (
-              <EmptyPanel title={`No payroll runs in ${data.year}`} message="Runs appear here once they are created under Payroll." />
+              <EmptyPanel
+                title={`No pay periods in ${data.year}`}
+                message="Pay periods appear here once they are created under Payroll."
+              />
             ) : (
               <DataTable
                 rows={data.items}
                 rowKey={(run) => run.id}
                 columns={COLUMNS}
                 minWidth="66rem"
-                caption={`Payroll runs in ${data.year}`}
+                caption={`Pay periods in ${data.year}`}
               />
             )}
           </div>

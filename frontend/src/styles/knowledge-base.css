@@ -1,0 +1,172 @@
+/* --- /knowledge-base: the HR guide ---------------------------------------- */
+/*
+ * A single reading page. Narrow measure for the prose, tables that scroll inside their
+ * own box on a phone rather than widening the page, and the site's tokens throughout.
+ */
+
+.kb {
+  max-width: 54rem;
+  margin: 0 auto;
+  padding: 2.5rem 1rem 4rem;
+  color: var(--ink-900);
+  line-height: 1.6;
+}
+
+.kb__header {
+  border-bottom: 1px solid var(--line-200);
+  padding-bottom: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.kb__eyebrow {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.kb h1 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  line-height: 1.2;
+}
+
+.kb__lead {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--ink-700);
+}
+
+.kb__links {
+  margin: 0.75rem 0 0;
+}
+
+.kb a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.kb a:hover {
+  color: var(--color-primary-hover);
+}
+
+.kb__toc {
+  background: var(--surface-muted);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.kb__toc-title {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+.kb__toc ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  columns: 2 16rem;
+  column-gap: 2rem;
+}
+
+.kb__toc li {
+  margin: 0.15rem 0;
+}
+
+.kb__body section {
+  scroll-margin-top: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+.kb__body h2 {
+  font-size: 1.4rem;
+  margin: 0 0 0.75rem;
+}
+
+.kb__body h3 {
+  font-size: 1.1rem;
+  margin: 1.25rem 0 0.4rem;
+}
+
+.kb__body p,
+.kb__body li,
+.kb__body dd {
+  max-width: 46rem;
+}
+
+.kb__body ul,
+.kb__body ol {
+  padding-left: 1.25rem;
+}
+
+.kb__body li {
+  margin: 0.3rem 0;
+}
+
+.kb__note {
+  font-size: 0.95rem;
+  color: var(--ink-700);
+}
+
+.kb__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  margin: 0.5rem 0 1rem;
+}
+
+.kb__table {
+  width: 100%;
+  min-width: 32rem;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.kb__table th,
+.kb__table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--line-200);
+}
+
+.kb__table thead th {
+  background: var(--surface-muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.kb__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.kb__code {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  white-space: pre;
+}
+
+.kb code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.kb__faq dt {
+  font-weight: 600;
+  margin-top: 1rem;
+}
+
+.kb__faq dd {
+  margin: 0.25rem 0 0;
+}

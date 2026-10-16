@@ -20,14 +20,27 @@ export type HrSettings = {
   attendanceTrackedFrom: string | null;
   /** Weekly-off days for an employee with no shift. */
   defaultWeeklyOff: Weekday[];
+  /**
+   * The day of the month a pay period starts on, 1 to 28. 1 is the calendar month; 26
+   * is "26th to 25th". The period is named after the month it ENDS in, so with 26 the
+   * October period runs 26 September to 25 October. Capped at 28 so every month has
+   * the day.
+   */
+  payrollCycleStartDay: number;
 };
 
 export const HR_SETTING_KEYS = {
   attendanceTrackedFrom: 'attendance_tracked_from',
   defaultWeeklyOff: 'default_weekly_off',
+  payrollCycleStartDay: 'payroll_cycle_start_day',
 } as const;
 
 const DEFAULT_WEEKLY_OFF: Weekday[] = ['sun'];
+
+function validCycleDay(value: string | number | null | undefined): number {
+  const day = Number(value);
+  return Number.isInteger(day) && day >= 1 && day <= 28 ? day : 1;
+}
 
 /** Parses a SET-style list (`'sat,sun'`) into weekdays, dropping anything unknown. */
 export function parseWeekdays(value: string | null | undefined, fallback: Weekday[] = DEFAULT_WEEKLY_OFF): Weekday[] {
@@ -57,6 +70,7 @@ export async function getHrSettings(): Promise<HrSettings> {
     defaultWeeklyOff: map.has(HR_SETTING_KEYS.defaultWeeklyOff)
       ? parseWeekdays(map.get(HR_SETTING_KEYS.defaultWeeklyOff))
       : DEFAULT_WEEKLY_OFF,
+    payrollCycleStartDay: validCycleDay(map.get(HR_SETTING_KEYS.payrollCycleStartDay)),
   };
 }
 
@@ -75,6 +89,9 @@ export async function updateHrSettings(
   if (patch.defaultWeeklyOff !== undefined) {
     const days = WEEKDAYS.filter((day) => patch.defaultWeeklyOff!.includes(day));
     writes.push([HR_SETTING_KEYS.defaultWeeklyOff, days.join(',')]);
+  }
+  if (patch.payrollCycleStartDay !== undefined) {
+    writes.push([HR_SETTING_KEYS.payrollCycleStartDay, String(validCycleDay(patch.payrollCycleStartDay))]);
   }
 
   for (const [key, value] of writes) {

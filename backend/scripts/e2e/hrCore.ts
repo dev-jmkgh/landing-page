@@ -350,4 +350,40 @@ export async function run(ctx: E2EContext): Promise<void> {
 
   const telecallerPeek = await ctx.ravi.get('/hr/notifications');
   check('core: a telecalling token cannot read the HR inbox', telecallerPeek.status === 401, telecallerPeek.status);
+
+  /* ------------------------------------------------ the day's status, from scratch */
+  /*
+   * Half day is decided from the totals every time: a short closed day is a half day
+   * even when it started late, and stops being one when more sessions take it past the
+   * threshold (the shift above allows 240 minutes for a half day).
+   */
+  const halfDayUser = await ctx.createSignedInHrEmployee({
+    name: 'Core Half Day',
+    email: 'core.halfday@example.test',
+  });
+  await adminAsBearer.call('PATCH', `/admin/hr/users/${halfDayUser.id}/assignment`, {
+    workMode: 'remote',
+    shiftId,
+  });
+  const shortLate = await adminAsBearer.put(`/admin/hr/attendance/${halfDayUser.id}/${twoDaysAgo}`, {
+    sessions: [{ startAt: '11:00', endAt: '11:07' }],
+    reason: 'Seven minutes, late',
+  });
+  check(
+    'core: seven minutes worked after a late start is a half day, not a full one',
+    shortLate.status === 200 && shortLate.json.day?.status === 'half_day' && Number(shortLate.json.day?.lateMinutes) > 0,
+    shortLate.json.day,
+  );
+  const fullDay = await adminAsBearer.put(`/admin/hr/attendance/${halfDayUser.id}/${twoDaysAgo}`, {
+    sessions: [
+      { startAt: '09:00', endAt: '12:00' },
+      { startAt: '13:00', endAt: '17:30' },
+    ],
+    reason: 'Morning and afternoon',
+  });
+  check(
+    'core: a day taken past the half-day threshold by a later session is no longer a half day',
+    fullDay.status === 200 && fullDay.json.day?.status === 'present' && Number(fullDay.json.day?.workedMinutes) === 450,
+    fullDay.json.day,
+  );
 }

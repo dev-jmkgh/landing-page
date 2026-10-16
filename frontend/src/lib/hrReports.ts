@@ -348,7 +348,7 @@ export const HR_AUDIT_ENTITY_LABELS: Record<string, string> = {
   hr_request: 'HR request',
   hr_document: 'Document',
   hr_announcement: 'Announcement',
-  hr_payroll_run: 'Payroll run',
+  hr_payroll_run: 'Pay period',
   hr_payslip: 'Payslip',
   hr_salary_structure: 'Salary structure',
   hr_department: 'Department',
@@ -415,10 +415,10 @@ export const HR_AUDIT_ACTION_GROUPS: Array<{ label: string; actions: Array<[stri
     actions: [
       ['hr_salary_structure_created', 'Salary structure created'],
       ['hr_salary_structure_deleted', 'Salary structure deleted'],
-      ['hr_payroll_run_created', 'Payroll run created'],
-      ['hr_payroll_run_processed', 'Payroll run processed'],
-      ['hr_payroll_run_approved', 'Payroll run approved'],
-      ['hr_payroll_run_deleted', 'Payroll run deleted'],
+      ['hr_payroll_run_created', 'Pay period created'],
+      ['hr_payroll_run_processed', 'Payslips calculated'],
+      ['hr_payroll_run_approved', 'Pay period approved'],
+      ['hr_payroll_run_deleted', 'Pay period deleted'],
     ],
   },
   {

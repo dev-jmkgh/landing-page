@@ -923,7 +923,11 @@ export async function run(ctx: E2EContext): Promise<void> {
       secondFix.json.day?.workedMinutes === 90 &&
       (secondFix.json.day?.sessions as Json[] | undefined)?.length === 1 &&
       secondFix.json.day?.lateMinutes === 50 &&
-      secondFix.json.day?.status === 'late',
+      /*
+       * Ninety minutes is under the shift's half-day threshold, so the day is a half day
+       * even though it started late — lateness stays on the row as late_minutes.
+       */
+      secondFix.json.day?.status === 'half_day',
     secondFix.json.day,
   );
   check(
@@ -1035,7 +1039,7 @@ export async function run(ctx: E2EContext): Promise<void> {
   );
   check(
     'and classifies the corrected day',
-    (calendar.json.days as Json[] | undefined)?.find((day) => day.date === d3)?.status === 'late',
+    (calendar.json.days as Json[] | undefined)?.find((day) => day.date === d3)?.status === 'half_day',
     (calendar.json.days as Json[] | undefined)?.find((day) => day.date === d3),
   );
 

@@ -491,22 +491,34 @@ export async function recomputeDayFor(userId: number, workDate: string): Promise
   );
 
   /*
-   * Status, decided after the totals are known.
+   * Status, decided after the totals are known — from scratch, every time.
    *
-   * Half day only ever downgrades from 'present': a day already marked 'late' keeps
-   * that, because being late is the more useful fact about it and the hours are on the
-   * row regardless. Only applied once the day is CLOSED — a half-day flag on somebody
-   * two hours into their shift would be wrong and alarming.
+   *   half_day  the day is CLOSED and worked less than the shift's half-day threshold
+   *   late      otherwise, when the first check-in was after start + grace
+   *   present   otherwise
+   *
+   * Two earlier rules were wrong. Half day only ever downgraded 'present', so a late
+   * start kept 'late' however little was worked — seven minutes paid as a full day.
+   * And nothing ever upgraded: a closed three-hour morning became a half day, and a
+   * four-hour afternoon session afterwards left it a half day. Deriving the status
+   * again from the totals fixes both. Lateness is still on the row (`late_minutes`).
+   *
+   * Only while the day is closed: a half-day flag on somebody two hours into their
+   * shift would be wrong and alarming. Rows written as absent or on leave are left alone.
    */
   await execute(
     `UPDATE hr_attendance a
-       JOIN hr_shifts s ON s.id = a.shift_id
-        SET a.status = 'half_day'
+       LEFT JOIN hr_shifts s ON s.id = a.shift_id
+        SET a.status = CASE
+              WHEN a.checked_out_at IS NOT NULL
+               AND a.worked_minutes IS NOT NULL
+               AND s.id IS NOT NULL
+               AND a.worked_minutes < s.half_day_minutes THEN 'half_day'
+              WHEN a.late_minutes > 0 THEN 'late'
+              ELSE 'present'
+            END
       WHERE a.user_id = ? AND a.work_date = ?
-        AND a.status = 'present'
-        AND a.checked_out_at IS NOT NULL
-        AND a.worked_minutes IS NOT NULL
-        AND a.worked_minutes < s.half_day_minutes`,
+        AND a.status IN ('present', 'late', 'half_day')`,
     [userId, workDate],
   );
 }

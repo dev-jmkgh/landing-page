@@ -13,7 +13,8 @@ import { validateBody } from '../../middleware/validate';
 import { HttpError, unauthorized, validationFailed } from '../../utils/httpError';
 import { logger } from '../../utils/logger';
 import { clientIp } from '../../utils/request';
-import { DEVICE_PLATFORMS, optionalPhoneField } from './hr.schema';
+import { queryOne, type RowDataPacket } from '../../db/pool';
+import { DEVICE_PLATFORMS, hrMobileKey, mobileNumberField } from './hr.schema';
 import { findHrUser } from './hr.repository';
 import {
   OTP_TTL_MINUTES,
@@ -171,7 +172,12 @@ export const hrSignupSchema = z.object({
     .toLowerCase()
     .email('Enter a valid email address.')
     .max(190),
-  phone: optionalPhoneField,
+  /*
+   * Required, and a real Indian mobile, the same rule the telecalling signup applies to
+   * the company SIM. The approver needs a number to reach the applicant on before
+   * letting them in, and an optional field was left blank by almost everybody.
+   */
+  phone: mobileNumberField,
   /*
    * Twelve characters, matching admin-created accounts. Not relaxed for
    * self-registration: a self-chosen password is if anything likelier to be weak.
@@ -201,6 +207,31 @@ hrAuthRouter.post(
   validateBody(hrSignupSchema),
   asyncHandler(async (request, response) => {
     const input = request.body as z.infer<typeof hrSignupSchema>;
+
+    /*
+     * One HR account per mobile number, as one telecalling account per company SIM.
+     *
+     * Compared on the last ten digits, because accounts created by an administrator keep
+     * the number as it was typed (`98400 11003`, `+91-98400-11003`). A read before the
+     * write: two registrations racing on one number is a person signing up twice, which
+     * the approver sees and rejects — not worth a unique index that every older,
+     * free-form row would have to satisfy.
+     */
+    const key = hrMobileKey(input.phone);
+    const taken = key
+      ? await queryOne<RowDataPacket & { id: number }>(
+          `SELECT id FROM hr_users
+            WHERE phone IS NOT NULL
+              AND RIGHT(REGEXP_REPLACE(phone, '[^0-9]', ''), 10) = ?
+            LIMIT 1`,
+          [key],
+        )
+      : null;
+    if (taken) {
+      throw validationFailed({
+        phone: 'That mobile number is already registered to another account. Contact HR if it is yours.',
+      });
+    }
 
     const result = await registerHrUser(input);
 

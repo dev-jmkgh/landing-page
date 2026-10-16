@@ -117,6 +117,23 @@ export function monthLabel(period: string): string {
   return `${MONTH_NAMES[month - 1] ?? period} ${year}`;
 }
 
+/**
+ * The first and last day of the pay period named `period`, for a cycle starting on
+ * `startDay` (the HR setting `payrollCycleStartDay`).
+ *
+ * A period is named after the month it ENDS in. With the default start day of 1 that is
+ * simply the calendar month; with 26, "2026-10" runs 26 September to 25 October.
+ */
+export function payPeriodBounds(period: string, startDay: number): { start: string; end: string } {
+  const [year, month] = period.split('-').map(Number) as [number, number];
+  const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
+  if (startDay <= 1) {
+    return { start: iso(year, month, 1), end: iso(year, month + 1, 0) };
+  }
+  // Day `startDay` of the previous month, through the day before it in this one.
+  return { start: iso(year, month - 1, startDay), end: iso(year, month, startDay - 1) };
+}
+
 /** `2026-11-01` → "1 November 2026", for messages a person reads. */
 export function longDate(date: string): string {
   const [year, month, day] = date.split('-').map(Number) as [number, number, number];
@@ -169,8 +186,40 @@ export type PayrollRun = {
   approvedAt: string | null;
   approvedByName: string | null;
   createdAt: string;
-  /** The first company date the run may be processed on (the day after the period ends). */
+  /**
+   * The first company date the period may be CALCULATED on: the day it starts. It may
+   * be calculated again at any time until it is approved.
+   */
   processableFrom: string;
+  /**
+   * The first date it may be APPROVED on: the day after it ends. Approval also needs a
+   * calculation made on or after that day, so the published figures cover every day.
+   */
+  approvableFrom: string;
+  /** The last day the current figures cover, or null before the first calculation. */
+  calculatedThrough: string | null;
+  /**
+   * True when the figures stop short of the period end — calculated while it was still
+   * running. Days after `calculatedThrough` are neither paid nor loss of pay yet.
+   */
+  provisional: boolean;
+  /** Employed people the last calculation left out, and why. Empty before it ran. */
+  exclusions: PayrollExclusion[];
+};
+
+/**
+ * Somebody employed during the period who has no payslip in it.
+ *
+ *   no_structure            no salary structure at all
+ *   structure_starts_later  their structure starts after the period ends
+ */
+export type PayrollExclusion = {
+  userId: number;
+  employeeCode: string;
+  employeeName: string;
+  reason: 'no_structure' | 'structure_starts_later';
+  /** For `structure_starts_later`: the date it starts. */
+  structureFrom: string | null;
 };
 
 export type PayslipLine = {
@@ -203,6 +252,11 @@ export type Payslip = {
   unpaidLeaveDays: number;
   absentDays: number;
   untrackedDays: number;
+  /**
+   * Days of the period still to come when it was calculated — only ever non-zero on a
+   * provisional calculation. Neither paid nor loss of pay.
+   */
+  remainingDays: number;
   lopDays: number;
   paidDays: number;
   grossEarnings: number;

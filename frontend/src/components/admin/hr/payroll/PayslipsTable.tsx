@@ -12,17 +12,22 @@ import {
   type PayrollRun,
   type Payslip,
 } from '@/lib/hrPayroll';
-import { EmptyPanel, Pager, TableSkeleton } from '../../telecalling/shared';
+import { EmptyPanel, Pager, TableSkeleton, Tag } from '../../telecalling/shared';
 import { isAbort, plural, readFailure } from './shared';
 
 /**
- * The payslips of one run: a paged, searchable table whose rows open to show the day
- * counts and every earning and deduction line.
+ * The payslips of one pay period: a paged, searchable table whose rows open to show the
+ * day counts and every earning and deduction line.
  *
  * EVERY FIGURE HERE IS THE SERVER'S. Gross, loss of pay, deductions and net are read off
- * the payslip exactly as the run computed them; nothing is added up or prorated in the
- * browser. A payslip is a record of what is paid, and a second calculation that could
- * round differently is how a paisa dispute starts.
+ * the payslip exactly as the calculation produced them; nothing is added up or prorated
+ * in the browser. A payslip is a record of what is paid, and a second calculation that
+ * could round differently is how a paisa dispute starts.
+ *
+ * PROVISIONAL PAYSLIPS. A payslip calculated while its period was still running has
+ * `remainingDays` > 0: days still to come, neither paid nor loss of pay. Its row is
+ * tagged "Provisional" and says how many days are still to come, so "12 of 30 days paid"
+ * is not read as eighteen days of loss of pay.
  *
  * WHY NOT `DataTable`: it renders one `<tr>` per record and has no full-width detail row,
  * and a payslip's detail — eleven day counts and two tables of lines — does not fit into
@@ -51,6 +56,7 @@ type DayCountKey =
   | 'daysInPeriod'
   | 'paidDays'
   | 'lopDays'
+  | 'remainingDays'
   | 'presentDays'
   | 'paidLeaveDays'
   | 'unpaidLeaveDays'
@@ -60,10 +66,20 @@ type DayCountKey =
   | 'untrackedDays'
   | 'unemployedDays';
 
-const DAY_COUNTS: { key: DayCountKey; label: string; hint?: string }[] = [
+/**
+ * `onlyWhenAboveZero` keeps "Still to come" off every final payslip, where it is always
+ * 0 and would only raise the question of what it means.
+ */
+const DAY_COUNTS: { key: DayCountKey; label: string; hint?: string; onlyWhenAboveZero?: boolean }[] = [
   { key: 'daysInPeriod', label: 'Days in period' },
   { key: 'paidDays', label: 'Paid days', hint: 'Days in period less not-employed and LOP days' },
   { key: 'lopDays', label: 'LOP days', hint: 'Unpaid leave plus absent days' },
+  {
+    key: 'remainingDays',
+    label: 'Still to come',
+    hint: 'After the calculation; not paid and not LOP yet',
+    onlyWhenAboveZero: true,
+  },
   { key: 'presentDays', label: 'Present' },
   { key: 'paidLeaveDays', label: 'Paid leave' },
   { key: 'unpaidLeaveDays', label: 'Unpaid leave' },
@@ -175,7 +191,10 @@ export function PayslipsTable({
               <span className="sr-only">{open ? 'Hide' : 'Show'} the payslip details for </span>
               <span className="hr-pay-expander__name">{slip.employeeName}</span>
             </button>
-            <span className="tc-muted tc-mono">{slip.employeeCode}</span>
+            <span className="hr-pay-slip-head__meta">
+              <span className="tc-muted tc-mono">{slip.employeeCode}</span>
+              {slip.remainingDays > 0 ? <Tag tone="progress">Provisional</Tag> : null}
+            </span>
           </div>
         );
       },
@@ -197,7 +216,7 @@ export function PayslipsTable({
       key: 'days',
       header: 'Days paid',
       align: 'end',
-      width: '8rem',
+      width: '10.5rem',
       nowrap: true,
       render: (slip) => (
         <div className="cell-stack">
@@ -206,6 +225,11 @@ export function PayslipsTable({
           </span>
           {slip.lopDays > 0 ? (
             <span className="cell-stack__secondary tc-cell-warn">{formatDays(slip.lopDays)} LOP</span>
+          ) : null}
+          {slip.remainingDays > 0 ? (
+            <span className="cell-stack__secondary">
+              Still to come: {formatDays(slip.remainingDays)} {slip.remainingDays === 1 ? 'day' : 'days'}
+            </span>
           ) : null}
         </div>
       ),
@@ -266,7 +290,7 @@ export function PayslipsTable({
     <section className="hr-pay-section" aria-labelledby="hr-pay-payslips-title">
       <div className="tc-panel-head">
         <h3 className="tc-section-title" id="hr-pay-payslips-title" style={{ margin: 0 }}>
-          Payslips
+          Payslips{run.provisional ? ' so far' : ''}
         </h3>
         <div className="field hr-pay-search">
           <label className="field__label" htmlFor="hr-pay-payslip-search">
@@ -291,7 +315,7 @@ export function PayslipsTable({
       ) : !data ? (
         <EmptyPanel
           title="Payslips not loaded"
-          message="The payslips of this run could not be loaded."
+          message="The payslips of this pay period could not be loaded."
           actionLabel="Try again"
           onAction={() => void load()}
         />
@@ -299,23 +323,27 @@ export function PayslipsTable({
         query ? (
           <EmptyPanel
             title="No payslips match"
-            message={`Nobody in this run matches “${query}”. Search by name or employee code.`}
+            message={`Nobody in this pay period matches “${query}”. Search by name or employee code.`}
             actionLabel="Clear the search"
             onAction={() => setSearch('')}
           />
         ) : (
           <EmptyPanel
-            title="No payslips in this run"
-            message="Nobody employed in this period has a salary structure. Add structures, then process the run again."
+            title="No payslips in this pay period"
+            message={
+              run.exclusions.length > 0
+                ? 'Nobody is included in this calculation. “Not included” above shows who was left out and why: give them a salary structure, then recalculate.'
+                : 'Nobody was employed during this period, so there is nobody to pay.'
+            }
           />
         )
       ) : (
         <LoadingOverlay busy={loading} label="Updating…">
           <div className="table-wrap hr-pay-table-wrap">
-            <table className="data-table" style={{ minWidth: '64rem' }}>
+            <table className="data-table" style={{ minWidth: '66rem' }}>
               <caption className="sr-only">
-                Payslips for this run. Each employee’s name opens the day counts and the earning
-                and deduction lines.
+                Payslips for this pay period{run.provisional ? ', figures so far' : ''}. Each
+                employee’s name opens the day counts and the earning and deduction lines.
               </caption>
               <colgroup>
                 {columns.map((column) => (
@@ -394,18 +422,38 @@ function PayslipDetail({ slip }: { slip: Payslip }) {
       <section className="hr-pay-detail__block" aria-label={`Days for ${slip.employeeName}`}>
         <h4 className="hr-pay-detail__title">Days</h4>
         <dl className="hr-pay-days">
-          {DAY_COUNTS.map((count) => (
+          {DAY_COUNTS.filter((count) => !count.onlyWhenAboveZero || slip[count.key] > 0).map((count) => (
             <div
               key={count.key}
               className="hr-pay-days__item"
-              data-tone={count.key === 'lopDays' && slip.lopDays > 0 ? 'warn' : undefined}
+              data-tone={
+                count.key === 'lopDays' && slip.lopDays > 0
+                  ? 'warn'
+                  : count.key === 'remainingDays'
+                    ? 'progress'
+                    : undefined
+              }
             >
               <dt>{count.label}</dt>
               <dd>{formatDays(slip[count.key])}</dd>
-              {count.hint ? <span className="hr-pay-days__hint">{count.hint}</span> : null}
+              {count.hint ? (
+                <span className="hr-pay-days__hint">
+                  {count.key === 'paidDays' && slip.remainingDays > 0
+                    ? 'So far: days in period less not-employed, LOP and days still to come'
+                    : count.hint}
+                </span>
+              ) : null}
             </div>
           ))}
         </dl>
+        {slip.remainingDays > 0 ? (
+          <p className="hr-pay-detail__so-far">
+            <Icon name="clock" size={14} />
+            Provisional: paid amounts cover the days so far.{' '}
+            {plural(slip.remainingDays, 'day')} still to come {slip.remainingDays === 1 ? 'is' : 'are'} not
+            counted yet.
+          </p>
+        ) : null}
       </section>
 
       <div className="hr-pay-detail__lines">

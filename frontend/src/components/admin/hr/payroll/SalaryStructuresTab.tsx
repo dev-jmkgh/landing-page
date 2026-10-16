@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CellStack, DataTable } from '@/components/admin/DataTable';
-import { LoadingOverlay } from '@/components/admin/Loader';
+import { LoaderBlock, LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import {
@@ -21,11 +21,11 @@ import { isAbort, readFailure } from './shared';
  * Who is set up for payroll, and each employee's salary structures.
  *
  * A structure is what an employee is paid in a full month — earnings and deductions —
- * from a date. Payroll uses, for each month, the structure with the latest
- * `effectiveFrom` on or before the month's last day; an employee with none is left out
- * of the run (and the run says how many were). So the question this list answers first
- * is "who is not set up", which is why the Set up filter exists and why the run screen
- * links here with it set to No.
+ * from a date. Payroll uses, for each pay period, the structure with the latest
+ * `effectiveFrom` on or before the period's last day; an employee with none is left out
+ * of the period (and its "Not included" card names them). So the question this list
+ * answers first is "who is not set up", which is why the Set up filter exists and why a
+ * pay period links here — on one employee, with the filter set to No behind them.
  *
  * Every employee approved in the HR app is listed, active or not: an account switched
  * off mid-month still worked part of it and is still paid for that part.
@@ -35,13 +35,26 @@ const PAGE_SIZE = 20;
 
 export type SetUpFilter = 'all' | 'true' | 'false';
 
+/**
+ * Where another screen sends this tab: a Set up filter, and optionally one employee to
+ * open straight away — from a pay period's "Not included" list, which knows the person
+ * only by id and code.
+ */
+export type StructuresTarget = {
+  setUp: SetUpFilter;
+  employee?: { userId: number; employeeCode: string };
+};
+
 export function SalaryStructuresTab({
   initialSetUp = 'all',
+  initialEmployee,
   onUnauthorized,
   onRestricted,
 }: {
-  /** Where the tab starts — "No" when opened from a run that left people out. */
+  /** Where the tab starts — "No" when opened from a pay period that left people out. */
   initialSetUp?: SetUpFilter;
+  /** An employee to open on arrival; the list (with `initialSetUp`) is where Back goes. */
+  initialEmployee?: StructuresTarget['employee'];
   onUnauthorized: () => void;
   onRestricted: () => void;
 }) {
@@ -57,6 +70,8 @@ export function SalaryStructuresTab({
   const [error, setError] = useState<string | null>(null);
 
   const [selected, setSelected] = useState<PayrollEmployee | null>(null);
+  /** True while `initialEmployee` is being looked up, so the list does not flash first. */
+  const [opening, setOpening] = useState(Boolean(initialEmployee));
 
   const abort = useRef<AbortController | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -118,11 +133,42 @@ export function SalaryStructuresTab({
     }
   }, [query, departmentId, setUp, page, onUnauthorized, onRestricted]);
 
+  /*
+   * Opening one employee on arrival. There is no single-employee payroll endpoint, so it
+   * is the list searched by employee code and matched on id (as EmployeeStructures
+   * refreshes itself). If they are not found, the list is left searched by their code,
+   * which shows what payroll does know about them.
+   */
+  useEffect(() => {
+    if (!initialEmployee) return undefined;
+    const controller = new AbortController();
+    payrollApi
+      .listEmployees({ q: initialEmployee.employeeCode, page: 1, pageSize: PAGE_SIZE }, controller.signal)
+      .then((result) => {
+        const found = result.items.find((item) => item.user.id === initialEmployee.userId);
+        if (found) {
+          setSelected(found);
+        } else {
+          setSearch(initialEmployee.employeeCode);
+          setQuery(initialEmployee.employeeCode);
+        }
+      })
+      .catch((caught: unknown) => {
+        if (isAbort(caught)) return;
+        const message = readFailure(caught, { onUnauthorized, onRestricted }, 'Could not open that employee.');
+        if (message) setError(message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setOpening(false);
+      });
+    return () => controller.abort();
+  }, [initialEmployee, onUnauthorized, onRestricted]);
+
   // Read while the list is showing, and again on the way back from an employee — their
   // structures may have changed, and with them what this row says.
   useEffect(() => {
-    if (selected === null) void load();
-  }, [load, selected]);
+    if (selected === null && !opening) void load();
+  }, [load, selected, opening]);
 
   useEffect(() => () => abort.current?.abort(), []);
 
@@ -146,6 +192,10 @@ export function SalaryStructuresTab({
   };
 
   /* -------------------------------------------------------- one employee */
+
+  if (opening) {
+    return <LoaderBlock label={`Opening ${initialEmployee?.employeeCode ?? 'the employee'}…`} />;
+  }
 
   if (selected) {
     return (
@@ -258,7 +308,7 @@ export function SalaryStructuresTab({
             title={setUp === 'false' && query === '' && departmentId === '' ? 'Everyone is set up' : 'Nobody matches these filters'}
             message={
               setUp === 'false' && query === '' && departmentId === ''
-                ? 'Every approved employee has a salary structure, so nobody is left out of a payroll run.'
+                ? 'Every approved employee has a salary structure, so nobody is left out of a pay period for want of one.'
                 : 'Try a different search or department, or clear the filters.'
             }
             actionLabel="Clear filters"

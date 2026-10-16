@@ -162,7 +162,7 @@ hrPayrollAdminRouter.post(
       action: 'hr_payroll_run_created',
       entityType: 'hr_payroll_run',
       entityId: run.id,
-      summary: `Created the payroll run for ${monthLabel(run.period)}`,
+      summary: `Created the ${monthLabel(run.period)} pay period`,
       ipAddress: clientIp(request),
     });
 
@@ -213,7 +213,7 @@ hrPayrollAdminRouter.post(
       action: 'hr_payroll_run_processed',
       entityType: 'hr_payroll_run',
       entityId: run.id,
-      summary: `Processed payroll for ${monthLabel(run.period)} (${run.employeeCount} employee${run.employeeCount === 1 ? '' : 's'})`,
+      summary: `Calculated payslips for ${monthLabel(run.period)} (${run.employeeCount} employee${run.employeeCount === 1 ? '' : 's'})`,
       meta: {
         employeeCount: run.employeeCount,
         totalGross: run.totalGross,
@@ -259,7 +259,7 @@ hrPayrollAdminRouter.delete(
       action: 'hr_payroll_run_deleted',
       entityType: 'hr_payroll_run',
       entityId: run.id,
-      summary: `Deleted the ${run.status} payroll run for ${monthLabel(run.period)}`,
+      summary: `Deleted the ${monthLabel(run.period)} pay period`,
       meta: { status: run.status, employeeCount: run.employeeCount },
       ipAddress: clientIp(request),
     });

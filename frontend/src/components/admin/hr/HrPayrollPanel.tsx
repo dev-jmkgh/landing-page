@@ -2,33 +2,38 @@
 
 import { useCallback, useRef, useState, type KeyboardEvent } from 'react';
 import { PayrollRunsTab } from './payroll/PayrollRunsTab';
-import { SalaryStructuresTab, type SetUpFilter } from './payroll/SalaryStructuresTab';
+import { SalaryStructuresTab, type StructuresTarget } from './payroll/SalaryStructuresTab';
 import { RestrictedState } from './payroll/shared';
 
 /**
- * Payroll: monthly runs and their payslips, and the salary structures they are computed
- * from.
+ * Payroll: pay periods and their payslips, and the salary structures they are worked out
+ * from. The API calls a pay period a payroll "run"; the screen never does.
  *
- * THE MONTHLY CYCLE, as the server enforces it:
+ * THE CYCLE, as the server enforces it:
  *   1. Every employee to be paid has a salary structure (Salary structures tab).
- *   2. A run is created for a month (a draft), and processed once the month is over —
- *      the server computes every payslip from attendance, leave and the structures.
- *   3. The administrator checks the payslips (each opens to its day counts and lines,
- *      and to its PDF), processes again if anything was corrected, and approves.
- *   4. Approval freezes the run and publishes the payslips to employees in the HR app.
+ *   2. A pay period is opened for a month. Its dates follow the pay cycle — the HR
+ *      setting `payrollCycleStartDay`, the calendar month or e.g. 26th to 25th — and are
+ *      fixed when it is opened.
+ *   3. It can be calculated any time once it has started. While it is running the
+ *      figures are "so far": they stop at the day of the calculation, and the days still
+ *      to come are neither paid nor loss of pay. Recalculate as often as wanted.
+ *   4. Once it has ended, a final recalculation covers every day; only then can it be
+ *      approved, which freezes it and publishes the payslips to employees in the HR app.
+ * Everybody employed in the period whom a calculation left out is listed on the period
+ * by name, with the reason ("Not included"), so "0 employees" is never a mystery.
  *
  * ADMINISTRATORS ONLY, READS INCLUDED. Elsewhere in HR a supervisor may look; here what
  * would be read is everybody's salary, so the server answers every payroll request from
  * anyone below administrator with 403. The panel takes the first such answer as "this
  * account cannot open payroll" and shows that plainly, instead of an error per request.
  *
- * Both tabs stay mounted once opened, hidden when not shown, so that following "N people
- * have no salary structure" from a run, setting them up and coming back finds the run
+ * Both tabs stay mounted once opened, hidden when not shown, so that following "Set up
+ * salary" from a pay period, setting the person up and coming back finds the period
  * still open where it was left.
  */
 
 const TABS = [
-  { key: 'runs', label: 'Runs' },
+  { key: 'runs', label: 'Pay periods' },
   { key: 'structures', label: 'Salary structures' },
 ] as const;
 
@@ -40,12 +45,12 @@ export function HrPayrollPanel({ onUnauthorized }: { onUnauthorized: () => void 
   const [restricted, setRestricted] = useState(false);
 
   /**
-   * How the Salary structures tab starts. A new `key` remounts it with that filter —
-   * used when a run sends the administrator to the people it left out.
+   * How the Salary structures tab starts. A new `key` remounts it with that target —
+   * used when a pay period sends the administrator to somebody it left out.
    */
-  const [structuresStart, setStructuresStart] = useState<{ key: number; setUp: SetUpFilter }>({
+  const [structuresStart, setStructuresStart] = useState<{ key: number; target: StructuresTarget }>({
     key: 0,
-    setUp: 'all',
+    target: { setUp: 'all' },
   });
 
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
@@ -57,13 +62,20 @@ export function HrPayrollPanel({ onUnauthorized }: { onUnauthorized: () => void 
     setOpened((current) => (current.has(next) ? current : new Set([...current, next])));
   }, []);
 
-  const openMissingStructures = useCallback(() => {
-    setStructuresStart((current) => ({ key: current.key + 1, setUp: 'false' }));
-    choose('structures');
-    // The link that was clicked is now inside a hidden panel; the tab it switched to is
-    // where keyboard focus belongs.
-    tabRefs.current.structures?.focus();
-  }, [choose]);
+  /**
+   * Switches to Salary structures. With a target it starts afresh there (a filter, or one
+   * employee opened); without one it is shown as it was left.
+   */
+  const openStructures = useCallback(
+    (target?: StructuresTarget) => {
+      if (target) setStructuresStart((current) => ({ key: current.key + 1, target }));
+      choose('structures');
+      // The button that was clicked is now inside a hidden panel; the tab it switched to
+      // is where keyboard focus belongs (an employee opened there takes it in turn).
+      tabRefs.current.structures?.focus();
+    },
+    [choose],
+  );
 
   /** Arrow keys move between the tabs, as a tab list is expected to behave. */
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -122,7 +134,7 @@ export function HrPayrollPanel({ onUnauthorized }: { onUnauthorized: () => void 
           <PayrollRunsTab
             onUnauthorized={onUnauthorized}
             onRestricted={onRestricted}
-            onOpenStructures={openMissingStructures}
+            onOpenStructures={openStructures}
           />
         </div>
       ) : null}
@@ -137,7 +149,8 @@ export function HrPayrollPanel({ onUnauthorized }: { onUnauthorized: () => void 
         >
           <SalaryStructuresTab
             key={structuresStart.key}
-            initialSetUp={structuresStart.setUp}
+            initialSetUp={structuresStart.target.setUp}
+            initialEmployee={structuresStart.target.employee}
             onUnauthorized={onUnauthorized}
             onRestricted={onRestricted}
           />
