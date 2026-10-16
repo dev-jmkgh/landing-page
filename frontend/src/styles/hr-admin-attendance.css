@@ -1,0 +1,554 @@
+/* =============================================================================
+ * HR admin — one employee's attendance month (opened from the register).
+ *
+ * The calendar reuses the profile calendar's `.hrp-cal` colours; this file adds the
+ * header, the totals, the clickable dates, the punch timeline and the day panel.
+ * ============================================================================= */
+
+/*
+ * One column that may shrink below its content: a grid track defaults to its children's
+ * min-content width, and the table view's 74rem minimum would otherwise widen the page
+ * instead of scrolling inside its own box.
+ */
+.hra {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+/* ------------------------------------------------------------------- header */
+
+.hra-head {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.hra-head__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  justify-self: start;
+  font-size: var(--text-sm);
+}
+
+.hra-head__name {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--ink-900);
+}
+
+.hra-head__name:focus {
+  outline: none;
+}
+
+.hra-head__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-500);
+}
+
+.hra-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* ------------------------------------------------------------------- totals */
+
+.hra-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.hra-totals__item {
+  display: grid;
+  gap: 0.15rem;
+  padding: var(--space-3);
+  border: 1px solid var(--line-200);
+  border-left: 3px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+}
+
+.hra-totals__item[data-tone='good'] {
+  border-left-color: var(--success-600);
+}
+
+.hra-totals__item[data-tone='warn'] {
+  border-left-color: var(--warning-600);
+}
+
+.hra-totals__item[data-tone='bad'] {
+  border-left-color: var(--danger-600);
+}
+
+.hra-totals__item[data-tone='progress'] {
+  border-left-color: var(--info-600);
+}
+
+.hra-totals__value {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+}
+
+.hra-totals__label {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+/* ------------------------------------------------------------------ calendar */
+
+/* The whole cell is the button, so the padding moves from the cell to it. */
+.hra-cal .hrp-cal__cell {
+  height: auto;
+  padding: 0;
+}
+
+.hra-cal__day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  min-height: 6.25rem;
+  padding: var(--space-2);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.hra-cal__day > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.hra-cal__day:hover {
+  background-color: rgb(15 23 42 / 4%);
+}
+
+.hra-cal__day:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: -2px;
+}
+
+.hrp-cal__cell[data-selected='true'] {
+  box-shadow: inset 0 0 0 2px var(--navy-800);
+}
+
+.hra-cal__hours {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+}
+
+.hra-cal__alert {
+  font-weight: 600;
+  color: var(--danger-600);
+}
+
+/* --------------------------------------------------------------------- table */
+
+.hra-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hra-date__today {
+  padding: 0 0.4rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--accent-050);
+  color: var(--accent-700);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.hra-late {
+  color: var(--warning-600);
+  font-weight: 600;
+}
+
+/*
+ * Each table's scroll box is also the containing block for the visually hidden text in it
+ * (`.sr-only` is absolutely positioned). Otherwise those 1px spans are placed against an
+ * ancestor outside the scroller, escape its clip and widen the page by the table's width.
+ */
+.hra .table-wrap {
+  position: relative;
+}
+
+.hra-num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- punch view */
+
+.hra-punch {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+}
+
+.hra-punch__days {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Date | the line across the day | hours worked. */
+.hra-punch__row {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) 4.5rem;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 2.6rem;
+  border-bottom: 1px solid var(--line-100);
+}
+
+.hra-punch__days > .hra-punch__row:last-child {
+  border-bottom: 0;
+}
+
+.hra-punch__row--scale {
+  min-height: 1.6rem;
+  border-bottom: 1px solid var(--line-200);
+}
+
+.hra-punch__row[data-status='weekly_off'],
+.hra-punch__row[data-status='holiday'],
+.hra-punch__row[data-status='not_employed'] {
+  background-color: var(--surface-muted);
+}
+
+.hra-punch__row[data-today='true'] .hra-punch__day {
+  color: var(--accent-700);
+}
+
+.hra-punch__row[data-selected='true'] {
+  background-color: var(--navy-050);
+}
+
+.hra-punch__date {
+  display: grid;
+  gap: 0.05rem;
+  padding: 0.3rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.hra-punch__date:hover {
+  background-color: var(--navy-050);
+}
+
+.hra-punch__date:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 0;
+}
+
+.hra-punch__day {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-900);
+  white-space: nowrap;
+}
+
+.hra-punch__status {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.hra-punch__row[data-status='absent'] .hra-punch__status {
+  color: var(--danger-600);
+  font-weight: 600;
+}
+
+.hra-punch__row[data-status='late'] .hra-punch__status,
+.hra-punch__row[data-status='half_day'] .hra-punch__status {
+  color: var(--warning-600);
+  font-weight: 600;
+}
+
+.hra-punch__track {
+  position: relative;
+  height: 1.25rem;
+}
+
+.hra-punch__track--scale {
+  height: 1.4rem;
+}
+
+.hra-punch__tick {
+  position: absolute;
+  top: 0.15rem;
+  transform: translateX(-50%);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-500);
+  white-space: nowrap;
+}
+
+.hra-punch__grid {
+  position: absolute;
+  top: -0.6rem;
+  bottom: -0.6rem;
+  width: 1px;
+  background-color: var(--line-100);
+}
+
+/* The shift: where the day was meant to be, behind the punches. */
+.hra-punch__shift {
+  position: absolute;
+  top: 0.15rem;
+  bottom: 0.15rem;
+  border: 1px dashed var(--navy-500);
+  border-radius: var(--radius-sm);
+  background-color: var(--navy-050);
+}
+
+.hra-punch__bar {
+  position: absolute;
+  top: 0.3rem;
+  bottom: 0.3rem;
+  min-width: 3px;
+  border-radius: var(--radius-sm);
+  background-color: var(--success-600);
+}
+
+.hra-punch__bar[data-kind='open'] {
+  background-color: var(--accent-500);
+}
+
+/* Corrected or approved: the same bar, striped, so "this was not punched" shows at a glance. */
+.hra-punch__bar[data-kind='admin'],
+.hra-punch__bar[data-kind='regularisation'] {
+  background-color: var(--info-600);
+  background-image: repeating-linear-gradient(135deg, rgb(255 255 255 / 30%) 0 4px, transparent 4px 8px);
+}
+
+.hra-punch__bar[data-kind='auto'] {
+  background-color: var(--danger-600);
+}
+
+.hra-punch__total {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+  text-align: end;
+  white-space: nowrap;
+}
+
+.hra-punch__row--scale .hra-punch__total {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--ink-500);
+}
+
+.hra-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.hra-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hra-legend__swatch {
+  width: 1.4rem;
+  height: 0.65rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--success-600);
+}
+
+.hra-legend__swatch[data-kind='shift'] {
+  border: 1px dashed var(--navy-500);
+  background-color: var(--navy-050);
+}
+
+.hra-legend__swatch[data-kind='open'] {
+  background-color: var(--accent-500);
+}
+
+.hra-legend__swatch[data-kind='admin'] {
+  background-color: var(--info-600);
+  background-image: repeating-linear-gradient(135deg, rgb(255 255 255 / 30%) 0 4px, transparent 4px 8px);
+}
+
+.hra-legend__swatch[data-kind='auto'] {
+  background-color: var(--danger-600);
+}
+
+/* ------------------------------------------------------------------ the day */
+
+.hra-detail {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  scroll-margin-top: var(--space-6);
+}
+
+.hra-detail__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.hra-detail__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hra-detail__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--ink-900);
+}
+
+.hra-detail__title:focus {
+  outline: none;
+}
+
+.hra-detail__close {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--ink-500);
+  cursor: pointer;
+}
+
+.hra-detail__close:hover {
+  background-color: var(--navy-050);
+  color: var(--navy-800);
+}
+
+.hra-detail__close:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+.hra-detail__notes,
+.hra-detail__note,
+.hra-detail__empty {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.hra-detail__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.hra-detail__facts dt {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--ink-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hra-detail__facts dd {
+  margin: 0.15rem 0 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-900);
+}
+
+.hra-detail__sessions .data-table {
+  min-width: 30rem;
+}
+
+.hra-detail__source {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.hra-detail__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ---------------------------------------------------------------- the register */
+
+/* The employee's name in the register opens this view. */
+.hra-name {
+  font-weight: 600;
+  text-align: start;
+}
+
+/* -------------------------------------------------------------- responsive */
+
+@media (max-width: 720px) {
+  .hra-punch {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+  }
+
+  .hra-punch__row {
+    grid-template-columns: 5.25rem minmax(0, 1fr) 3.25rem;
+    gap: var(--space-2);
+  }
+
+  /* Every other hour label, so the scale stays readable at phone width. */
+  .hra-punch__tick--minor {
+    display: none;
+  }
+
+  .hra-detail {
+    padding: var(--space-4);
+  }
+
+  /* Four short columns fit a phone once the desktop minimum width is lifted. */
+  .hra-detail__sessions .data-table {
+    min-width: 0;
+  }
+
+  .hra-detail__sessions th,
+  .hra-detail__sessions td {
+    padding-inline: var(--space-2);
+  }
+}

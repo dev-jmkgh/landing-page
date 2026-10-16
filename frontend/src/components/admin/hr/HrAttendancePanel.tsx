@@ -22,6 +22,7 @@ import {
 import { EmptyPanel, Pager, Tag, TableSkeleton } from '../telecalling/shared';
 import { CorrectDayDialog } from './attendance/CorrectDayDialog';
 import { AttendanceStatusTag, DayMarkers, DayStatusTag } from './attendance/dayStatus';
+import { EmployeeAttendanceView } from './attendance/EmployeeAttendanceView';
 import { ExceptionsView } from './attendance/ExceptionsView';
 import { isAbort } from './people/shared';
 import { useOrgLists } from './people/useOrgLists';
@@ -43,10 +44,14 @@ const PAGE_SIZE = 25;
 
 type Tab = 'register' | 'exceptions';
 
+/** The employee whose month is open, and the register date it was opened from. */
+type Viewing = { userId: number; name: string; date: string | null };
+
 export function HrAttendancePanel({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [tab, setTab] = useState<Tab>('register');
   /** Unreviewed exceptions, for the tab badge. Null when unknown — then no badge. */
   const [waiting, setWaiting] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<Viewing | null>(null);
 
   const refreshWaiting = useCallback(async () => {
     try {
@@ -62,37 +67,61 @@ export function HrAttendancePanel({ onUnauthorized }: { onUnauthorized: () => vo
     void refreshWaiting();
   }, [refreshWaiting, tab]);
 
+  /*
+   * Back from an employee's month: the register is still there (hidden, not unmounted, so
+   * its date, filters and page survive), and focus returns to the name that was clicked.
+   */
+  const closeEmployee = () => {
+    const userId = viewing?.userId;
+    setViewing(null);
+    window.requestAnimationFrame(() => document.getElementById(`hr-att-name-${userId}`)?.focus());
+  };
+
   return (
     <>
-      <div className="admin-toolbar hrp-tabbar">
-        <div className="admin-tabs" role="tablist" aria-label="Attendance views">
-          <button
-            type="button"
-            role="tab"
-            className="admin-tab"
-            aria-selected={tab === 'register'}
-            onClick={() => setTab('register')}
-          >
-            Register
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="admin-tab"
-            aria-selected={tab === 'exceptions'}
-            onClick={() => setTab('exceptions')}
-          >
-            Exceptions
-            {waiting !== null && waiting > 0 ? <span className="tc-tab-count">{waiting}</span> : null}
-          </button>
-        </div>
-      </div>
+      {viewing ? (
+        <EmployeeAttendanceView
+          key={viewing.userId}
+          userId={viewing.userId}
+          initialName={viewing.name}
+          initialMonth={viewing.date?.slice(0, 7)}
+          initialDate={viewing.date ?? undefined}
+          onBack={closeEmployee}
+          onUnauthorized={onUnauthorized}
+        />
+      ) : null}
 
-      {tab === 'register' ? (
-        <RegisterView onUnauthorized={onUnauthorized} />
-      ) : (
-        <ExceptionsView onUnauthorized={onUnauthorized} />
-      )}
+      <div hidden={viewing !== null}>
+        <div className="admin-toolbar hrp-tabbar">
+          <div className="admin-tabs" role="tablist" aria-label="Attendance views">
+            <button
+              type="button"
+              role="tab"
+              className="admin-tab"
+              aria-selected={tab === 'register'}
+              onClick={() => setTab('register')}
+            >
+              Register
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className="admin-tab"
+              aria-selected={tab === 'exceptions'}
+              onClick={() => setTab('exceptions')}
+            >
+              Exceptions
+              {waiting !== null && waiting > 0 ? <span className="tc-tab-count">{waiting}</span> : null}
+            </button>
+          </div>
+        </div>
+
+        {tab === 'register' ? (
+          <RegisterView onUnauthorized={onUnauthorized} onOpenEmployee={setViewing} />
+        ) : (
+          <ExceptionsView onUnauthorized={onUnauthorized} />
+        )}
+      </div>
     </>
   );
 }
@@ -101,7 +130,14 @@ export function HrAttendancePanel({ onUnauthorized }: { onUnauthorized: () => vo
 /* Register                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function RegisterView({ onUnauthorized }: { onUnauthorized: () => void }) {
+function RegisterView({
+  onUnauthorized,
+  onOpenEmployee,
+}: {
+  onUnauthorized: () => void;
+  /** Opens the employee's month — the calendar, table and punch views. */
+  onOpenEmployee: (viewing: Viewing) => void;
+}) {
   /** Empty means "whatever the server calls today". */
   const [date, setDate] = useState('');
   const [search, setSearch] = useState('');
@@ -368,7 +404,17 @@ function RegisterView({ onUnauthorized }: { onUnauthorized: () => void }) {
                   header: 'Employee',
                   render: (row) => (
                     <CellStack
-                      primary={row.name}
+                      primary={
+                        <button
+                          type="button"
+                          id={`hr-att-name-${row.userId}`}
+                          className="tc-link-button hra-name"
+                          onClick={() => onOpenEmployee({ userId: row.userId, name: row.name, date: shownDate })}
+                        >
+                          {row.name}
+                          <span className="sr-only">: open their attendance month</span>
+                        </button>
+                      }
                       secondary={
                         [row.designationName, row.departmentName].filter(Boolean).join(' · ') ||
                         undefined

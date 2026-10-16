@@ -10,6 +10,7 @@ import { validateBody, validateQuery } from '../../../middleware/validate';
 import { badRequest, notFound } from '../../../utils/httpError';
 import { clientIp } from '../../../utils/request';
 import { recordAudit } from '../../telecalling/activity/activity.repository';
+import { assignmentFor, historyFor, summaryFor } from '../attendance/attendance.service';
 import { calendarFor, companyToday, monthBounds } from '../calendar/calendar.service';
 import { listHrUsers } from '../hr.repository';
 import { getHrSettings, updateHrSettings } from '../settings/hrSettings';
@@ -391,6 +392,54 @@ hrPeopleAdminRouter.get(
     const { start, end } = monthBounds(period);
     const days = await calendarFor(id, start, end, { includePending: true });
     response.json({ success: true, month: period, days });
+  }),
+);
+
+/**
+ * One employee's month for the attendance view: every date as the classifier sees it,
+ * each with its recorded day — punches included — beside it, the month's totals, and the
+ * shift they are on now.
+ *
+ * The calendar alone cannot draw a punch timeline (it carries first in and last out, not
+ * the sessions), and the paged attendance list cannot draw a calendar (a day with no row
+ * is invisible there). A month is at most 31 days, so both are read whole: a bounded
+ * aggregate the same size as the calendar it extends, in four queries however many days
+ * have punches.
+ *
+ * `shift` is the CURRENT assignment, for the timeline's shift band on days with no record.
+ * A recorded day carries its own shift snapshot (`record.shiftStartsAt`), which wins.
+ */
+hrPeopleAdminRouter.get(
+  '/employees/:id/attendance-month',
+  requireRole('supervisor'),
+  validateQuery(employeeCalendarQuerySchema),
+  asyncHandler(async (request, response) => {
+    const id = parseId(request.params.id);
+    const { month } = response.locals.query as z.infer<typeof employeeCalendarQuerySchema>;
+
+    if (!(await findAccountState(id))) throw notFound('Employee not found.');
+
+    const period = month ?? companyToday().slice(0, 7);
+    const { start, end } = monthBounds(period);
+    const [days, recorded, summary, assignment] = await Promise.all([
+      calendarFor(id, start, end, { includePending: true }),
+      historyFor(id, start, end),
+      summaryFor(id, start, end),
+      assignmentFor(id),
+    ]);
+
+    const byDate = new Map(recorded.map((day) => [day.workDate, day]));
+    const shift = assignment.shift;
+
+    response.json({
+      success: true,
+      month: period,
+      shift: shift
+        ? { name: shift.name, startsAt: shift.startsAt, endsAt: shift.endsAt, breakMinutes: shift.breakMinutes }
+        : null,
+      summary,
+      days: days.map((day) => ({ ...day, record: byDate.get(day.date) ?? null })),
+    });
   }),
 );
 

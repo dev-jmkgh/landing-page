@@ -1048,6 +1048,59 @@ export async function run(ctx: E2EContext): Promise<void> {
   const ghostCalendar = await admin.get('/admin/hr/employees/99999999/calendar');
   check('an unknown employee’s calendar is a 404', ghostCalendar.status === 404, ghostCalendar.status);
 
+  /* The attendance view's month: the calendar, with each day's record and punches beside it. */
+  const monthView = await admin.get(`/admin/hr/employees/${priyaId}/attendance-month?month=${month}`);
+  const viewDays = (monthView.json.days as Json[] | undefined) ?? [];
+  const viewD3 = viewDays.find((day) => day.date === d3);
+  check(
+    'the attendance view covers every date of the month, classified like the calendar',
+    monthView.status === 200 &&
+      monthView.json.month === month &&
+      viewDays.length === monthDays &&
+      viewDays.every((day, index) => day.status === (calendar.json.days as Json[])[index]?.status),
+    { status: monthView.status, length: viewDays.length },
+  );
+  check(
+    'with the corrected day’s record and its session beside it',
+    viewD3?.record?.workDate === d3 &&
+      Array.isArray(viewD3?.record?.sessions) &&
+      (viewD3.record.sessions as Json[]).length === 1 &&
+      viewD3.record.sessions[0].source === 'admin',
+    viewD3,
+  );
+  check(
+    'and no record on a date nothing was punched',
+    viewDays.every((day) => day.record === null || day.record.workDate === day.date) &&
+      viewDays.some((day) => day.record === null),
+    viewDays.filter((day) => day.record !== null).map((day) => day.date),
+  );
+  // Against the records in the same response, so the check holds whatever date it runs on.
+  const records = viewDays.map((day) => day.record).filter(Boolean) as Json[];
+  const closedSessions = records.reduce(
+    (sum, record) => sum + (record.sessions as Json[]).filter((session) => session.endedAt !== null).length,
+    0,
+  );
+  const attended = records.filter((record) => ['present', 'late', 'half_day'].includes(String(record.status))).length;
+  check(
+    'the month’s totals agree with the records',
+    records.length >= 1 &&
+      Number(monthView.json.summary?.totalSessions) === closedSessions &&
+      Number(monthView.json.summary?.daysPresent) === attended,
+    { summary: monthView.json.summary, closedSessions, attended },
+  );
+  check(
+    'and name the shift they are on, for the timeline',
+    monthView.json.shift === null ||
+      (typeof monthView.json.shift?.startsAt === 'string' && typeof monthView.json.shift?.name === 'string'),
+    monthView.json.shift,
+  );
+  const badViewMonth = await admin.get(`/admin/hr/employees/${priyaId}/attendance-month?month=2026-13`);
+  check('the attendance view refuses an impossible month', badViewMonth.status === 422, badViewMonth.status);
+  const ghostView = await admin.get('/admin/hr/employees/99999999/attendance-month');
+  check('and an unknown employee is a 404', ghostView.status === 404, ghostView.status);
+  const raviView = await ravi.get(`/admin/hr/employees/${priyaId}/attendance-month`);
+  check('a telecaller cannot read the attendance view', raviView.status === 403, raviView.status);
+
   /* ------------------------------------------------------------ exceptions */
 
   const flaggedQueue = await admin.get(`/admin/hr/attendance/exceptions?type=flagged&reviewed=false&userId=${arunId}`);
@@ -1132,6 +1185,7 @@ export async function run(ctx: E2EContext): Promise<void> {
     ['PATCH', `/admin/hr/employees/${priyaId}`, { role: 'hr_admin' }],
     ['GET', `/admin/hr/employees/${priyaId}/attendance`],
     ['GET', `/admin/hr/employees/${priyaId}/calendar`],
+    ['GET', `/admin/hr/employees/${priyaId}/attendance-month`],
     ['GET', '/admin/hr/settings'],
     ['PATCH', '/admin/hr/settings', { defaultWeeklyOff: [] }],
     ['GET', `/admin/hr/attendance?status=absent&departmentId=${deptAId}`],

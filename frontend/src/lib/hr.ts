@@ -535,6 +535,30 @@ export type CalendarDay = {
   status: CalendarDayStatus;
 };
 
+/** A month's totals over the days that have a record. */
+export type AttendanceSummary = {
+  /** Days attended: present, late and half days together. */
+  daysPresent: number;
+  daysLate: number;
+  daysHalf: number;
+  totalWorkedMinutes: number;
+  /** Over the days that produced hours, so a day still running does not drag it down. */
+  averageWorkedMinutes: number;
+  totalSessions: number;
+};
+
+/** A calendar day with its recorded day — punches included — beside it. */
+export type AttendanceMonthDay = CalendarDay & { record: AttendanceDay | null };
+
+/** One employee's month, as the attendance view shows it. */
+export type AttendanceMonth = {
+  month: string;
+  /** The shift they are on NOW. A recorded day's own `shiftStartsAt` snapshot wins. */
+  shift: { name: string; startsAt: string; endsAt: string; breakMinutes: number } | null;
+  summary: AttendanceSummary;
+  days: AttendanceMonthDay[];
+};
+
 /** One session of an exception day, with the evidence a reviewer needs. */
 export type ExceptionSession = {
   id: number;
@@ -756,6 +780,15 @@ export const peopleApi = {
       `${BASE}/employees/${id}/calendar${qs({ month })}`,
       { signal },
     ),
+
+  /**
+   * The same month for the attendance view: each date with its recorded day and punches
+   * beside it, the month's totals, and the current shift. Also bounded at 31 days.
+   */
+  employeeAttendanceMonth: (id: number, month: string | undefined, signal?: AbortSignal) =>
+    adminRequest<AttendanceMonth>(`${BASE}/employees/${id}/attendance-month${qs({ month })}`, {
+      signal,
+    }),
 
   /** That employee's balances for a year — every active leave type, read-only here. */
   leaveBalances: (userId: number, year: number, signal?: AbortSignal) =>

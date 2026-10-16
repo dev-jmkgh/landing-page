@@ -9,6 +9,7 @@
    by a marketing page rule of equal specificity. */
 @import './telecalling.css';
 @import './hr-admin-people.css';
+@import './hr-admin-attendance.css';
 @import './hr-admin-leave.css';
 @import './hr-admin-payroll.css';
 @import './hr-admin-reports.css';
