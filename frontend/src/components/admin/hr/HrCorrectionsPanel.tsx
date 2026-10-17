@@ -15,6 +15,7 @@ import {
   type Regularisation,
 } from '@/lib/hr';
 import { EmptyPanel, Pager, Tag, TableSkeleton } from '../telecalling/shared';
+import { ConfirmDialog } from './payroll/shared';
 import { isAbort } from './people/shared';
 
 /**
@@ -65,6 +66,14 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  /*
+   * The request being decided, in a dialog on the page. Not the browser's confirm() and
+   * prompt(): a browser told to stop showing a page's dialogs (or an embedded view) makes
+   * them return "cancel" silently, and Approve and Reject then appeared to do nothing.
+   */
+  const [deciding, setDeciding] = useState<{ item: Regularisation; action: 'approve' | 'reject' } | null>(null);
+  const [note, setNote] = useState('');
+  const [dialogError, setDialogError] = useState<string | null>(null);
 
   const abort = useRef<AbortController | null>(null);
 
@@ -117,69 +126,56 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  const decide = async (
-    item: Regularisation,
-    action: () => Promise<Regularisation>,
-    success: string,
-  ) => {
-    setBusyId(item.id);
-    setError(null);
+  const approve = (item: Regularisation) => {
     setNotice(null);
+    setDialogError(null);
+    setDeciding({ item, action: 'approve' });
+  };
 
+  const reject = (item: Regularisation) => {
+    setNotice(null);
+    setDialogError(null);
+    setNote('');
+    setDeciding({ item, action: 'reject' });
+  };
+
+  /** Runs the decision in the open dialog; it stays open, with the reason, if it fails. */
+  const confirmDecision = async () => {
+    if (!deciding) return;
+    const { item, action } = deciding;
+    const trimmed = note.trim();
+    if (action === 'reject' && trimmed.length > 500) {
+      setDialogError('Keep the reason under 500 characters.');
+      return;
+    }
+
+    setBusyId(item.id);
+    setDialogError(null);
+    setError(null);
     try {
-      await action();
-      setNotice(success);
+      if (action === 'approve') await attendanceAdminApi.approveRegularisation(item.id, null);
+      else await attendanceAdminApi.rejectRegularisation(item.id, trimmed || null);
+      setDeciding(null);
+      setNotice(
+        action === 'approve'
+          ? `${item.employeeName}'s attendance for ${formatDate(item.workDate)} has been corrected.`
+          : `${item.employeeName}'s correction was rejected.`,
+      );
       await load();
       await refreshCount();
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) return onUnauthorized();
       if (caught instanceof ApiError && caught.status === 403) {
-        setError('Only an administrator can decide corrections.');
+        setDialogError('Only an administrator can decide corrections.');
         return;
       }
-      setError(caught instanceof ApiError ? caught.message : 'Could not update that request.');
+      setDialogError(caught instanceof ApiError ? caught.message : 'Could not update that request.');
       // "Already decided" means somebody else got there first — show what they did.
       await load();
       await refreshCount();
     } finally {
       setBusyId(null);
     }
-  };
-
-  const approve = async (item: Regularisation) => {
-    const confirmed = window.confirm(
-      `Approve ${item.employeeName}'s correction for ${formatDate(item.workDate)}?\n\n` +
-        `In: ${timeOf(item.requestedCheckInAt)}   Out: ${timeOf(item.requestedCheckOutAt)}\n\n` +
-        'This writes the attendance for that day.',
-    );
-    if (!confirmed) return;
-
-    await decide(
-      item,
-      () => attendanceAdminApi.approveRegularisation(item.id, null),
-      `${item.employeeName}'s attendance for ${formatDate(item.workDate)} has been corrected.`,
-    );
-  };
-
-  const reject = async (item: Regularisation) => {
-    const note = window.prompt(
-      `Reject ${item.employeeName}'s correction for ${formatDate(item.workDate)}?\n\n` +
-        'Give a reason — it is shown to them in the app, and it is the only message they get.\n\n' +
-        'Leave blank to reject without one.',
-    );
-    if (note === null) return;
-
-    const trimmed = note.trim();
-    if (trimmed.length > 500) {
-      setError('Keep the reason under 500 characters.');
-      return;
-    }
-
-    await decide(
-      item,
-      () => attendanceAdminApi.rejectRegularisation(item.id, trimmed || null),
-      `${item.employeeName}'s correction was rejected.`,
-    );
   };
 
   const items = data?.items ?? [];
@@ -289,7 +285,7 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
                           type="button"
                           className="btn btn--primary btn--sm"
                           disabled={busyId === row.id}
-                          onClick={() => void approve(row)}
+                          onClick={() => approve(row)}
                         >
                           <Icon name="check" size={15} />
                           Approve
@@ -298,7 +294,7 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
                           type="button"
                           className="btn btn--ghost btn--sm"
                           disabled={busyId === row.id}
-                          onClick={() => void reject(row)}
+                          onClick={() => reject(row)}
                         >
                           Reject
                         </button>
@@ -334,6 +330,47 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
           busy={loading}
           onChange={setPage}
         />
+      ) : null}
+
+      {deciding ? (
+        <ConfirmDialog
+          title={
+            deciding.action === 'approve'
+              ? `Approve ${deciding.item.employeeName}'s correction?`
+              : `Reject ${deciding.item.employeeName}'s correction?`
+          }
+          confirmLabel={deciding.action === 'approve' ? 'Approve' : 'Reject'}
+          busyLabel={deciding.action === 'approve' ? 'Approving…' : 'Rejecting…'}
+          danger={deciding.action === 'reject'}
+          busy={busyId === deciding.item.id}
+          error={dialogError}
+          onConfirm={() => void confirmDecision()}
+          onCancel={() => setDeciding(null)}
+        >
+          <p>
+            {formatDate(deciding.item.workDate)} · In {timeOf(deciding.item.requestedCheckInAt)} · Out{' '}
+            {timeOf(deciding.item.requestedCheckOutAt)}
+          </p>
+          {deciding.item.reason ? <p className="tc-muted">“{deciding.item.reason}”</p> : null}
+          {deciding.action === 'approve' ? (
+            <p>This writes the attendance for that day.</p>
+          ) : (
+            <div className="field" style={{ marginTop: 'var(--space-3)' }}>
+              <label className="field__label" htmlFor="hr-corr-reject-note">
+                Reason (optional)
+              </label>
+              <textarea
+                id="hr-corr-reject-note"
+                className="input"
+                rows={3}
+                maxLength={500}
+                value={note}
+                placeholder="Shown to them in the app — it is the only message they get."
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </div>
+          )}
+        </ConfirmDialog>
       ) : null}
     </>
   );

@@ -310,6 +310,19 @@ export function EmployeeDetail({
       >
         {tab === 'profile' ? (
           <LoadingOverlay busy={loading}>
+            {/*
+              An HR manager approves for their direct reports only. With none, their approval
+              queues in the app are always empty — which reads as approvals not working.
+            */}
+            {employee.role === 'hr_manager' && directReports === 0 ? (
+              <div style={{ marginBottom: 'var(--space-4)' }}>
+                <FormAlert variant="info">
+                  Nobody reports to {employee.name} yet, so they have no leave or corrections to approve in
+                  the HR app. Set “Reports to” to {employee.name} on each team member, or change their
+                  access level to HR administrator to approve for everyone.
+                </FormAlert>
+              </div>
+            ) : null}
             <div className="hrp-facts-grid">
               <Facts title="Work">
                 <Fact label="Department">{show(employee.departmentName)}</Fact>

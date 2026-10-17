@@ -31,7 +31,10 @@ export function AdminLogin({ onSuccess }: { onSuccess: (email: string) => void }
     } catch (error) {
       setFormError(
         error instanceof ApiError && error.status === 401
-          ? 'Incorrect email or password.'
+          ? // An HR app account's own credentials: the server says where they work.
+            error.code === 'hr_app_account'
+            ? error.message
+            : 'Incorrect email or password.'
           : error instanceof ApiError
             ? error.message
             : 'Sign in failed. Please try again.',

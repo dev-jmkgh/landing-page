@@ -6,7 +6,7 @@ import { asyncHandler } from '../../middleware/errorHandler';
 import { loginLimiter } from '../../middleware/rateLimit';
 import { createDownloadUrl, openResume, supportsPresignedUpload } from '../../services/storage';
 import { validateBody, validateQuery } from '../../middleware/validate';
-import { notFound, unauthorized } from '../../utils/httpError';
+import { HttpError, notFound, unauthorized } from '../../utils/httpError';
 import { logger } from '../../utils/logger';
 import { clientIp } from '../../utils/request';
 import {
@@ -17,6 +17,7 @@ import {
 import { listEnquiries, updateEnquiryStatus } from '../enquiries/enquiry.repository';
 import { listQuerySchema, statusUpdateSchema, type ListQuery } from '../enquiries/enquiry.schema';
 import { applicationStatusUpdateSchema } from '../applications/application.schema';
+import { hrCredentialsMatch } from '../hr/hrAuth.service';
 import {
   authenticate,
   clearSessionCookies,
@@ -45,6 +46,20 @@ adminRouter.post(
     const identity = await authenticate(email, password);
 
     if (!identity) {
+      /*
+       * An HR app account's own email and password, typed here: say where it works. HR
+       * managers and employees sign in to the HR app; this website is for administrators.
+       * Only when the password is right for that account (see `hrCredentialsMatch`), so a
+       * guesser learns nothing they could not learn by signing in to the app.
+       */
+      if (await hrCredentialsMatch(email, password)) {
+        logger.info('HR app account used on the admin sign-in', { ip: clientIp(request) });
+        throw new HttpError(
+          401,
+          'This is an HR app account. Sign in on the JMK HR app on your phone; this website is for administrators.',
+          { code: 'hr_app_account' },
+        );
+      }
       logger.warn('Failed admin sign-in attempt', { ip: clientIp(request) });
       // Same message whichever factor was wrong — no account enumeration.
       throw unauthorized('Incorrect email or password.');

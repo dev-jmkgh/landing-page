@@ -1402,7 +1402,9 @@ hrAttendanceAdminRouter.get(
 );
 
 const decisionSchema = z.object({
-  note: z.string().trim().max(500).optional().transform((v) => (v && v.length > 0 ? v : null)),
+  // `null` too: the admin website sends `{ note: null }` for "no note", and refusing it as
+  // invalid made every Approve (and every Reject without a reason) fail.
+  note: z.string().trim().max(500).nullish().transform((v) => (v && v.length > 0 ? v : null)),
 });
 
 hrAttendanceAdminRouter.post(

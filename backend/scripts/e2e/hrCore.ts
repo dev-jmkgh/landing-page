@@ -141,6 +141,17 @@ export async function run(ctx: E2EContext): Promise<void> {
     regPage.json,
   );
 
+  /*
+   * The admin website sends `{ note: null }` for "no note" — on Approve always, on Reject
+   * when no reason was typed. Refused as invalid (422), neither button ever worked.
+   */
+  for (const action of ['approve', 'reject'] as const) {
+    const noNote = await adminAsBearer.post(`/admin/hr/regularisations/99999999/${action}`, { note: null });
+    check(`core: ${action} accepts the website's "no note" (null)`, noNote.status === 404, noNote.json);
+  }
+  const noReason = await adminAsBearer.post('/admin/hr/registrations/99999999/reject', { reason: null });
+  check('core: rejecting a registration accepts "no reason" (null)', noReason.status === 404, noReason.json);
+
   const decided = await adminAsBearer.post(
     `/admin/hr/regularisations/${Number(correction.json.request?.id)}/approve`,
     { note: 'Confirmed' },

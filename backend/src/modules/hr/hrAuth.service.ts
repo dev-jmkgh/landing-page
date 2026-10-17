@@ -120,6 +120,27 @@ export type HrSignInResult =
  * person can clear themselves — telling them to wait for an administrator when the
  * thing blocking them is a code in their own inbox sends them to wait for nothing.
  */
+/**
+ * Whether this email and password are an HR app account's own.
+ *
+ * For the ADMIN WEBSITE's sign-in only: somebody given an HR app account (an HR manager,
+ * say) who types it into the admin website should be told where it works, not "incorrect
+ * email or password" — that sent one hunting for a password that was right. It reveals
+ * nothing to a guesser: it is true only when the password is correct for that account.
+ */
+export async function hrCredentialsMatch(emailInput: string, password: string): Promise<boolean> {
+  const row = await queryOne<HrAuthRow>(
+    `SELECT id, name, email, password_hash, role, is_active, approval_status,
+            rejection_reason, email_verified_at
+       FROM hr_users
+      WHERE email = ?
+      LIMIT 1`,
+    [emailInput.trim().toLowerCase()],
+  );
+  if (!row) return false;
+  return bcrypt.compare(password, row.password_hash).catch(() => false);
+}
+
 export async function authenticateHrUser(
   emailInput: string,
   password: string,

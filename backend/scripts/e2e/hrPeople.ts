@@ -346,6 +346,28 @@ export async function run(ctx: E2EContext): Promise<void> {
   const arunId = Number(arunRes.json.employee?.id);
   check('codes keep counting up', arunRes.json.employee?.employeeCode === codeAt(2), arunRes.json.employee?.employeeCode);
 
+  /*
+   * The admin website is for administrators. An HR app account's own credentials typed there
+   * get told where they work — only when the password is right, so a guesser learns nothing.
+   */
+  const wrongDoor = await makeClient(base).post('/admin/auth/login', { email: 'ppl.hr.arun@example.test', password: PASSWORD });
+  check(
+    'an HR app account signing in on the admin website is told to use the HR app',
+    wrongDoor.status === 401 && wrongDoor.json.code === 'hr_app_account' && /HR app/.test(String(wrongDoor.json.message)),
+    wrongDoor.json,
+  );
+  const wrongDoorBadPassword = await makeClient(base).post('/admin/auth/login', {
+    email: 'ppl.hr.arun@example.test',
+    password: `${PASSWORD}-not-it`,
+  });
+  check(
+    'but with the wrong password it is the usual message, naming nothing',
+    wrongDoorBadPassword.status === 401 &&
+      wrongDoorBadPassword.json.code !== 'hr_app_account' &&
+      wrongDoorBadPassword.json.message === 'Incorrect email or password.',
+    wrongDoorBadPassword.json,
+  );
+
   const arunSession = await signIn('ppl.hr.arun@example.test');
   must('the second employee signs in', arunSession.login.status === 200, arunSession.login.json);
   const arunClient = arunSession.client;

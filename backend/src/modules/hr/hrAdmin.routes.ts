@@ -175,7 +175,8 @@ const rejectSchema = z.object({
     .string()
     .trim()
     .max(500, 'Keep the reason to 500 characters or fewer.')
-    .optional()
+    // `null` too: the admin website sends `{ reason: null }` when no reason was typed.
+    .nullish()
     .transform((value) => (value && value.length > 0 ? value : null)),
 });
 
