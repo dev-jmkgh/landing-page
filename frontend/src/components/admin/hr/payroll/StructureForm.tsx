@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { ButtonSpinner } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -88,6 +89,7 @@ export function StructureForm({
   onCreated: (structure: SalaryStructure) => void;
   onUnauthorized: () => void;
 }) {
+  const dialogs = useDialogs();
   const uid = useId();
   const id = (part: string) => `${uid}-${part}`;
 
@@ -302,9 +304,20 @@ export function StructureForm({
     }
   };
 
-  const cancel = () => {
+  const cancel = async () => {
     const dirty = rows.length > 0 || note.trim() !== '' || effectiveFrom !== '';
-    if (dirty && !window.confirm('Discard this new structure? Nothing you typed is saved.')) return;
+    if (
+      dirty &&
+      !(await dialogs.confirm({
+        title: 'Discard this new structure?',
+        message: 'Nothing you typed is saved.',
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep editing',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     onCancel();
   };
 
@@ -613,7 +626,7 @@ export function StructureForm({
           {saving ? <ButtonSpinner /> : <Icon name="check" size={16} />}
           {saving ? 'Saving…' : 'Save structure'}
         </button>
-        <button type="button" className="btn btn--ghost" disabled={saving} onClick={cancel}>
+        <button type="button" className="btn btn--ghost" disabled={saving} onClick={() => void cancel()}>
           Cancel
         </button>
       </div>

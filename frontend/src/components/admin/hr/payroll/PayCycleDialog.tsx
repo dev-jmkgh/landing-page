@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
+import { useRestoreFocus, useStableClose } from '@/components/admin/ConfirmDialog';
 import { ButtonSpinner } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Dialog } from '@/components/ui/Dialog';
@@ -8,7 +9,6 @@ import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
 import { CYCLE_START_DAYS, cycleExample, describeCycle, ordinal, payrollApi } from '@/lib/hrPayroll';
 import { todayIso } from '@/lib/telecalling';
-import { useRestoreFocus, useStableClose } from './shared';
 
 /**
  * Sets the pay cycle: the day of the month every pay period starts on (1 to 28).

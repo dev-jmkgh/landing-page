@@ -1360,6 +1360,15 @@
   font-size: var(--text-xl);
 }
 
+/* The shared admin popup (components/admin/ConfirmDialog.tsx): paragraphs sit closer. */
+.tc-confirm-dialog__text > .dialog__text {
+  margin-top: var(--space-3);
+}
+
+.tc-confirm-dialog__field {
+  margin-top: var(--space-4);
+}
+
 .tc-confirm-dialog__actions {
   display: flex;
   flex-wrap: wrap;

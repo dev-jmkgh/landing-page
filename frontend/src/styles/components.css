@@ -71,6 +71,18 @@
   background-color: var(--navy-050);
 }
 
+/* The confirm button of something that cannot be taken back: remove, switch off, reject. */
+.btn.btn--danger {
+  background-color: var(--danger-600);
+  color: var(--color-on-dark);
+}
+
+.btn.btn--danger:hover:not(:disabled) {
+  background-color: var(--danger-600);
+  box-shadow: var(--shadow-md);
+  filter: brightness(0.92);
+}
+
 .btn--ghost-light {
   border-color: rgba(255, 255, 255, 0.32);
   color: #fff;

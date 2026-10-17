@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
 import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
@@ -20,6 +21,7 @@ import { YearSwitcher, isAbort, readFailure, writeFailure } from './shared';
  */
 
 export function HolidaysTab({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const dialogs = useDialogs();
   const today = todayIso();
   const [year, setYear] = useState(() => Number(today.slice(0, 4)));
   const [items, setItems] = useState<Holiday[] | null>(null);
@@ -73,10 +75,13 @@ export function HolidaysTab({ onUnauthorized }: { onUnauthorized: () => void }) 
   );
 
   const remove = async (holiday: Holiday) => {
-    const confirmed = window.confirm(
-      `Remove ${holiday.name} (${formatCalendarDay(holiday.date)}) from the holiday calendar?\n\n` +
+    const confirmed = await dialogs.confirm({
+      title: `Remove ${holiday.name} (${formatCalendarDay(holiday.date)}) from the holiday calendar?`,
+      message:
         'That date becomes a normal working day for attendance and payroll. Leave requests already raised across it keep their day count.',
-    );
+      confirmLabel: 'Remove',
+      danger: true,
+    });
     if (!confirmed) return;
 
     setBusyId(holiday.id);

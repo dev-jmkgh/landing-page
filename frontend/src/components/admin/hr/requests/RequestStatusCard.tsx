@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useRef, useState } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { ButtonSpinner } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -48,6 +49,7 @@ export function RequestStatusCard({
   onChanged: (message: string) => void;
   onUnauthorized: () => void;
 }) {
+  const dialogs = useDialogs();
   const uid = useId();
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<Action | null>(null);
@@ -75,10 +77,14 @@ export function RequestStatusCard({
     // Final, like resolving: the request closes and nothing more can be written on it.
     if (
       status === 'rejected' &&
-      !window.confirm(
-        `Reject “${request.subject}”?\n\n${request.employeeName} is notified with your note, and the request is closed.` +
+      !(await dialogs.confirm({
+        title: `Reject “${request.subject}”?`,
+        message:
+          `${request.employeeName} is notified with your note, and the request is closed.` +
           (request.category === 'profile_update' ? ' Their record is not changed.' : ''),
-      )
+        confirmLabel: 'Reject',
+        danger: true,
+      }))
     ) {
       return;
     }

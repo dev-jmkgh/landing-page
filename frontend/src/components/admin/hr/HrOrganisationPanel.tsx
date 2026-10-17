@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
 import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
@@ -30,6 +31,7 @@ type Editing =
   | { kind: 'designation'; entry: Designation | null };
 
 export function HrOrganisationPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const dialogs = useDialogs();
   const [departments, setDepartments] = useState<Department[] | null>(null);
   const [designations, setDesignations] = useState<Designation[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,10 +80,15 @@ export function HrOrganisationPanel({ onUnauthorized }: { onUnauthorized: () => 
       const people =
         entry.employeeCount === 0
           ? 'Nobody is in it.'
-          : `The ${entry.employeeCount} active ${entry.employeeCount === 1 ? 'employee' : 'employees'} in it stay in it.`;
-      const confirmed = window.confirm(
-        `Switch off ${entry.name}? ${people} Nobody new can be put into this ${noun} until it is switched back on.`,
-      );
+          : entry.employeeCount === 1
+            ? 'The 1 active employee in it stays in it.'
+            : `The ${entry.employeeCount} active employees in it stay in it.`;
+      const confirmed = await dialogs.confirm({
+        title: `Switch off ${entry.name}?`,
+        message: `${people} Nobody new can be put into this ${noun} until it is switched back on.`,
+        confirmLabel: 'Switch off',
+        danger: true,
+      });
       if (!confirmed) return;
     }
 

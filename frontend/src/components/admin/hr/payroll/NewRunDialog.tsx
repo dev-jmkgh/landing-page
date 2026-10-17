@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
+import { useRestoreFocus, useStableClose } from '@/components/admin/ConfirmDialog';
 import { ButtonSpinner } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Dialog } from '@/components/ui/Dialog';
@@ -18,7 +19,6 @@ import {
   type PayrollRun,
 } from '@/lib/hrPayroll';
 import { todayIso } from '@/lib/telecalling';
-import { useRestoreFocus, useStableClose } from './shared';
 
 /**
  * Opens a pay period for one month (a draft — no figures until it is calculated).

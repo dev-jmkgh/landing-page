@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { ButtonSpinner, LoadingOverlay } from '@/components/admin/Loader';
 import { Tag } from '@/components/admin/telecalling/shared';
 import { FormAlert } from '@/components/forms/Fields';
@@ -92,6 +93,7 @@ export function EmployeeDetail({
   onChanged: () => void;
   onUnauthorized: () => void;
 }) {
+  const dialogs = useDialogs();
   const [employee, setEmployee] = useState<HrEmployee>(initial);
   const [directReports, setDirectReports] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -155,9 +157,13 @@ export function EmployeeDetail({
 
   const setActive = async (active: boolean) => {
     if (!active) {
-      const confirmed = window.confirm(
-        `Switch off ${employee.name}'s HR access? They are signed out of the HR app on every device straight away.\n\nThis does NOT affect any telecalling account they hold — that is a separate login.`,
-      );
+      const confirmed = await dialogs.confirm({
+        title: `Switch off ${employee.name}'s HR access?`,
+        message:
+          'They are signed out of the HR app on every device straight away.\n\nThis does NOT affect any telecalling account they hold — that is a separate login.',
+        confirmLabel: 'Switch off',
+        danger: true,
+      });
       if (!confirmed) return;
     }
 

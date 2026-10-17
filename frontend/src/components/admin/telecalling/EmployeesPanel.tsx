@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
 import { ButtonSpinner, LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
@@ -135,6 +136,7 @@ function waitingFor(registeredAt: string | null): string | null {
 }
 
 export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const dialogs = useDialogs();
   const nav = useTelecallingNav();
   const { replaceParams, leadId: openLeadId } = nav;
 
@@ -363,24 +365,29 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
     let companyPhone: string | undefined;
 
     if (employee.companyPhone === null) {
-      const answer = window.prompt(
-        `Approve ${employee.name} (${employee.email})? They will be able to sign in to the mobile app immediately and see the leads assigned to them.\n\nFirst enter their company SIM number. Check it against the SIM cards the company issued.`,
-        '',
-      );
+      const answer = await dialogs.prompt({
+        title: `Approve ${employee.name}?`,
+        message: `${employee.email} will be able to sign in to the mobile app immediately and see the leads assigned to them.\n\nFirst enter their company SIM number. Check it against the SIM cards the company issued.`,
+        label: 'Company SIM number',
+        type: 'tel',
+        placeholder: '98765 43210',
+        confirmLabel: 'Approve',
+        validate: (value) =>
+          companyPhoneKey(value) === null
+            ? `Enter a 10-digit mobile number for ${employee.name}'s company SIM.`
+            : null,
+      });
       if (answer === null) return;
 
       const key = companyPhoneKey(answer);
-      if (key === null) {
-        setError(
-          `Enter a 10-digit mobile number for ${employee.name}'s company SIM, then approve again.`,
-        );
-        return;
-      }
+      if (key === null) return;
       companyPhone = `+91${key}`;
     } else {
-      const confirmed = window.confirm(
-        `Approve ${employee.name} (${employee.email}) with the company SIM ${formatCompanyPhone(employee.companyPhone)}? Check the number against the SIM cards the company issued.\n\nThey will be able to sign in to the mobile app immediately and see the leads assigned to them.`,
-      );
+      const confirmed = await dialogs.confirm({
+        title: `Approve ${employee.name}?`,
+        message: `${employee.email}, with the company SIM ${formatCompanyPhone(employee.companyPhone)}. Check the number against the SIM cards the company issued.\n\nThey will be able to sign in to the mobile app immediately and see the leads assigned to them.`,
+        confirmLabel: 'Approve',
+      });
       if (!confirmed) return;
     }
 
@@ -392,20 +399,23 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
   };
 
   const reject = async (employee: Employee) => {
-    const reason = window.prompt(
-      `Reject ${employee.name}'s registration? Give a reason — it is shown to them the next time they try to sign in, and it is the only message they will get.\n\nLeave blank to reject without one.`,
-    );
+    const reason = await dialogs.prompt({
+      title: `Reject ${employee.name}'s registration?`,
+      message:
+        'The reason is shown to them the next time they try to sign in, and it is the only message they will get.',
+      label: 'Reason (optional)',
+      hint: 'Leave it blank to reject without one.',
+      multiline: true,
+      // The server's limit, so a long reason is not lost to a 422.
+      maxLength: 255,
+      confirmLabel: 'Reject',
+      danger: true,
+    });
 
     // Cancelled, as opposed to submitted empty, which is a valid "no reason given".
     if (reason === null) return;
 
     const trimmed = reason.trim();
-
-    // The server's limit, checked here so a long reason is not lost to a 422.
-    if (trimmed.length > 255) {
-      setError('Keep the reason under 255 characters.');
-      return;
-    }
 
     await decide(
       employee,
@@ -540,16 +550,16 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
   };
 
   const resetPassword = async (employee: Employee) => {
-    const password = window.prompt(
-      `Set a new password for ${employee.name}. At least 12 characters. Every device they are signed in on will be signed out.`,
-    );
+    const password = await dialogs.prompt({
+      title: `Set a new password for ${employee.name}`,
+      message: 'Every device they are signed in on will be signed out. Give them the new password directly.',
+      label: 'New password',
+      hint: 'At least 12 characters.',
+      confirmLabel: 'Reset password',
+      validate: (value) => (value.length < 12 ? 'The password must be at least 12 characters.' : null),
+    });
 
     if (password === null) return;
-
-    if (password.length < 12) {
-      setError('The password must be at least 12 characters.');
-      return;
-    }
 
     setBusyId(employee.id);
     setError(null);
@@ -577,10 +587,20 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
    */
   const editCompanyNumber = async (employee: Employee) => {
     const current = employee.companyPhone ? formatCompanyPhone(employee.companyPhone) : '';
-    const answer = window.prompt(
-      `${employee.name}'s company SIM number — the SIM card the company issued them. Incoming calls are recorded only when they reach this number.\n\nChanging it asks them to choose their company SIM again in the app. Leave it blank to remove the number.`,
-      current,
-    );
+    const answer = await dialogs.prompt({
+      title: `${employee.name}'s company SIM number`,
+      message:
+        'The SIM card the company issued them. Incoming calls are recorded only when they reach this number.\n\nChanging it asks them to choose their company SIM again in the app.',
+      label: 'Company SIM number',
+      type: 'tel',
+      initialValue: current,
+      hint: 'Leave it blank to remove the number.',
+      confirmLabel: 'Save',
+      validate: (value) =>
+        value.trim() !== '' && companyPhoneKey(value) === null
+          ? `Enter a 10-digit mobile number for ${employee.name}'s company SIM.`
+          : null,
+    });
 
     if (answer === null) return;
 
@@ -590,21 +610,20 @@ export function EmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void 
     if (trimmed === '') {
       if (employee.companyPhone === null) return;
 
-      const confirmed = window.confirm(
-        `Remove ${employee.name}'s company number?${
+      const confirmed = await dialogs.confirm({
+        title: `Remove ${employee.name}'s company number?`,
+        message:
           employee.role === 'telecaller'
-            ? ' Their incoming calls will not be recorded until a number is added again.'
-            : ''
-        }`,
-      );
+            ? 'Their incoming calls will not be recorded until a number is added again.'
+            : undefined,
+        confirmLabel: 'Remove',
+        danger: true,
+      });
       if (!confirmed) return;
       companyPhone = null;
     } else {
       const key = companyPhoneKey(trimmed);
-      if (key === null) {
-        setError(`Enter a 10-digit mobile number for ${employee.name}'s company SIM.`);
-        return;
-      }
+      if (key === null) return;
       companyPhone = `+91${key}`;
       if (companyPhone === employee.companyPhone) return;
     }

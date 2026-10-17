@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useState } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { ButtonSpinner } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -23,6 +24,7 @@ const BODY_MAX = 500;
 type FieldKey = 'title' | 'body' | 'departmentId';
 
 export function AnnouncementCard({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const dialogs = useDialogs();
   const uid = useId();
   const id = (name: string) => `${uid}-${name}`;
 
@@ -71,9 +73,11 @@ export function AnnouncementCard({ onUnauthorized }: { onUnauthorized: () => voi
 
     const audience = department ? `everyone in ${department.name}` : 'every current employee';
     if (
-      !window.confirm(
-        `Send “${cleanTitle}” to ${audience}?\n\nIt appears in their HR app inbox straight away and cannot be recalled.`,
-      )
+      !(await dialogs.confirm({
+        title: `Send “${cleanTitle}” to ${audience}?`,
+        message: 'It appears in their HR app inbox straight away and cannot be recalled.',
+        confirmLabel: 'Send',
+      }))
     ) {
       return;
     }

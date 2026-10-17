@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
 import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
@@ -268,6 +269,7 @@ function RegistrationQueue({
   onDecided: () => void;
   onUnauthorized: () => void;
 }) {
+  const dialogs = useDialogs();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -380,9 +382,11 @@ function RegistrationQueue({
       return;
     }
 
-    const confirmed = window.confirm(
-      `Approve ${employee.name} (${employee.email})? They will be able to sign in to the HR app immediately.`,
-    );
+    const confirmed = await dialogs.confirm({
+      title: `Approve ${employee.name}?`,
+      message: `${employee.email} will be able to sign in to the HR app immediately.`,
+      confirmLabel: 'Approve',
+    });
     if (!confirmed) return;
 
     await act(
@@ -393,20 +397,23 @@ function RegistrationQueue({
   };
 
   const reject = async (employee: HrEmployee) => {
-    const reason = window.prompt(
-      `Reject ${employee.name}'s registration? Give a reason — it is shown to them the next time they try to sign in, and it is the only message they will get.\n\nLeave blank to reject without one.`,
-    );
+    const reason = await dialogs.prompt({
+      title: `Reject ${employee.name}'s registration?`,
+      message:
+        'The reason is shown to them the next time they try to sign in, and it is the only message they will get.',
+      label: 'Reason (optional)',
+      hint: 'Leave it blank to reject without one.',
+      multiline: true,
+      // The server's limit, so a long reason is not lost to a 422.
+      maxLength: 500,
+      confirmLabel: 'Reject',
+      danger: true,
+    });
 
     // Cancelled, as opposed to submitted empty, which is a valid "no reason given".
     if (reason === null) return;
 
     const trimmed = reason.trim();
-
-    // The server's limit, checked here so a long reason is not lost to a 422.
-    if (trimmed.length > 500) {
-      setError('Keep the reason under 500 characters.');
-      return;
-    }
 
     await act(
       employee,

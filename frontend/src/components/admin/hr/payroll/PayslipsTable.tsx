@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -14,7 +15,7 @@ import {
   type Payslip,
 } from '@/lib/hrPayroll';
 import { EmptyPanel, Pager, TableSkeleton, Tag } from '../../telecalling/shared';
-import { ConfirmDialog, isAbort, plural, readFailure } from './shared';
+import { isAbort, plural, readFailure } from './shared';
 
 /**
  * The payslips of one pay period: a paged, searchable table whose rows open to show the

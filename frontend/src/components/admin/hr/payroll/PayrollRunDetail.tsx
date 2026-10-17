@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { ButtonSpinner, LoaderBlock } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -21,7 +22,7 @@ import { StatCard, StatGrid } from '../../telecalling/shared';
 import { NotIncludedCard } from './NotIncludedCard';
 import { PayslipsTable } from './PayslipsTable';
 import type { StructuresTarget } from './SalaryStructuresTab';
-import { ConfirmDialog, RunStatusTag, isAbort, plural, readFailure } from './shared';
+import { RunStatusTag, isAbort, plural, readFailure } from './shared';
 
 /**
  * One pay period: where it is, the actions that move it along, who it left out, its

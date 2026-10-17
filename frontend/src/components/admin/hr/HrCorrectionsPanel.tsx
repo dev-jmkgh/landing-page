@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
 import { LoadingOverlay } from '@/components/admin/Loader';
-import { FormAlert } from '@/components/forms/Fields';
+import { FormAlert, TextAreaField } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/telecalling';
@@ -15,7 +16,6 @@ import {
   type Regularisation,
 } from '@/lib/hr';
 import { EmptyPanel, Pager, Tag, TableSkeleton } from '../telecalling/shared';
-import { ConfirmDialog } from './payroll/shared';
 import { isAbort } from './people/shared';
 
 /**
@@ -345,28 +345,27 @@ export function HrCorrectionsPanel({ onUnauthorized }: { onUnauthorized: () => v
           busy={busyId === deciding.item.id}
           error={dialogError}
           onConfirm={() => void confirmDecision()}
+          // A typed reason is not thrown away by a stray click beside the panel.
+          dismissOnBackdrop={deciding.action === 'approve'}
           onCancel={() => setDeciding(null)}
         >
-          <p>
+          <p className="dialog__text">
             {formatDate(deciding.item.workDate)} · In {timeOf(deciding.item.requestedCheckInAt)} · Out{' '}
             {timeOf(deciding.item.requestedCheckOutAt)}
           </p>
-          {deciding.item.reason ? <p className="tc-muted">“{deciding.item.reason}”</p> : null}
+          {deciding.item.reason ? <p className="dialog__text tc-muted">“{deciding.item.reason}”</p> : null}
           {deciding.action === 'approve' ? (
-            <p>This writes the attendance for that day.</p>
+            <p className="dialog__text">This writes the attendance for that day.</p>
           ) : (
-            <div className="field" style={{ marginTop: 'var(--space-3)' }}>
-              <label className="field__label" htmlFor="hr-corr-reject-note">
-                Reason (optional)
-              </label>
-              <textarea
-                id="hr-corr-reject-note"
-                className="input"
+            <div className="tc-confirm-dialog__field">
+              <TextAreaField
+                label="Reason (optional)"
+                name="reviewNote"
                 rows={3}
                 maxLength={500}
                 value={note}
-                placeholder="Shown to them in the app — it is the only message they get."
-                onChange={(event) => setNote(event.target.value)}
+                hint="Shown to them in the app. It is the only message they get."
+                onChange={setNote}
               />
             </div>
           )}

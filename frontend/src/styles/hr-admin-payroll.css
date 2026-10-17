@@ -273,10 +273,6 @@
   min-height: 0;
 }
 
-.hr-pay-confirm__text > .dialog__text {
-  margin-top: var(--space-3);
-}
-
 .hr-pay-fieldset {
   display: grid;
   gap: 0.4rem;

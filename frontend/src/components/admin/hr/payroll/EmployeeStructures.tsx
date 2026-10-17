@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -18,7 +19,7 @@ import {
 import { formatDateTime, todayIso } from '@/lib/telecalling';
 import { EmptyPanel, Pager, TableSkeleton, Tag } from '../../telecalling/shared';
 import { StructureForm } from './StructureForm';
-import { ConfirmDialog, isAbort, readFailure } from './shared';
+import { isAbort, readFailure } from './shared';
 
 /**
  * One employee's salary structures, newest first, and the form for a new one.

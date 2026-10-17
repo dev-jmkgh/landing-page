@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { ButtonSpinner } from '@/components/admin/Loader';
 import { FileField, FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
@@ -60,6 +61,7 @@ export function ShareDocumentForm({
   onCancel?: () => void;
   onUnauthorized: () => void;
 }) {
+  const dialogs = useDialogs();
   const uid = useId();
   const id = (name: string) => `${uid}-${name}`;
 
@@ -107,9 +109,11 @@ export function ShareDocumentForm({
     const companyWide = !request && audience === 'company';
     if (
       companyWide &&
-      !window.confirm(
-        `Share “${cleanTitle}” with every current employee?\n\nEach of them is notified in the HR app and can open it.`,
-      )
+      !(await dialogs.confirm({
+        title: `Share “${cleanTitle}” with every current employee?`,
+        message: 'Each of them is notified in the HR app and can open it.',
+        confirmLabel: 'Share',
+      }))
     ) {
       return;
     }

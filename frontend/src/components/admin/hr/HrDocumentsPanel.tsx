@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDialogs } from '@/components/admin/ConfirmDialog';
 import { CellActions, CellStack, DataTable } from '@/components/admin/DataTable';
 import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
@@ -44,6 +45,7 @@ const SCOPES: { key: HrDocumentScope; label: string }[] = [
 ];
 
 export function HrDocumentsPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const dialogs = useDialogs();
   const [scope, setScope] = useState<HrDocumentScope>('all');
   const [employee, setEmployee] = useState<HrEmployeeOption | null>(null);
   const [search, setSearch] = useState('');
@@ -130,9 +132,12 @@ export function HrDocumentsPanel({ onUnauthorized }: { onUnauthorized: () => voi
   const remove = async (document: HrDocument) => {
     const who =
       document.scope === 'company' ? 'every employee' : (document.employeeName ?? 'the employee');
-    const confirmed = window.confirm(
-      `Remove “${document.title}”?\n\nIt disappears from ${who}'s documents in the HR app straight away, and links already opened stop working.`,
-    );
+    const confirmed = await dialogs.confirm({
+      title: `Remove “${document.title}”?`,
+      message: `It disappears from ${who}'s documents in the HR app straight away, and links already opened stop working.`,
+      confirmLabel: 'Remove',
+      danger: true,
+    });
     if (!confirmed) return;
 
     setBusyId(document.id);
