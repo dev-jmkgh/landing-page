@@ -602,6 +602,32 @@
   container-type: inline-size;
 }
 
+/* A payslip's "Pay in full" decision, under its lines. */
+.hr-pay-fullpay {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--line-200);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+}
+
+.hr-pay-fullpay p {
+  margin: 0;
+  flex: 1 1 20rem;
+}
+
+.hr-pay-fullpay[data-state='on'] {
+  border-style: solid;
+  border-color: var(--success-600);
+  background-color: var(--success-050);
+}
+
 .hr-pay-slip-head {
   display: flex;
   flex-direction: column;

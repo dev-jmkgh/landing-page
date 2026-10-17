@@ -222,6 +222,15 @@ export type PayrollExclusion = {
   structureFrom: string | null;
 };
 
+/** An administrator's decision to pay one employee in full for a pay period. */
+export const fullPaySchema = z.object({
+  reason: z
+    .string({ required_error: 'Say why this employee is being paid in full.' })
+    .trim()
+    .min(5, 'Say why this employee is being paid in full.')
+    .max(500, 'Keep it to 500 characters or fewer.'),
+});
+
 export type PayslipLine = {
   label: string;
   kind: ComponentKind;
@@ -258,6 +267,14 @@ export type Payslip = {
    */
   remainingDays: number;
   lopDays: number;
+  /**
+   * Loss-of-pay days an administrator waived by paying the employee in full this period
+   * (`fullPayReason` says why). Already taken out of `lopDays`; the absences themselves
+   * still show in `absentDays` / `unpaidLeaveDays`.
+   */
+  lopWaivedDays: number;
+  /** Set while the employee is paid in full this period. Admin-facing. */
+  fullPayReason: string | null;
   paidDays: number;
   grossEarnings: number;
   lopAmount: number;

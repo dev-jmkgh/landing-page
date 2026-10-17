@@ -643,12 +643,16 @@ export type DayTenths = {
   /** Days after the calculation date: not yet paid, not loss of pay. */
   remaining: number;
   lop: number;
+  /** Loss of pay an administrator waived by paying in full (already out of `lop`). */
+  lopWaived: number;
   paid: number;
 };
 
 export type ComputedPayslip = PayrollCandidate & {
   structureId: number;
   days: DayTenths;
+  /** Why the employee is paid in full this period, when an administrator decided so. */
+  fullPayReason: string | null;
   grossPaise: number;
   lopPaise: number;
   deductionsPaise: number;
@@ -726,20 +730,23 @@ export async function replacePayslips(
           tenths(slip.days.untracked),
           tenths(slip.days.remaining),
           tenths(slip.days.lop),
+          tenths(slip.days.lopWaived),
+          slip.fullPayReason ? slip.fullPayReason.slice(0, 500) : null,
           tenths(slip.days.paid),
           paiseToDecimal(slip.grossPaise),
           paiseToDecimal(slip.lopPaise),
           paiseToDecimal(slip.deductionsPaise),
           paiseToDecimal(slip.netPaise),
         );
-        return `(${new Array(23).fill('?').join(', ')})`;
+        return `(${new Array(25).fill('?').join(', ')})`;
       });
       await connection.execute(
         `INSERT INTO hr_payslips
            (run_id, user_id, structure_id, employee_code, employee_name, department_name,
             designation_name, days_in_period, unemployed_days, weekly_off_days, holiday_days,
             present_days, paid_leave_days, unpaid_leave_days, absent_days, untracked_days,
-            remaining_days, lop_days, paid_days, gross_earnings, lop_amount, total_deductions, net_pay)
+            remaining_days, lop_days, lop_waived_days, full_pay_reason, paid_days,
+            gross_earnings, lop_amount, total_deductions, net_pay)
          VALUES ${values.join(', ')}`,
         params,
       );
@@ -796,6 +803,41 @@ export async function replacePayslips(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Paying in full                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** Who is paid in full in a pay period, and why — by employee. */
+export async function fullPayFor(runId: number): Promise<Map<number, string>> {
+  const rows = await query<RowDataPacket & { user_id: number; reason: string }>(
+    'SELECT user_id, reason FROM hr_payroll_full_pay WHERE run_id = ?',
+    [runId],
+  );
+  return new Map(rows.map((row) => [Number(row.user_id), row.reason]));
+}
+
+/** Records (or replaces) the decision to pay one employee in full for a pay period. */
+export async function setFullPay(
+  runId: number,
+  userId: number,
+  reason: string,
+  setBy: { id: number | null; name: string },
+): Promise<void> {
+  await execute(
+    `INSERT INTO hr_payroll_full_pay (run_id, user_id, reason, set_by, set_by_name)
+     VALUES (?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE reason = VALUES(reason), set_by = VALUES(set_by),
+                             set_by_name = VALUES(set_by_name), created_at = CURRENT_TIMESTAMP`,
+    [runId, userId, reason, setBy.id, setBy.name.slice(0, 160)],
+  );
+}
+
+/** Withdraws it. Returns whether there was one. */
+export async function clearFullPay(runId: number, userId: number): Promise<boolean> {
+  const result = await execute('DELETE FROM hr_payroll_full_pay WHERE run_id = ? AND user_id = ?', [runId, userId]);
+  return result.affectedRows > 0;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Payslips                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -824,6 +866,8 @@ interface PayslipRow extends RowDataPacket {
   untracked_days: string;
   remaining_days: string;
   lop_days: string;
+  lop_waived_days: string;
+  full_pay_reason: string | null;
   paid_days: string;
   gross_earnings: string;
   lop_amount: string;
@@ -840,7 +884,7 @@ const PAYSLIP_SELECT = `
          p.department_name, p.designation_name,
          p.days_in_period, p.unemployed_days, p.weekly_off_days, p.holiday_days,
          p.present_days, p.paid_leave_days, p.unpaid_leave_days, p.absent_days,
-         p.untracked_days, p.remaining_days, p.lop_days, p.paid_days,
+         p.untracked_days, p.remaining_days, p.lop_days, p.lop_waived_days, p.full_pay_reason, p.paid_days,
          p.gross_earnings, p.lop_amount, p.total_deductions, p.net_pay
     FROM hr_payslips p
     JOIN hr_payroll_runs r ON r.id = p.run_id
@@ -905,6 +949,8 @@ function toPayslip(row: PayslipRow, lines: PayslipLine[]): Payslip {
     untrackedDays: days(row.untracked_days),
     remainingDays: days(row.remaining_days),
     lopDays: days(row.lop_days),
+    lopWaivedDays: days(row.lop_waived_days),
+    fullPayReason: row.full_pay_reason,
     paidDays: days(row.paid_days),
     grossEarnings: money(row.gross_earnings),
     lopAmount: money(row.lop_amount),

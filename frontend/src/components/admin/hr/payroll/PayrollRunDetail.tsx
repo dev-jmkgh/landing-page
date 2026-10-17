@@ -495,6 +495,7 @@ export function PayrollRunDetail({
         <PayslipsTable
           run={run}
           refreshToken={slipsRefresh}
+          onRunChanged={(next) => setRun(next)}
           onUnauthorized={onUnauthorized}
           onRestricted={onRestricted}
         />

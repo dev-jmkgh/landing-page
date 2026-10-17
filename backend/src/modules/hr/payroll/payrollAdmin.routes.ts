@@ -11,6 +11,7 @@ import { buildPayslipPdf } from './payslipPdf';
 import {
   createRunSchema,
   createStructureSchema,
+  fullPaySchema,
   monthLabel,
   payrollEmployeesQuerySchema,
   runPayslipsQuerySchema,
@@ -22,6 +23,7 @@ import {
 import {
   approveRun,
   buildRunCsv,
+  clearEmployeeFullPay,
   createRun,
   createStructure,
   deleteRun,
@@ -34,6 +36,7 @@ import {
   listStructures,
   payslipFilename,
   processRun,
+  setEmployeeFullPay,
 } from './payroll.service';
 
 /**
@@ -265,6 +268,61 @@ hrPayrollAdminRouter.delete(
     });
 
     response.json({ success: true });
+  }),
+);
+
+/* -------------------------------------------------------------------------- */
+/* Paying in full                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Pays an employee in full for the pay period: their loss of pay is waived, for the
+ * reason given. ADMIN ONLY, audited, and the period is recalculated straight away.
+ */
+hrPayrollAdminRouter.put(
+  '/payroll/runs/:id/full-pay/:userId',
+  ...write(),
+  validateBody(fullPaySchema),
+  asyncHandler(async (request, response) => {
+    const runId = parseId(request.params.id);
+    const userId = parseId(request.params.userId);
+    const { reason } = request.body as z.infer<typeof fullPaySchema>;
+    const { run, employeeName, employeeCode } = await setEmployeeFullPay(runId, userId, reason, request.actor!);
+
+    await recordAudit({
+      actor: request.actor!,
+      action: 'hr_payroll_full_pay_set',
+      entityType: 'hr_payroll_run',
+      entityId: run.id,
+      summary: `Paid ${employeeName} (${employeeCode}) in full for ${monthLabel(run.period)}: ${reason}`,
+      meta: { userId, reason },
+      ipAddress: clientIp(request),
+    });
+
+    response.json({ success: true, run });
+  }),
+);
+
+/** Withdraws it: the employee's loss of pay applies again. */
+hrPayrollAdminRouter.delete(
+  '/payroll/runs/:id/full-pay/:userId',
+  ...write(),
+  asyncHandler(async (request, response) => {
+    const runId = parseId(request.params.id);
+    const userId = parseId(request.params.userId);
+    const { run, employeeName, employeeCode } = await clearEmployeeFullPay(runId, userId, request.actor!);
+
+    await recordAudit({
+      actor: request.actor!,
+      action: 'hr_payroll_full_pay_cleared',
+      entityType: 'hr_payroll_run',
+      entityId: run.id,
+      summary: `Stopped paying ${employeeName} (${employeeCode}) in full for ${monthLabel(run.period)}`,
+      meta: { userId },
+      ipAddress: clientIp(request),
+    });
+
+    response.json({ success: true, run });
   }),
 );
 

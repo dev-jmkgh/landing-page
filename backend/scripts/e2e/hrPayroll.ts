@@ -97,7 +97,7 @@ export async function run(ctx: E2EContext): Promise<void> {
   const { check, utcDb, adminAsBearer: admin, ravi, base, makeClient } = ctx;
   console.log('\nhr payroll');
 
-  const { companyToday, eachDate, monthBounds } = await import('../../src/modules/hr/calendar/calendar.service');
+  const { addDays, companyToday, eachDate, monthBounds } = await import('../../src/modules/hr/calendar/calendar.service');
 
   /* ------------------------------------------------------------- helpers */
   const rows = async (sql: string, params: unknown[] = []): Promise<Json[]> =>
@@ -649,6 +649,98 @@ export async function run(ctx: E2EContext): Promise<void> {
     const beforeLink = await alpha.client.post(`/hr/payslips/${Number(slip?.id)}/link`);
     check('payroll: nor downloadable', beforeLink.status === 404, beforeLink.status);
 
+    /* ---- no free days: before attendance tracking began is loss of pay too */
+    await utcDb.query(
+      "INSERT INTO hr_settings (setting_key, setting_value) VALUES ('attendance_tracked_from', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
+      [addDays(end, 1)],
+    );
+    const untrackedRun = await admin.post(`/admin/hr/payroll/runs/${runId}/process`);
+    const untrackedSlip = await payslipOf('PRL-0001');
+    check(
+      'payroll: days before attendance tracking began are not paid for nothing — absences stay loss of pay',
+      untrackedRun.status === 200 &&
+        untrackedSlip?.untrackedDays === 0 &&
+        untrackedSlip?.absentDays === alphaAbsentDays &&
+        untrackedSlip?.lopDays === alphaLopDays &&
+        untrackedSlip?.netPay === slip?.netPay,
+      { untracked: untrackedSlip?.untrackedDays, absent: untrackedSlip?.absentDays, lop: untrackedSlip?.lopDays },
+    );
+    await utcDb.query("DELETE FROM hr_settings WHERE setting_key = 'attendance_tracked_from'");
+
+    /* ---- paying in full: an administrator's decision, with a reason, recorded */
+    const fullPay = await admin.put(`/admin/hr/payroll/runs/${runId}/full-pay/${alpha.id}`, {
+      reason: 'Approved by management for September',
+    });
+    const fullSlip = await payslipOf('PRL-0001');
+    check(
+      'payroll: an administrator can pay an employee in full — the loss of pay is waived',
+      fullPay.status === 200 &&
+        fullPay.json.run?.status === 'processed' &&
+        fullSlip?.lopDays === 0 &&
+        fullSlip?.lopWaivedDays === alphaLopDays &&
+        fullSlip?.lopAmount === 0 &&
+        fullSlip?.paidDays === days &&
+        fullSlip?.grossEarnings === 43600 &&
+        fullSlip?.netPay === 43600 - 2000 &&
+        fullSlip?.fullPayReason === 'Approved by management for September',
+      { status: fullPay.status, slip: fullSlip && [fullSlip.lopDays, fullSlip.lopWaivedDays, fullSlip.paidDays, fullSlip.grossEarnings, fullSlip.netPay] },
+    );
+    check(
+      'payroll: the absences still show — only their loss of pay is waived',
+      fullSlip?.absentDays === alphaAbsentDays && fullSlip?.unpaidLeaveDays === 1,
+      fullSlip,
+    );
+    const fullAgain = await admin.post(`/admin/hr/payroll/runs/${runId}/process`);
+    const fullAgainSlip = await payslipOf('PRL-0001');
+    check(
+      'payroll: paying in full survives a recalculation',
+      fullAgain.status === 200 && fullAgainSlip?.lopWaivedDays === alphaLopDays && fullAgainSlip?.lopDays === 0,
+      fullAgainSlip,
+    );
+    check(
+      'payroll: and is audited, with the reason',
+      Number(
+        (
+          await rows(
+            "SELECT COUNT(*) AS c FROM audit_logs WHERE action = 'hr_payroll_full_pay_set' AND entity_id = ? AND summary LIKE '%Approved by management%'",
+            [runId],
+          )
+        )[0]?.c,
+      ) === 1,
+    );
+    const fullCsv = (await admin.getRaw(`/admin/hr/payroll/runs/${runId}/export.csv`)).body.toString('utf8');
+    const fullCsvLines = fullCsv.replace(/^﻿/, '').split('\r\n');
+    check(
+      'payroll: the CSV says how much was waived and why, in columns added at the end',
+      fullCsvLines[0]?.endsWith('LOP waived days,Paid in full because') === true &&
+        (fullCsvLines.find((line) => line.startsWith('PRL-0001,')) ?? '').endsWith(
+          `,${alphaLopDays === Math.trunc(alphaLopDays) ? alphaLopDays : alphaLopDays.toFixed(1)},Approved by management for September`,
+        ),
+      fullCsvLines.slice(0, 2),
+    );
+    const shortReason = await admin.put(`/admin/hr/payroll/runs/${runId}/full-pay/${alpha.id}`, { reason: 'ok' });
+    check('payroll: paying in full needs a reason', shortReason.status === 422 && Boolean(shortReason.json.errors?.reason), shortReason.json);
+    const notOnPayroll = await admin.put(`/admin/hr/payroll/runs/${runId}/full-pay/99999999`, { reason: 'Not on this payroll' });
+    check("payroll: nor can somebody with no payslip in the period be paid in full", notOnPayroll.status === 404, notOnPayroll.status);
+    const supervisorFull = await supervisor.client.put(`/admin/hr/payroll/runs/${runId}/full-pay/${alpha.id}`, {
+      reason: 'A supervisor trying',
+    });
+    check('payroll: a supervisor cannot pay anybody in full', supervisorFull.status === 403, supervisorFull.status);
+
+    const undoFull = await admin.del(`/admin/hr/payroll/runs/${runId}/full-pay/${alpha.id}`);
+    const undoneSlip = await payslipOf('PRL-0001');
+    check(
+      'payroll: withdrawing it puts the loss of pay back',
+      undoFull.status === 200 &&
+        undoneSlip?.lopDays === alphaLopDays &&
+        undoneSlip?.lopWaivedDays === 0 &&
+        undoneSlip?.fullPayReason === null &&
+        undoneSlip?.netPay === slip?.netPay,
+      undoneSlip,
+    );
+    const undoTwice = await admin.del(`/admin/hr/payroll/runs/${runId}/full-pay/${alpha.id}`);
+    check('payroll: withdrawing it twice is refused', undoTwice.status === 400, undoTwice.json);
+
     /* ---- re-processing is idempotent */
     const reprocessed = await admin.post(`/admin/hr/payroll/runs/${runId}/process`);
     const slipAgain = await payslipOf('PRL-0001');
@@ -748,6 +840,10 @@ export async function run(ctx: E2EContext): Promise<void> {
 
     const twice = await admin.post(`/admin/hr/payroll/runs/${runId}/approve`);
     check('payroll: approving twice is refused', twice.status === 400, twice.json);
+    const frozenFull = await admin.put(`/admin/hr/payroll/runs/${runId}/full-pay/${alpha.id}`, {
+      reason: 'Too late, it is approved',
+    });
+    check('payroll: an approved period cannot pay anybody in full', frozenFull.status === 400, frozenFull.json);
     const frozen = await admin.post(`/admin/hr/payroll/runs/${runId}/process`);
     check('payroll: an approved run cannot be re-processed', frozen.status === 400, frozen.json);
     const undeletable = await admin.del(`/admin/hr/payroll/runs/${runId}`);

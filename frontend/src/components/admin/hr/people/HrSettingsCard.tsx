@@ -142,7 +142,7 @@ export function HrSettingsCard({ onUnauthorized }: { onUnauthorized: () => void 
                 label="Attendance tracked from"
                 value={trackedFrom}
                 error={fieldErrors.attendanceTrackedFrom}
-                hint="Days before this date are not judged present or absent. With no punch on record they count as not tracked, so payroll does not deduct pay for them. Leave it empty to judge every day."
+                hint="Days before this date show as “Not tracked” in calendars and reports. Payroll still counts a working day with no attendance as absent (loss of pay) — to pay somebody for those days, pay them in full on their payslip. Leave it empty to judge every day."
                 onChange={setTrackedFrom}
               />
               {trackedFrom ? (

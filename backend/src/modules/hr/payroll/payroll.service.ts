@@ -1,3 +1,4 @@
+import { queryOne, type RowDataPacket } from '../../../db/pool';
 import { badRequest, conflict, notFound } from '../../../utils/httpError';
 import {
   addDays,
@@ -12,6 +13,7 @@ import { judgeEndedDays } from '../attendance/dayJudge';
 import { getHrSettings } from '../settings/hrSettings';
 import {
   allRunPayslips,
+  clearFullPay,
   componentsFor,
   deleteRunRow,
   deleteStructureIfUnused,
@@ -20,6 +22,7 @@ import {
   findRun,
   findRunByPeriod,
   findStructure,
+  fullPayFor,
   hrUserExists,
   insertRun,
   insertStructure,
@@ -36,6 +39,7 @@ import {
   replacePayslips,
   runsForYear,
   RunChangedError,
+  setFullPay,
   structureExistsFrom,
   type ComponentRecord,
   type ComputedPayslip,
@@ -122,10 +126,16 @@ export type PayrollOperator = { id: number | null; name: string };
  * The split's fractions are halves at most (a half-day leave, a half day worked), and
  * summing them as integers rather than floats is what keeps "27.5" from becoming
  * 27.499999999.
+ *
+ * NO FREE DAYS. A working day with no attendance and no leave is absent — loss of pay —
+ * however long ago it was. Days before attendance tracking began (the HR setting) used to
+ * be paid in full without judging; they are judged like any other now, because HR wants
+ * the default to deduct. Paying somebody for days they cannot account for is an
+ * administrator's decision, recorded per pay period (`setEmployeeFullPay`), not a gap in
+ * the arithmetic. The calendar still labels those days "Not tracked"; payroll does not.
  */
 export function sumDays(
   days: CalendarDay[],
-  trackedFrom: string | null,
   /**
    * The calculation date for a period still running; omitted once it has ended. Days
    * after it have not happened. Today itself counts as worked if there is attendance
@@ -146,6 +156,7 @@ export function sumDays(
     untracked: 0,
     remaining: 0,
     lop: 0,
+    lopWaived: 0,
     paid: 0,
   };
   for (const day of days) {
@@ -156,7 +167,8 @@ export function sumDays(
       totals.remaining += 10;
       continue;
     }
-    const split = payrollSplit(day, trackedFrom);
+    // No tracking date: every working day is judged on its attendance (see above).
+    const split = payrollSplit(day, null);
     totals.unemployed += Math.round(split.unemployed * 10);
     totals.weeklyOff += Math.round(split.weeklyOff * 10);
     totals.holiday += Math.round(split.holiday * 10);
@@ -369,10 +381,7 @@ export async function processRun(
   // first — unthrottled, unlike the pass reads make.
   await judgeEndedDays();
 
-  const [settings, candidates] = await Promise.all([
-    getHrSettings(),
-    payrollCandidates(run.periodStart, run.periodEnd),
-  ]);
+  const candidates = await payrollCandidates(run.periodStart, run.periodEnd);
 
   const withStructure = candidates.filter(
     (candidate): candidate is PayrollCandidate & { structureId: number } => candidate.structureId !== null,
@@ -393,7 +402,10 @@ export async function processRun(
       structureFrom: candidate.nextStructureFrom,
     }));
 
-  const components = await componentsFor([...new Set(withStructure.map((c) => c.structureId))]);
+  const [components, fullPay] = await Promise.all([
+    componentsFor([...new Set(withStructure.map((c) => c.structureId))]),
+    fullPayFor(runId),
+  ]);
 
   const slips: ComputedPayslip[] = [];
   for (let start = 0; start < withStructure.length; start += CALENDAR_BATCH) {
@@ -407,16 +419,25 @@ export async function processRun(
     );
 
     for (const candidate of batch) {
-      const days = sumDays(
-        calendars.get(candidate.userId) ?? [],
-        settings.attendanceTrackedFrom,
-        ended ? undefined : today,
-      );
+      const days = sumDays(calendars.get(candidate.userId) ?? [], ended ? undefined : today);
       // The SQL filter and the calendar agree on employment dates; this is the backstop.
       if (days.daysInPeriod === 0 || days.unemployed >= days.daysInPeriod) continue;
+
+      /*
+       * Paid in full by an administrator's decision: the loss of pay is waived — every day
+       * employed and already happened is paid — and the payslip says how much was waived.
+       * The absences and unpaid leave stay in their counts, so the record stays true.
+       */
+      const fullPayReason = fullPay.get(candidate.userId) ?? null;
+      if (fullPayReason) {
+        days.lopWaived = days.lop;
+        days.lop = 0;
+        days.paid = Math.max(0, days.daysInPeriod - days.unemployed - days.remaining);
+      }
       slips.push({
         ...candidate,
         days,
+        fullPayReason,
         ...computePay(components.get(candidate.structureId) ?? [], days),
       });
     }
@@ -488,6 +509,52 @@ export async function approveRun(runId: number, actor: PayrollOperator): Promise
   }
 
   return { run: await getRun(runId), notified };
+}
+
+/**
+ * Pays one employee in full for a pay period — an ADMINISTRATOR's decision, with a reason —
+ * and recalculates the period so the payslip shows it at once. Undone by
+ * `clearEmployeeFullPay`. Both refuse an approved period: its payslips are published.
+ *
+ * The employee must have a payslip in the period, i.e. the period has been calculated
+ * and they are in it: the decision is about a payslip HR is looking at.
+ */
+export async function setEmployeeFullPay(
+  runId: number,
+  userId: number,
+  reason: string,
+  actor: PayrollOperator,
+): Promise<{ run: PayrollRun; employeeName: string; employeeCode: string }> {
+  const { run, payslip } = await fullPayTarget(runId, userId);
+  await setFullPay(run.id, userId, reason, actor);
+  const { run: recalculated } = await processRun(run.id, actor);
+  return { run: recalculated, employeeName: payslip.employee_name, employeeCode: payslip.employee_code };
+}
+
+export async function clearEmployeeFullPay(
+  runId: number,
+  userId: number,
+  actor: PayrollOperator,
+): Promise<{ run: PayrollRun; employeeName: string; employeeCode: string }> {
+  const { run, payslip } = await fullPayTarget(runId, userId);
+  if (!(await clearFullPay(run.id, userId))) {
+    throw badRequest(`${payslip.employee_name} is not being paid in full this period.`);
+  }
+  const { run: recalculated } = await processRun(run.id, actor);
+  return { run: recalculated, employeeName: payslip.employee_name, employeeCode: payslip.employee_code };
+}
+
+async function fullPayTarget(runId: number, userId: number) {
+  const run = await getRun(runId);
+  if (run.status === 'approved') {
+    throw badRequest('This pay period has been approved, so its payslips can no longer change.');
+  }
+  const payslip = await queryOne<RowDataPacket & { employee_name: string; employee_code: string }>(
+    'SELECT employee_name, employee_code FROM hr_payslips WHERE run_id = ? AND user_id = ? LIMIT 1',
+    [runId, userId],
+  );
+  if (!payslip) throw notFound('That employee has no payslip in this pay period. Calculate the payslips first.');
+  return { run, payslip };
 }
 
 export async function deleteRun(runId: number): Promise<PayrollRun> {
@@ -621,6 +688,9 @@ const CSV_HEADER = [
   'LOP amount',
   'Total deductions',
   'Net pay',
+  // Appended, not inserted: anything reading the columns by position keeps working.
+  'LOP waived days',
+  'Paid in full because',
 ];
 
 const csvDays = (value: number) => (Number.isInteger(value) ? String(value) : value.toFixed(1));
@@ -652,6 +722,8 @@ export async function buildRunCsv(runId: number): Promise<{ filename: string; cs
       csvMoney(slip.lopAmount),
       csvMoney(slip.totalDeductions),
       csvMoney(slip.netPay),
+      csvDays(slip.lopWaivedDays),
+      csvText(slip.fullPayReason),
     ].join(','),
   );
 

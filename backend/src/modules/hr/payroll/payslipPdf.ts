@@ -112,6 +112,8 @@ export function buildPayslipPdf(slip: Payslip): Buffer {
   // Shown only when they apply, so the counts above still add up to the month for the reader.
   if (slip.unemployedDays > 0) cells.push(['Not employed', slip.unemployedDays]);
   if (slip.untrackedDays > 0) cells.push(['Not tracked (paid)', slip.untrackedDays]);
+  // Paid in full by HR's decision: the loss of pay that would have applied, waived.
+  if (slip.lopWaivedDays > 0) cells.push(['Loss of pay waived', slip.lopWaivedDays]);
   if (slip.remainingDays > 0) cells.push(['Still to come', slip.remainingDays]);
 
   const columnWidth = WIDTH / 3;

@@ -327,6 +327,10 @@ export type Payslip = {
    */
   remainingDays: number;
   lopDays: number;
+  /** Loss of pay waived because an administrator pays this employee in full this period. */
+  lopWaivedDays: number;
+  /** Why, while the employee is paid in full this period. */
+  fullPayReason: string | null;
   paidDays: number;
   grossEarnings: number;
   lopAmount: number;
@@ -428,6 +432,20 @@ export const payrollApi = {
     adminRequest<{ run: PayrollRun; notified: number }>(`${PAYROLL}/runs/${id}/approve`, {
       method: 'POST',
     }),
+
+  /**
+   * Pays one employee in full for the period — their loss of pay is waived — for the reason
+   * given. Admin only, audited; the period is recalculated and comes back.
+   */
+  setFullPay: (runId: number, userId: number, reason: string) =>
+    adminRequest<{ run: PayrollRun }>(`${PAYROLL}/runs/${runId}/full-pay/${userId}`, {
+      method: 'PUT',
+      body: { reason },
+    }),
+
+  /** Withdraws it: the employee's loss of pay applies again. Recalculates too. */
+  clearFullPay: (runId: number, userId: number) =>
+    adminRequest<{ run: PayrollRun }>(`${PAYROLL}/runs/${runId}/full-pay/${userId}`, { method: 'DELETE' }),
 
   /** Draft or processed only; the payslips go with it. */
   deleteRun: (id: number) =>

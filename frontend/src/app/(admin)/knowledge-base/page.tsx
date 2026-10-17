@@ -384,7 +384,8 @@ export default function KnowledgeBasePage() {
           <ol>
             <li>
               <strong>Organisation:</strong> add departments and designations. Set “Attendance
-              tracked from” to the go-live date, so payroll does not count earlier days as absent.
+              tracked from” to the go-live date, so calendars show earlier days as “Not tracked”.
+              Payroll still counts them as absent; pay somebody in full if they should be paid.
             </li>
             <li>
               <strong>Workplaces:</strong> add office sites and shifts — with weekly offs and the
@@ -441,8 +442,11 @@ export default function KnowledgeBasePage() {
             </li>
           </ol>
           <p>
-            Loss of pay counts absent days and unpaid leave. Weekly offs, holidays and paid
-            leave are paid. Each shift has two day rules, judged after the day is over (a nightly
+            Loss of pay counts absent days and unpaid leave — every working day with no
+            attendance and no leave is absent, including days before attendance tracking began.
+            Weekly offs, holidays and paid leave are paid. To pay one employee for the whole
+            period anyway, open their payslip and choose <strong>Pay in full</strong>: admins only,
+            with a reason, recorded in the audit log, and undoable until the period is approved. Each shift has two day rules, judged after the day is over (a nightly
             job just after midnight): worked at least the <em>full-day</em> minimum is a full day;
             at least the <em>half-day</em> minimum is a half day (half of it loss of pay unless
             half-day leave covers it); less than that is absent. Until midnight a day shows as
