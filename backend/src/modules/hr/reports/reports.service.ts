@@ -9,6 +9,7 @@ import {
   companyToday,
   daysBetween,
   isIsoDate,
+  verdictOf,
   type CalendarDay,
   type CalendarDayStatus,
   type LeaveKind,
@@ -310,7 +311,8 @@ export type AttendanceReportRow = {
 };
 
 function summarise(employee: EmployeeRow, days: CalendarDay[]): AttendanceReportRow {
-  const count = (status: CalendarDayStatus) => days.filter((day) => day.status === status).length;
+  // Totals count verdicts; a day still in progress counts as what it is so far.
+  const count = (status: CalendarDayStatus) => days.filter((day) => verdictOf(day) === status).length;
   const worked = days
     .map((day) => day.attendance?.workedMinutes)
     .filter((value): value is number => typeof value === 'number');

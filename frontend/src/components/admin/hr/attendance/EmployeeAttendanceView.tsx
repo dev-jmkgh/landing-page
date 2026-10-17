@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { CellStack, DataTable } from '@/components/admin/DataTable';
 import { LoaderBlock, LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
+import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { ApiError } from '@/lib/api';
 import {
@@ -13,37 +14,42 @@ import {
   WEEKDAY_LONG,
   WEEKDAY_SHORT,
   WORK_MODE_LABELS,
+  companyClock,
+  dayVerdict,
   formatMonth,
   minutesAsHours,
   peopleApi,
   shiftMonth,
-  type AttendanceMonth,
-  type AttendanceMonthDay,
+  type AttendanceDays,
+  type AttendanceViewDay,
+  type AttendanceViewSession,
   type CalendarDayStatus,
   type HrEmployee,
+  type WorkMode,
 } from '@/lib/hr';
-import { formatTime } from '@/lib/telecalling';
+import { formatTime, todayIso } from '@/lib/telecalling';
 import { Tag } from '../../telecalling/shared';
 import { isAbort } from '../people/shared';
 import { CorrectDayDialog } from './CorrectDayDialog';
 import { DayMarkers, DayStatusTag, FlagTags } from './dayStatus';
 
 /**
- * One employee's attendance for a month — opened from the register by their name.
+ * One employee's attendance — opened from the register by their name.
  *
- * Three ways to read the same month, as HR tools usually offer them:
- *   Calendar     the month at a glance, each date coloured by what it was
- *   Table        one row per date, with the times and totals
- *   Punch view   each date as a line across the working day, one bar per session, so
- *                late starts, long breaks and forgotten check-outs show as shapes
+ * Three ways to read it, as HR tools usually offer them:
+ *   Calendar     a MONTH at a glance, each date coloured by what it was
+ *   Table        a WEEK, one row per date, with the times and totals
+ *   Punch view   a WEEK, each date as a line across the working day with one bar per
+ *                session, so late starts, long breaks and forgotten check-outs show as shapes
  *
- * Every view is drawn from one response (`attendance-month`): the server's single day
- * classifier, with each date's recorded day and sessions beside it — the same verdicts
- * the employee's app, the register and payroll use. A month is at most 31 days, so it is
- * fetched whole.
+ * Every view is drawn from one response (`attendance-days`, a month or a week): the
+ * server's single day classifier, with each date's recorded day, its sessions and the
+ * evidence behind each punch beside it — the same verdicts the employee's app, the register
+ * and payroll use. Neither period is more than 31 days, so each is fetched whole.
  *
- * Choosing a date in any view opens that day below: its sessions, who recorded them, and
- * the correction, which goes through the same dialog the register uses.
+ * Choosing a date in any view opens that day in a drawer from the right: every check-in
+ * and check-out, office or remote, where each punch was made, and the correction, which
+ * goes through the same dialog the register uses.
  */
 
 type View = 'calendar' | 'table' | 'punch';
@@ -76,9 +82,23 @@ function writeView(view: View) {
 
 /* ------------------------------------------------------------------ dates */
 
-/** "Thu, 16 Oct" from `2026-10-16`. Built at noon UTC so no zone can move the date. */
+/** All date maths at noon UTC on `YYYY-MM-DD`, so no zone or daylight rule can move a date. */
+const atNoon = (date: string) => new Date(`${date}T12:00:00Z`);
+
+function addDays(date: string, days: number): string {
+  const next = atNoon(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next.toISOString().slice(0, 10);
+}
+
+/** The Sunday a week starts on — the calendar grid's first column. */
+function weekStartOf(date: string): string {
+  return addDays(date, -atNoon(date).getUTCDay());
+}
+
+/** "Thu, 16 Oct" from `2026-10-16`. */
 function shortDate(date: string): string {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-IN', {
+  return atNoon(date).toLocaleDateString('en-IN', {
     timeZone: 'UTC',
     weekday: 'short',
     day: '2-digit',
@@ -87,13 +107,23 @@ function shortDate(date: string): string {
 }
 
 function longDate(date: string): string {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-IN', {
+  return atNoon(date).toLocaleDateString('en-IN', {
     timeZone: 'UTC',
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   });
+}
+
+/** "11 – 17 Oct 2026", or "27 Sep – 3 Oct 2026" across a month. */
+function rangeLabel(from: string, to: string): string {
+  const format = (date: string, options: Intl.DateTimeFormatOptions) =>
+    atNoon(date).toLocaleDateString('en-IN', { timeZone: 'UTC', ...options });
+  const end = format(to, { day: 'numeric', month: 'short', year: 'numeric' });
+  if (from.slice(0, 7) === to.slice(0, 7)) return `${format(from, { day: 'numeric' })} – ${end}`;
+  if (from.slice(0, 4) === to.slice(0, 4)) return `${format(from, { day: 'numeric', month: 'short' })} – ${end}`;
+  return `${format(from, { day: 'numeric', month: 'short', year: 'numeric' })} – ${end}`;
 }
 
 /** Minutes after the company's midnight on `date` (IST, +05:30, no daylight saving). */
@@ -113,7 +143,7 @@ function clockLabel(minutes: number): string {
 }
 
 /** The shift a date was worked against: its own snapshot when recorded, else today's shift. */
-function shiftFor(day: AttendanceMonthDay, current: AttendanceMonth['shift']): { start: number; end: number } | null {
+function shiftFor(day: AttendanceViewDay, current: AttendanceDays['shift']): { start: number; end: number } | null {
   const start = clockMinutes(day.record?.shiftStartsAt ?? current?.startsAt);
   const end = clockMinutes(day.record?.shiftEndsAt ?? current?.endsAt);
   if (start === null || end === null) return null;
@@ -124,11 +154,11 @@ function shiftFor(day: AttendanceMonthDay, current: AttendanceMonth['shift']): {
 /** Days with no work expected — no shift band on the timeline, nothing to correct. */
 const RESTING: CalendarDayStatus[] = ['weekly_off', 'holiday', 'not_employed'];
 
-const canCorrectDay = (day: AttendanceMonthDay) =>
+const canCorrectDay = (day: AttendanceViewDay) =>
   day.employed && day.status !== 'not_employed' && (day.isToday || day.status !== 'upcoming');
 
 /** What a date was, beyond its status: leave, the holiday's name, a pending request. */
-function dayNotes(day: AttendanceMonthDay): string[] {
+function dayNotes(day: AttendanceViewDay): string[] {
   const notes: string[] = [];
   if (day.leave) {
     const half =
@@ -159,25 +189,35 @@ export function EmployeeAttendanceView({
   initialName: string;
   /** `YYYY-MM`. The register's month, so a click from 3 September opens September. */
   initialMonth?: string;
-  /** The register's date, opened in the day panel when it falls in the month shown. */
+  /** The register's date: marked in the views, and the week the week views open on. */
   initialDate?: string;
   onBack: () => void;
   onUnauthorized: () => void;
 }) {
   const uid = useId();
-  const [month, setMonth] = useState<string | undefined>(initialMonth);
-  const [data, setData] = useState<AttendanceMonth | null>(null);
-  const [employee, setEmployee] = useState<HrEmployee | null>(null);
   const [view, setView] = useState<View>(() => (typeof window === 'undefined' ? 'calendar' : readView()));
+  /** The calendar's month; undefined until the server names the current one. */
+  const [month, setMonth] = useState<string | undefined>(initialMonth);
+  /** The Sunday the week views start on. */
+  const [weekStart, setWeekStart] = useState<string>(() => weekStartOf(initialDate ?? todayIso()));
+  const [data, setData] = useState<AttendanceDays | null>(null);
+  const [employee, setEmployee] = useState<HrEmployee | null>(null);
+  /** The date last chosen — marked in every view, and carried between month and week. */
   const [selected, setSelected] = useState<string | null>(initialDate ?? null);
-  const [correcting, setCorrecting] = useState<AttendanceMonthDay | null>(null);
+  /** The date whose drawer is open. */
+  const [drawerDate, setDrawerDate] = useState<string | null>(null);
+  const [correcting, setCorrecting] = useState<AttendanceViewDay | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const detailRef = useRef<HTMLHeadingElement>(null);
+  /** What opened the drawer, so focus can return there after a correction too. */
+  const triggerRef = useRef<HTMLElement | null>(null);
   const abort = useRef<AbortController | null>(null);
+
+  const weekly = view !== 'calendar';
+  const weekEnd = addDays(weekStart, 6);
 
   // Arriving from the register: the heading takes focus, so a keyboard user is placed here.
   useEffect(() => {
@@ -192,7 +232,7 @@ export function EmployeeAttendanceView({
       .catch((caught) => {
         if (isAbort(caught)) return;
         if (caught instanceof ApiError && caught.status === 401) onUnauthorized();
-        // Otherwise the header keeps the register's name; the month still loads.
+        // Otherwise the header keeps the register's name; the days still load.
       });
     return () => controller.abort();
   }, [userId, onUnauthorized]);
@@ -204,15 +244,16 @@ export function EmployeeAttendanceView({
     setLoading(true);
     setError(null);
     try {
-      setData(await peopleApi.employeeAttendanceMonth(userId, month, controller.signal));
+      const query = weekly ? { from: weekStart, to: weekEnd } : { month };
+      setData(await peopleApi.employeeAttendanceDays(userId, query, controller.signal));
     } catch (caught) {
       if (isAbort(caught)) return;
       if (caught instanceof ApiError && caught.status === 401) return onUnauthorized();
-      setError(caught instanceof ApiError ? caught.message : 'Could not load this month.');
+      setError(caught instanceof ApiError ? caught.message : 'Could not load these days.');
     } finally {
       if (abort.current === controller) setLoading(false);
     }
-  }, [userId, month, onUnauthorized]);
+  }, [userId, weekly, weekStart, weekEnd, month, onUnauthorized]);
 
   useEffect(() => {
     void load();
@@ -220,33 +261,52 @@ export function EmployeeAttendanceView({
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  const current = data?.month ?? month ?? null;
-  const go = (delta: number) => {
-    if (!current) return;
-    setMonth(shiftMonth(current, delta));
-    setSelected(null);
-  };
+  const today = todayIso();
+  const currentMonth = (!weekly && data?.month) || month || today.slice(0, 7);
 
+  /*
+   * Switching between the month and the week keeps the place: the chosen date's week (or
+   * month), else today's when it is in view, else the start of what was showing.
+   */
   const choose = (next: View) => {
+    if (next === view) return;
+    if (next !== 'calendar' && view === 'calendar') {
+      const anchor =
+        selected && selected.slice(0, 7) === currentMonth
+          ? selected
+          : today.slice(0, 7) === currentMonth
+            ? today
+            : `${currentMonth}-01`;
+      setWeekStart(weekStartOf(anchor));
+    }
+    if (next === 'calendar' && view !== 'calendar') {
+      const anchor = selected && selected >= weekStart && selected <= weekEnd ? selected : addDays(weekStart, 3);
+      setMonth(anchor.slice(0, 7));
+    }
     setView(next);
     writeView(next);
   };
 
+  const goMonth = (delta: number) => setMonth(shiftMonth(currentMonth, delta));
+  const goWeek = (delta: number) => setWeekStart(addDays(weekStart, delta * 7));
+
   const open = (date: string) => {
+    triggerRef.current = document.activeElement as HTMLElement | null;
     setSelected(date);
     setNotice(null);
-    // After the panel renders: its heading takes focus, which also scrolls it into view.
-    window.requestAnimationFrame(() => detailRef.current?.focus());
+    setDrawerDate(date);
   };
 
   const days = data?.days ?? [];
-  const selectedDay = days.find((day) => day.date === selected) ?? null;
+  const drawerDay = days.find((day) => day.date === drawerDate) ?? null;
   const name = employee?.name ?? initialName;
 
+  // Totals count verdicts: somebody checked in or out today counts as present (or late) so far.
   const counts = new Map<CalendarDayStatus, number>();
-  for (const day of days) counts.set(day.status, (counts.get(day.status) ?? 0) + 1);
+  for (const day of days) counts.set(dayVerdict(day), (counts.get(dayVerdict(day)) ?? 0) + 1);
   const count = (...statuses: CalendarDayStatus[]) =>
     statuses.reduce((sum, status) => sum + (counts.get(status) ?? 0), 0);
+  const period = data ? (data.month ? formatMonth(data.month) : rangeLabel(data.from, data.to)) : '';
 
   return (
     <div className="hra">
@@ -278,54 +338,94 @@ export function EmployeeAttendanceView({
       </div>
 
       <div className="hra-toolbar">
-        <div className="hrp-month" role="group" aria-label="Month">
-          <button
-            type="button"
-            className="btn btn--outline btn--sm"
-            onClick={() => go(-1)}
-            disabled={!current || loading}
-            aria-label={current ? `Previous month, ${formatMonth(shiftMonth(current, -1))}` : 'Previous month'}
-          >
-            <Icon name="arrowLeft" size={15} />
-          </button>
-          <label className="sr-only" htmlFor={`${uid}-month`}>
-            Month
-          </label>
-          <input
-            id={`${uid}-month`}
-            className="input hrp-month__input"
-            type="month"
-            value={current ?? ''}
-            onChange={(event) => {
-              if (/^\d{4}-\d{2}$/.test(event.target.value)) {
-                setMonth(event.target.value);
-                setSelected(null);
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="btn btn--outline btn--sm"
-            onClick={() => go(1)}
-            disabled={!current || loading}
-            aria-label={current ? `Next month, ${formatMonth(shiftMonth(current, 1))}` : 'Next month'}
-          >
-            <Icon name="arrowRight" size={15} />
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
-            onClick={() => {
-              setMonth(undefined);
-              setSelected(null);
-            }}
-            disabled={data !== null && days.some((day) => day.isToday)}
-          >
-            This month
-          </button>
-        </div>
+        {weekly ? (
+          <div className="hrp-month" role="group" aria-label="Week">
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={() => goWeek(-1)}
+              disabled={loading}
+              aria-label={`Previous week, ${rangeLabel(addDays(weekStart, -7), addDays(weekStart, -1))}`}
+            >
+              <Icon name="arrowLeft" size={15} />
+            </button>
+            <label className="sr-only" htmlFor={`${uid}-week`}>
+              Show the week containing
+            </label>
+            <input
+              id={`${uid}-week`}
+              className="input hrp-month__input"
+              type="date"
+              value={weekStart}
+              onChange={(event) => {
+                if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) setWeekStart(weekStartOf(event.target.value));
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={() => goWeek(1)}
+              disabled={loading}
+              aria-label={`Next week, ${rangeLabel(addDays(weekStart, 7), addDays(weekStart, 13))}`}
+            >
+              <Icon name="arrowRight" size={15} />
+            </button>
+            <span className="hra-range" aria-live="polite">
+              {rangeLabel(weekStart, weekEnd)}
+            </span>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setWeekStart(weekStartOf(today))}
+              disabled={today >= weekStart && today <= weekEnd}
+            >
+              This week
+            </button>
+          </div>
+        ) : (
+          <div className="hrp-month" role="group" aria-label="Month">
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={() => goMonth(-1)}
+              disabled={loading}
+              aria-label={`Previous month, ${formatMonth(shiftMonth(currentMonth, -1))}`}
+            >
+              <Icon name="arrowLeft" size={15} />
+            </button>
+            <label className="sr-only" htmlFor={`${uid}-month`}>
+              Month
+            </label>
+            <input
+              id={`${uid}-month`}
+              className="input hrp-month__input"
+              type="month"
+              value={currentMonth}
+              onChange={(event) => {
+                if (/^\d{4}-\d{2}$/.test(event.target.value)) setMonth(event.target.value);
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={() => goMonth(1)}
+              disabled={loading}
+              aria-label={`Next month, ${formatMonth(shiftMonth(currentMonth, 1))}`}
+            >
+              <Icon name="arrowRight" size={15} />
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setMonth(today.slice(0, 7))}
+              disabled={currentMonth === today.slice(0, 7)}
+            >
+              This month
+            </button>
+          </div>
+        )}
 
-        <div className="tc-segmented" role="group" aria-label="Show the month as">
+        <div className="tc-segmented" role="group" aria-label="Show the days as">
           {VIEWS.map((item) => (
             <button
               key={item.key}
@@ -352,11 +452,11 @@ export function EmployeeAttendanceView({
 
       {data === null ? (
         loading ? (
-          <LoaderBlock label="Loading the month…" minHeight="22rem" />
+          <LoaderBlock label="Loading the days…" minHeight="22rem" />
         ) : null
       ) : (
-        <LoadingOverlay busy={loading} label="Loading the month…">
-          <ul className="hra-totals" aria-label={`Totals for ${formatMonth(data.month)}`}>
+        <LoadingOverlay busy={loading} label="Loading the days…">
+          <ul className="hra-totals" aria-label={`Totals for ${period}`}>
             <Total value={count('present', 'late', 'half_day')} label="Days present" tone="good" />
             <Total value={count('late')} label="Late" tone="warn" />
             <Total value={count('half_day')} label="Half days" tone="warn" />
@@ -371,13 +471,14 @@ export function EmployeeAttendanceView({
             />
           </ul>
 
-          {view === 'calendar' ? (
+          {/* What is showing must match what was asked for; a stale month never draws as a week. */}
+          {view === 'calendar' && data.month ? (
             <CalendarView data={data} name={name} selected={selected} onOpen={open} />
-          ) : view === 'table' ? (
+          ) : view === 'table' && !data.month ? (
             <TableView data={data} name={name} onOpen={open} />
-          ) : (
+          ) : view === 'punch' && !data.month ? (
             <PunchView data={data} name={name} selected={selected} onOpen={open} />
-          )}
+          ) : null}
 
           <p className="tc-muted hrp-caption">
             Times are India Standard Time. “Not tracked” days fall before attendance tracking began, so a missing punch
@@ -386,15 +487,18 @@ export function EmployeeAttendanceView({
         </LoadingOverlay>
       )}
 
-      {selectedDay && data ? (
-        <DayPanel
-          day={selectedDay}
+      {drawerDay && data ? (
+        <DayDrawer
+          day={drawerDay}
+          name={name}
           shift={data.shift}
-          headingRef={detailRef}
-          onClose={() => setSelected(null)}
+          employeeMode={employee?.workMode ?? null}
+          onClose={() => setDrawerDate(null)}
           onCorrect={() => {
+            // One dialog at a time: the drawer closes and the correction opens in its place.
+            setDrawerDate(null);
             setNotice(null);
-            setCorrecting(selectedDay);
+            setCorrecting(drawerDay);
           }}
         />
       ) : null}
@@ -402,18 +506,18 @@ export function EmployeeAttendanceView({
       {correcting ? (
         <CorrectDayDialog
           key={`${userId}-${correcting.date}`}
-          employee={{
-            userId,
-            name,
-            employeeCode: employee?.employeeCode ?? '',
-          }}
+          employee={{ userId, name, employeeCode: employee?.employeeCode ?? '' }}
           date={correcting.date}
           day={correcting.record}
-          onClose={() => setCorrecting(null)}
+          onClose={() => {
+            setCorrecting(null);
+            window.setTimeout(() => triggerRef.current?.focus(), 0);
+          }}
           onSaved={(_day, message) => {
             setCorrecting(null);
             setNotice(message);
             void load();
+            window.setTimeout(() => triggerRef.current?.focus(), 0);
           }}
           onUnauthorized={onUnauthorized}
         />
@@ -447,16 +551,16 @@ function CalendarView({
   selected,
   onOpen,
 }: {
-  data: AttendanceMonth;
+  data: AttendanceDays;
   name: string;
   selected: string | null;
   onOpen: (date: string) => void;
 }) {
   /* The month as weeks, Sunday first, padded at both ends to whole weeks. */
-  const weeks: (AttendanceMonthDay | null)[][] = [];
+  const weeks: (AttendanceViewDay | null)[][] = [];
   if (data.days.length > 0) {
     const lead = WEEKDAYS.indexOf(data.days[0]!.weekday);
-    const cells: (AttendanceMonthDay | null)[] = [...Array.from({ length: lead }, () => null), ...data.days];
+    const cells: (AttendanceViewDay | null)[] = [...Array.from({ length: lead }, () => null), ...data.days];
     while (cells.length % 7 !== 0) cells.push(null);
     for (let index = 0; index < cells.length; index += 7) weeks.push(cells.slice(index, index + 7));
   }
@@ -465,7 +569,8 @@ function CalendarView({
     <div className="hrp-cal-wrap">
       <table className="hrp-cal hra-cal">
         <caption className="sr-only">
-          {name}’s days in {formatMonth(data.month)}. Choose a date to see its punches.
+          {name}’s days in {data.month ? formatMonth(data.month) : rangeLabel(data.from, data.to)}. Choose a date to see
+          its punches.
         </caption>
         <thead>
           <tr>
@@ -488,12 +593,7 @@ function CalendarView({
                     data-today={day.isToday ? 'true' : undefined}
                     data-selected={day.date === selected ? 'true' : undefined}
                   >
-                    <button
-                      type="button"
-                      className="hra-cal__day"
-                      aria-pressed={day.date === selected}
-                      onClick={() => onOpen(day.date)}
-                    >
+                    <button type="button" className="hra-cal__day" onClick={() => onOpen(day.date)}>
                       <span className="hrp-cal__num">
                         {Number(day.date.slice(8, 10))}
                         <span className="sr-only">
@@ -539,9 +639,9 @@ function TableView({
   name,
   onOpen,
 }: {
-  data: AttendanceMonth;
+  data: AttendanceDays;
   name: string;
-  /** Opens the date's panel, which is also where a day is corrected. */
+  /** Opens the date's drawer, which is also where a day is corrected. */
   onOpen: (date: string) => void;
 }) {
   const dash = <span className="tc-muted">—</span>;
@@ -552,7 +652,7 @@ function TableView({
       rowKey={(day) => day.date}
       rowTone={(day) => (day.record?.missingPunch ? 'bad' : day.status === 'absent' ? 'warn' : undefined)}
       minWidth="62rem"
-      caption={`${name}’s attendance, ${formatMonth(data.month)}, one row per date`}
+      caption={`${name}’s attendance, ${rangeLabel(data.from, data.to)}, one row per date`}
       columns={[
         {
           key: 'date',
@@ -664,10 +764,10 @@ function TableView({
 
 /**
  * The hours the timeline spans: from an hour before the earliest shift start or punch in
- * the month to an hour after the latest, never less than eight hours. A fixed 00:00–24:00
+ * the week to an hour after the latest, never less than eight hours. A fixed 00:00–24:00
  * would leave a 9-to-6 day as a thin bar in the middle third of the line.
  */
-function timelineWindow(data: AttendanceMonth, now: number): { from: number; to: number } {
+function timelineWindow(data: AttendanceDays, now: number): { from: number; to: number } {
   let low = Infinity;
   let high = -Infinity;
   const take = (minute: number | null) => {
@@ -706,7 +806,7 @@ function PunchView({
   selected,
   onOpen,
 }: {
-  data: AttendanceMonth;
+  data: AttendanceDays;
   name: string;
   selected: string | null;
   onOpen: (date: string) => void;
@@ -730,8 +830,8 @@ function PunchView({
   return (
     <div className="hra-punch">
       <p className="sr-only">
-        {name}’s sessions in {formatMonth(data.month)}, one line per date, from {clockLabel(range.from)} to{' '}
-        {clockLabel(range.to)}. Each date lists its sessions in words as well.
+        {name}’s sessions for {rangeLabel(data.from, data.to)}, one line per date, from {clockLabel(range.from)} to{' '}
+        {clockLabel(range.to)}. Each date lists its sessions in words as well; choose one to see every punch.
       </p>
 
       <div className="hra-punch__row hra-punch__row--scale" aria-hidden="true">
@@ -766,11 +866,12 @@ function PunchView({
           return (
             <li
               key={day.date}
-              className="hra-punch__row"
+              className="hra-punch__row hra-punch__row--day"
               data-status={day.status}
               data-today={day.isToday ? 'true' : undefined}
               data-selected={day.date === selected ? 'true' : undefined}
             >
+              {/* The whole row is this button's target (see the CSS), one tab stop per date. */}
               <button type="button" className="hra-punch__date" onClick={() => onOpen(day.date)}>
                 <span className="hra-punch__day">{shortDate(day.date)}</span>
                 <span className="hra-punch__status">{DAY_STATUS_LABELS[day.status]}</span>
@@ -784,41 +885,36 @@ function PunchView({
                 {shift ? (
                   <span
                     className="hra-punch__shift"
-                    style={{
-                      left: at(shift.start),
-                      width: width(shift.start, shift.end),
-                    }}
-                    title={`Shift ${clockLabel(shift.start)}–${clockLabel(shift.end)}`}
+                    style={{ left: at(shift.start), width: width(shift.start, shift.end) }}
                   />
                 ) : null}
                 {sessions.map((session) => {
                   const start = minuteOfDay(session.startedAt, day.date);
                   const end = minuteOfDay(session.endedAt ?? new Date(now).toISOString(), day.date);
                   const kind = session.endedAt === null ? 'open' : session.autoClosed ? 'auto' : session.source;
-                  const label = `${formatTime(session.startedAt)}–${session.endedAt ? formatTime(session.endedAt) : 'now'}${
-                    session.minutes !== null ? ` · ${minutesAsHours(session.minutes)}` : ''
-                  }${session.source !== 'app' ? ` · ${ATTENDANCE_SOURCE_LABELS[session.source]}` : ''}`;
                   return (
                     <span
                       key={session.id}
                       className="hra-punch__bar"
                       data-kind={kind}
-                      style={{
-                        left: at(start),
-                        width: width(start, Math.max(end, start + 1)),
-                      }}
-                      title={label}
+                      style={{ left: at(start), width: width(start, Math.max(end, start + 1)) }}
                     />
                   );
                 })}
               </div>
 
-              <span className="hra-punch__total">
+              <span className="hra-punch__total" aria-hidden="true">
                 {day.record?.workedMinutes
                   ? minutesAsHours(day.record.workedMinutes)
                   : day.record?.openSessionStartedAt
                     ? 'in now'
                     : ''}
+                {day.record?.checkedInAt ? (
+                  <span className="hra-punch__span">
+                    {companyClock(day.record.checkedInAt)}–
+                    {day.record.checkedOutAt ? companyClock(day.record.checkedOutAt) : 'now'}
+                  </span>
+                ) : null}
               </span>
             </li>
           );
@@ -851,122 +947,217 @@ function PunchView({
   );
 }
 
-/* ------------------------------------------------------------------ the day */
+/* ------------------------------------------------------------------ the day drawer */
 
-function DayPanel({
+const mapLink = (latitude: number, longitude: number) =>
+  `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+
+/** The device clock, when it disagreed with the server's by two minutes or more. */
+function phoneClockNote(deviceAt: string | null | undefined, serverAt: string | null): string | null {
+  if (!deviceAt || !serverAt) return null;
+  return Math.abs(Date.parse(deviceAt) - Date.parse(serverAt)) >= 2 * 60_000
+    ? `Phone clock said ${formatTime(deviceAt)}`
+    : null;
+}
+
+/**
+ * One punch — a check-in or a check-out — as the drawer lists it: the time, office or
+ * remote, where it was made and how sure the phone was of it.
+ */
+function Punch({ kind, session, mode }: { kind: 'in' | 'out'; session: AttendanceViewSession; mode: WorkMode | null }) {
+  const isIn = kind === 'in';
+  const at = isIn ? session.startedAt : session.endedAt;
+  const latitude = (isIn ? session.inLatitude : session.outLatitude) ?? null;
+  const longitude = (isIn ? session.inLongitude : session.outLongitude) ?? null;
+  const accuracy = (isIn ? session.inAccuracyMetres : session.outAccuracyMetres) ?? null;
+  const distance = (isIn ? session.inDistanceMetres : session.outDistanceMetres) ?? null;
+  const site = session.inLocationName ?? null;
+  const flags = (isIn ? session.inFlags : session.outFlags) ?? [];
+  const clockNote = phoneClockNote(isIn ? session.inDeviceAt : session.outDeviceAt, at);
+
+  /* The words for where the punch was made. */
+  let where: ReactNode;
+  if (!isIn && session.endedAt === null) {
+    where = 'Still checked in';
+  } else if (!isIn && session.autoClosed) {
+    where = 'Nobody checked out, so the system closed this session with no hours';
+  } else if (latitude === null || longitude === null) {
+    where =
+      session.source === 'admin'
+        ? 'Entered by an administrator — no location'
+        : session.source === 'regularisation'
+          ? 'From an approved correction — no location'
+          : 'No location shared';
+  } else {
+    // A check-in names the site it was matched to; a check-out says how far it was from it.
+    const place =
+      isIn && site
+        ? distance !== null
+          ? `At ${site} · ${distance} m away`
+          : `At ${site}`
+        : distance !== null
+          ? `${distance} m from ${site ?? 'the site'}`
+          : null;
+    const parts = [place, accuracy !== null ? `accurate to ±${accuracy} m` : null].filter(Boolean);
+    where = (
+      <>
+        {parts.length ? <span className="hra-punch-item__place">{parts.join(' · ')}</span> : null}
+        <span className="hra-punch-item__coords">
+          {latitude.toFixed(5)}, {longitude.toFixed(5)}{' '}
+          <a href={mapLink(latitude, longitude)} target="_blank" rel="noopener noreferrer" className="tc-text-button">
+            Open in Maps
+            <span className="sr-only"> (the {isIn ? 'check-in' : 'check-out'} location, in a new tab)</span>
+          </a>
+        </span>
+      </>
+    );
+  }
+
+  return (
+    <div className="hra-punch-item" data-kind={kind}>
+      <span className="hra-punch-item__dot" aria-hidden="true" />
+      <div className="hra-punch-item__body">
+        <p className="hra-punch-item__line">
+          <span className="hra-punch-item__label">{isIn ? 'Check-in' : 'Check-out'}</span>
+          <strong className="hra-punch-item__time">{at ? formatTime(at) : '—'}</strong>
+          {mode && at && !(!isIn && session.autoClosed) ? (
+            <span className="hra-mode" data-mode={mode}>
+              {WORK_MODE_LABELS[mode] ?? mode}
+            </span>
+          ) : null}
+        </p>
+        <p className="hra-punch-item__where">{where}</p>
+        {clockNote ? <p className="hra-punch-item__note">{clockNote}</p> : null}
+        <FlagTags flags={flags} />
+      </div>
+    </div>
+  );
+}
+
+function DayDrawer({
   day,
+  name,
   shift: currentShift,
-  headingRef,
+  employeeMode,
   onClose,
   onCorrect,
 }: {
-  day: AttendanceMonthDay;
-  shift: AttendanceMonth['shift'];
-  headingRef: RefObject<HTMLHeadingElement | null>;
+  day: AttendanceViewDay;
+  name: string;
+  shift: AttendanceDays['shift'];
+  /** Their assigned mode, for a day with no record of its own. */
+  employeeMode: WorkMode | null;
   onClose: () => void;
   onCorrect: () => void;
 }) {
-  const uid = useId();
   const record = day.record;
   const shift = RESTING.includes(day.status) ? null : shiftFor(day, currentShift);
   const notes = dayNotes(day);
+  // The day's own mode — an approved work-from-home or field day is recorded as such.
+  const mode = record?.workMode ?? null;
 
   return (
-    <section className="tc-card hra-detail" aria-labelledby={`${uid}-title`}>
-      <header className="hra-detail__head">
-        <div className="hra-detail__title-row">
-          <h3 className="hra-detail__title" id={`${uid}-title`} ref={headingRef} tabIndex={-1}>
-            {longDate(day.date)}
-          </h3>
+    <Dialog
+      open
+      onClose={onClose}
+      title={longDate(day.date)}
+      label={`${name}, ${longDate(day.date)}`}
+      className="hra-drawer"
+    >
+      <div className="hra-drawer__head">
+        <p className="hra-drawer__eyebrow">{name}</p>
+        <h2 className="hra-drawer__title">{longDate(day.date)}</h2>
+        <div className="hra-drawer__tags">
           <DayStatusTag status={day.status} />
+          {mode ? (
+            <span className="hra-mode" data-mode={mode}>
+              {WORK_MODE_LABELS[mode] ?? mode}
+            </span>
+          ) : null}
           {record ? (
             <DayMarkers missingPunch={record.missingPunch} flagged={record.flagged} source={record.source} />
           ) : null}
         </div>
-        <button type="button" className="hra-detail__close" onClick={onClose} aria-label="Close the day">
-          <Icon name="close" size={16} />
-        </button>
-      </header>
+        {notes.length ? <p className="hra-drawer__notes">{notes.join(' · ')}</p> : null}
+      </div>
 
-      {notes.length ? <p className="hra-detail__notes">{notes.join(' · ')}</p> : null}
+      <div className="hra-drawer__body">
+        <dl className="hra-drawer__facts">
+          <div>
+            <dt>Shift</dt>
+            <dd>{shift ? `${clockLabel(shift.start)}–${clockLabel(shift.end)}` : '—'}</dd>
+          </div>
+          <div>
+            <dt>Worked</dt>
+            <dd>{record?.workedMinutes === null || !record ? '—' : minutesAsHours(record.workedMinutes)}</dd>
+          </div>
+          <div>
+            <dt>Break</dt>
+            <dd>{record && record.breakMinutes > 0 ? minutesAsHours(record.breakMinutes) : '—'}</dd>
+          </div>
+          <div>
+            <dt>First in</dt>
+            <dd>{record?.checkedInAt ? formatTime(record.checkedInAt) : '—'}</dd>
+          </div>
+          <div>
+            <dt>Last out</dt>
+            <dd>
+              {record?.checkedOutAt ? formatTime(record.checkedOutAt) : record?.openSessionStartedAt ? 'In now' : '—'}
+            </dd>
+          </div>
+          <div>
+            <dt>Late by</dt>
+            <dd>{record && record.lateMinutes > 0 ? minutesAsHours(record.lateMinutes) : '—'}</dd>
+          </div>
+        </dl>
 
-      <dl className="hra-detail__facts">
-        <div>
-          <dt>Shift</dt>
-          <dd>{shift ? `${clockLabel(shift.start)}–${clockLabel(shift.end)}` : '—'}</dd>
-        </div>
-        <div>
-          <dt>First in</dt>
-          <dd>{record?.checkedInAt ? formatTime(record.checkedInAt) : '—'}</dd>
-        </div>
-        <div>
-          <dt>Last out</dt>
-          <dd>
-            {record?.checkedOutAt ? formatTime(record.checkedOutAt) : record?.openSessionStartedAt ? 'In now' : '—'}
-          </dd>
-        </div>
-        <div>
-          <dt>Worked</dt>
-          <dd>{record?.workedMinutes === null || !record ? '—' : minutesAsHours(record.workedMinutes)}</dd>
-        </div>
-        <div>
-          <dt>Break</dt>
-          <dd>{record && record.breakMinutes > 0 ? minutesAsHours(record.breakMinutes) : '—'}</dd>
-        </div>
-        <div>
-          <dt>Late by</dt>
-          <dd>{record && record.lateMinutes > 0 ? minutesAsHours(record.lateMinutes) : '—'}</dd>
-        </div>
-      </dl>
+        <h3 className="hra-drawer__section">Check-ins and check-outs</h3>
+        {record && record.sessions.length > 0 ? (
+          <ol className="hra-sessions">
+            {record.sessions.map((session, index) => (
+              <li key={session.id} className="hra-sessions__item">
+                <div className="hra-sessions__head">
+                  <span>Session {index + 1}</span>
+                  <span className="hra-sessions__duration">
+                    {session.minutes === null ? 'running' : minutesAsHours(session.minutes)}
+                  </span>
+                </div>
+                <Punch kind="in" session={session} mode={mode} />
+                <Punch kind="out" session={session} mode={mode} />
+                <p className="hra-sessions__source">
+                  {session.autoClosed
+                    ? 'Closed by the system'
+                    : session.source === 'app'
+                      ? 'Punched in the HR app'
+                      : ATTENDANCE_SOURCE_LABELS[session.source]}
+                </p>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="tc-muted hra-drawer__empty">
+            No punches on this day
+            {employeeMode && !RESTING.includes(day.status)
+              ? ` (assigned to work ${WORK_MODE_LABELS[employeeMode]?.toLowerCase() ?? employeeMode})`
+              : ''}
+            .
+          </p>
+        )}
 
-      {record && record.sessions.length > 0 ? (
-        <div className="table-wrap hra-detail__sessions">
-          <table className="data-table">
-            <caption className="sr-only">Sessions on {longDate(day.date)}</caption>
-            <thead>
-              <tr>
-                <th scope="col">Check-in</th>
-                <th scope="col">Check-out</th>
-                <th scope="col" className="hra-num">
-                  Duration
-                </th>
-                <th scope="col">Recorded</th>
-              </tr>
-            </thead>
-            <tbody>
-              {record.sessions.map((session) => (
-                <tr key={session.id}>
-                  <td>{formatTime(session.startedAt)}</td>
-                  <td>{session.endedAt ? formatTime(session.endedAt) : <Tag tone="progress">in now</Tag>}</td>
-                  <td className="hra-num">{session.minutes === null ? '—' : minutesAsHours(session.minutes)}</td>
-                  <td>
-                    <span className="hra-detail__source">
-                      {session.autoClosed ? 'Closed by the system' : ATTENDANCE_SOURCE_LABELS[session.source]}
-                      <FlagTags flags={session.flags} />
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="tc-muted hra-detail__empty">No punches on this day.</p>
-      )}
-
-      {record?.note ? (
-        <p className="hra-detail__note">
-          <strong>Correction note:</strong> {record.note}
-        </p>
-      ) : null}
+        {record?.note ? (
+          <p className="hra-drawer__note">
+            <strong>Correction note:</strong> {record.note}
+          </p>
+        ) : null}
+      </div>
 
       {canCorrectDay(day) ? (
-        <div className="hra-detail__actions">
+        <div className="hra-drawer__foot">
           <button type="button" className="btn btn--outline btn--sm" onClick={onCorrect}>
             Correct day
           </button>
         </div>
       ) : null}
-    </section>
+    </Dialog>
   );
 }

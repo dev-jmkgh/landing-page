@@ -320,7 +320,11 @@ export type CalendarDayStatus =
   | 'weekly_off'
   | 'upcoming'
   | 'untracked'
-  | 'not_employed';
+  | 'not_employed'
+  /* While the day is in progress — before the nightly verdict on its hours. */
+  | 'checked_in'
+  | 'checked_out'
+  | 'yet_to_check_in';
 
 export const DAY_STATUS_LABELS: Record<CalendarDayStatus, string> = {
   present: 'Present',
@@ -333,7 +337,21 @@ export const DAY_STATUS_LABELS: Record<CalendarDayStatus, string> = {
   upcoming: 'Not yet',
   untracked: 'Not tracked',
   not_employed: 'Not employed',
+  checked_in: 'Checked in',
+  checked_out: 'Checked out',
+  yet_to_check_in: 'Yet to check in',
 };
+
+/**
+ * The verdict under a live status, for anything that COUNTS days — the server's
+ * `verdictOf`: a day in progress counts as what its roll-up says so far, and a day not
+ * punched yet as not yet judged. Labels show `status`; totals use this.
+ */
+export function dayVerdict(day: Pick<CalendarDay, 'status' | 'attendance'>): CalendarDayStatus {
+  if ((day.status === 'checked_in' || day.status === 'checked_out') && day.attendance) return day.attendance.status;
+  if (day.status === 'yet_to_check_in') return 'upcoming';
+  return day.status;
+}
 
 export type StatusTone = 'neutral' | 'progress' | 'good' | 'warn' | 'bad';
 
@@ -348,6 +366,9 @@ export const DAY_STATUS_TONE: Record<CalendarDayStatus, StatusTone> = {
   upcoming: 'neutral',
   untracked: 'neutral',
   not_employed: 'neutral',
+  checked_in: 'good',
+  checked_out: 'progress',
+  yet_to_check_in: 'neutral',
 };
 
 /** Why a punch was flagged for review — the session `in_flags` / `out_flags` SET. */
@@ -392,7 +413,10 @@ export type Shift = {
   endsAt: string;
   breakMinutes: number;
   graceMinutes: number;
+  /** The FULL-DAY minimum: a finished day worked for less is a half day (or absent). */
   halfDayMinutes: number;
+  /** The HALF-DAY minimum: a finished day worked for less is absent. 0 = never. */
+  absentMinutes: number;
   isActive: boolean;
   /** Rest days, Sunday first. An empty list is a real answer — a seven-day rota. */
   weeklyOffDays: Weekday[];
@@ -408,6 +432,8 @@ export const REGISTER_STATUS_FILTERS = [
   'holiday',
   'weekly_off',
   'currently_in',
+  'checked_out',
+  'yet_to_check_in',
   'not_checked_out',
 ] as const;
 export type RegisterStatusFilter = (typeof REGISTER_STATUS_FILTERS)[number];
@@ -420,7 +446,9 @@ export const REGISTER_STATUS_FILTER_LABELS: Record<RegisterStatusFilter, string>
   on_leave: 'On leave',
   holiday: 'Holiday',
   weekly_off: 'Weekly off',
-  currently_in: 'In right now',
+  currently_in: 'Checked in (in right now)',
+  checked_out: 'Checked out (today)',
+  yet_to_check_in: 'Yet to check in (today)',
   not_checked_out: 'Did not check out',
 };
 
@@ -494,6 +522,11 @@ export type AttendanceDay = {
   openSessionStartedAt: string | null;
   missingPunch: boolean;
   flagged: boolean;
+  /**
+   * Where the day stands while it is not over (before the nightly verdict on its hours):
+   * in right now, or checked out for now. Null once the day is over — then `status` is it.
+   */
+  liveStatus: 'checked_in' | 'checked_out' | null;
   sessions: AttendanceSession[];
 };
 
@@ -547,16 +580,43 @@ export type AttendanceSummary = {
   totalSessions: number;
 };
 
-/** A calendar day with its recorded day — punches included — beside it. */
-export type AttendanceMonthDay = CalendarDay & { record: AttendanceDay | null };
+/** Where and how each punch of a session was made. Admin reads only. */
+export type SessionEvidence = {
+  inDeviceAt: string | null;
+  outDeviceAt: string | null;
+  inLatitude: number | null;
+  inLongitude: number | null;
+  outLatitude: number | null;
+  outLongitude: number | null;
+  /** From the site the check-in was judged against, when there was one. */
+  inDistanceMetres: number | null;
+  outDistanceMetres: number | null;
+  inAccuracyMetres: number | null;
+  outAccuracyMetres: number | null;
+  /** The site the check-in was matched to, if any. */
+  inLocationName: string | null;
+  inFlags: PunchFlag[];
+  outFlags: PunchFlag[];
+};
 
-/** One employee's month, as the attendance view shows it. */
-export type AttendanceMonth = {
-  month: string;
+/** A session as the attendance view reads it: the punch, and the evidence behind it. */
+export type AttendanceViewSession = AttendanceSession & Partial<SessionEvidence>;
+
+/** A calendar day with its recorded day — punches and their evidence — beside it. */
+export type AttendanceViewDay = CalendarDay & {
+  record: (Omit<AttendanceDay, 'sessions'> & { sessions: AttendanceViewSession[] }) | null;
+};
+
+/** One employee's days — a month or a week — as the attendance view shows them. */
+export type AttendanceDays = {
+  /** `YYYY-MM` when a month was asked for; null for a range such as a week. */
+  month: string | null;
+  from: string;
+  to: string;
   /** The shift they are on NOW. A recorded day's own `shiftStartsAt` snapshot wins. */
   shift: { name: string; startsAt: string; endsAt: string; breakMinutes: number } | null;
   summary: AttendanceSummary;
-  days: AttendanceMonthDay[];
+  days: AttendanceViewDay[];
 };
 
 /** One session of an exception day, with the evidence a reviewer needs. */
@@ -782,13 +842,15 @@ export const peopleApi = {
     ),
 
   /**
-   * The same month for the attendance view: each date with its recorded day and punches
-   * beside it, the month's totals, and the current shift. Also bounded at 31 days.
+   * The attendance view's days: a month (`month`) or a range of up to 31 days (`from` and
+   * `to`, the week view) — each date with its recorded day, punches and their evidence
+   * beside it, the period's totals, and the current shift.
    */
-  employeeAttendanceMonth: (id: number, month: string | undefined, signal?: AbortSignal) =>
-    adminRequest<AttendanceMonth>(`${BASE}/employees/${id}/attendance-month${qs({ month })}`, {
-      signal,
-    }),
+  employeeAttendanceDays: (
+    id: number,
+    query: { month?: string; from?: string; to?: string },
+    signal?: AbortSignal,
+  ) => adminRequest<AttendanceDays>(`${BASE}/employees/${id}/attendance-days${qs(query)}`, { signal }),
 
   /** That employee's balances for a year — every active leave type, read-only here. */
   leaveBalances: (userId: number, year: number, signal?: AbortSignal) =>
@@ -871,10 +933,9 @@ export const attendanceAdminApi = {
       (r) => r.shift,
     ),
 
+  /** `rejudged`: finished days re-judged because the full-day or half-day minimum changed. */
   updateShift: (id: number, body: Partial<ShiftInput> & { isActive?: boolean }) =>
-    adminRequest<{ shift: Shift }>(`${BASE}/shifts/${id}`, { method: 'PATCH', body }).then(
-      (r) => r.shift,
-    ),
+    adminRequest<{ shift: Shift; rejudged: number }>(`${BASE}/shifts/${id}`, { method: 'PATCH', body }),
 
   /* ---- assignment ---- */
   assign: (

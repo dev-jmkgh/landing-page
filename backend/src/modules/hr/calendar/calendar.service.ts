@@ -1,5 +1,6 @@
 import { query, type RowDataPacket } from '../../../db/pool';
 import { COMPANY_UTC_OFFSET, type AttendanceStatus, type WorkMode } from '../attendance/attendance.schema';
+import { ensureDaysJudged } from '../attendance/dayJudge';
 import { getHrSettings, parseWeekdays, WEEKDAYS, type Weekday } from '../settings/hrSettings';
 
 /**
@@ -116,6 +117,13 @@ export type CalendarAttendance = {
 /**
  * What a day was, as one word.
  *
+ * While a day is NOT OVER its hours have no verdict yet (see `attendance/dayJudge.ts`), so
+ * it says where the person is instead:
+ *   checked_in      — a session is open right now (a night shift may have begun yesterday)
+ *   checked_out     — today, punched and checked out for now; judged after midnight
+ *   yet_to_check_in — today, a working day for them, and no punch yet
+ *
+ * Once it is over:
  *   present / late / half_day — attended, as the attendance roll-up recorded it
  *   holiday / weekly_off      — not a working day for this person
  *   on_leave                  — approved leave (a half day shows here too; payroll
@@ -136,7 +144,21 @@ export type CalendarDayStatus =
   | 'weekly_off'
   | 'upcoming'
   | 'untracked'
-  | 'not_employed';
+  | 'not_employed'
+  | 'checked_in'
+  | 'checked_out'
+  | 'yet_to_check_in';
+
+/**
+ * The verdict underneath a live status, for anything that COUNTS days: an attended day
+ * still in progress counts as what its roll-up says (present, late), and a day nobody has
+ * punched yet counts as not yet judged. Labels show `status`; totals use this.
+ */
+export function verdictOf(day: Pick<CalendarDay, 'status' | 'attendance'>): CalendarDayStatus {
+  if ((day.status === 'checked_in' || day.status === 'checked_out') && day.attendance) return day.attendance.status;
+  if (day.status === 'yet_to_check_in') return 'upcoming';
+  return day.status;
+}
 
 export type CalendarDay = {
   date: string;
@@ -314,14 +336,32 @@ function employedOn(context: EmployeeCalendarContext, date: string): boolean {
   return true;
 }
 
-function resolveStatus(day: Omit<CalendarDay, 'status'>, today: string, trackedFrom: string | null): CalendarDayStatus {
+/**
+ * `today` is the judging boundary the caller asked for (payroll moves it); `liveToday` is
+ * the company's actual date, which decides which day is still in progress.
+ */
+function resolveStatus(
+  day: Omit<CalendarDay, 'status'>,
+  today: string,
+  liveToday: string,
+  trackedFrom: string | null,
+): CalendarDayStatus {
   if (!day.employed) return 'not_employed';
-  if (day.attendance && ATTENDED.has(day.attendance.status)) return day.attendance.status;
+  if (day.attendance && ATTENDED.has(day.attendance.status)) {
+    // In right now, whatever the date: a night shift that began yesterday is still running.
+    if (day.attendance.checkedInAt && !day.attendance.checkedOutAt) return 'checked_in';
+    // Out for now, and the day not over: the verdict on its hours comes after midnight.
+    if (day.date >= liveToday) return 'checked_out';
+    return day.attendance.status;
+  }
   if (day.holiday && !day.holiday.isOptional) return 'holiday';
   if (day.weeklyOff) return 'weekly_off';
   if (day.leave && day.leave.kind === 'leave') return 'on_leave';
+  const tracked = !(trackedFrom && day.date < trackedFrom);
+  // Expected in today and not punched yet: not absent — that is decided once the day is over.
+  if (day.date === liveToday && tracked) return 'yet_to_check_in';
   if (day.date >= today) return 'upcoming';
-  if (trackedFrom && day.date < trackedFrom) return 'untracked';
+  if (!tracked) return 'untracked';
   return 'absent';
 }
 
@@ -335,12 +375,19 @@ export async function calendarForUsers(
   to: string,
   options: { includePending?: boolean; today?: string } = {},
 ): Promise<Map<number, CalendarDay[]>> {
+  /*
+   * Every reader of a day's verdict comes through here — the calendars, the register,
+   * reports, payroll — so days that ended since the last pass are judged first (at most
+   * one pass a minute; see `dayJudge.ts`).
+   */
+  await ensureDaysJudged();
   const result = new Map<number, CalendarDay[]>();
   const ids = [...new Set(userIds)];
   if (ids.length === 0) return result;
 
   const dates = eachDate(from, to);
-  const today = options.today ?? companyToday();
+  const liveToday = companyToday();
+  const today = options.today ?? liveToday;
 
   const [settings, contexts, holidays, leave, attendance] = await Promise.all([
     getHrSettings(),
@@ -401,7 +448,7 @@ export async function calendarForUsers(
           : null,
       };
 
-      return { ...base, status: resolveStatus(base, today, settings.attendanceTrackedFrom) };
+      return { ...base, status: resolveStatus(base, today, liveToday, settings.attendanceTrackedFrom) };
     });
 
     result.set(userId, days);

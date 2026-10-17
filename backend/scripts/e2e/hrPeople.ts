@@ -766,12 +766,16 @@ export async function run(ctx: E2EContext): Promise<void> {
     regItems,
   );
   check(
-    'the employee who checked in is present, in right now, and flagged',
-    arunReg?.dayStatus === 'present' && arunReg?.currentlyIn === true && arunReg?.flagged === true && arunReg?.missingPunch === false,
+    'the employee who checked in today reads checked in, in right now, and flagged',
+    arunReg?.dayStatus === 'checked_in' && arunReg?.currentlyIn === true && arunReg?.flagged === true && arunReg?.missingPunch === false,
     arunReg,
   );
   if (!holidayToday) {
-    check('the one with no punch on a working day is absent', priyaReg?.dayStatus === 'absent' && priyaReg?.status === 'absent', priyaReg);
+    check(
+      'the one with no punch on a working day is yet to check in — not absent while the day is going',
+      priyaReg?.dayStatus === 'yet_to_check_in',
+      priyaReg,
+    );
   }
 
   const regPage1 = await admin.get(`/admin/hr/attendance?departmentId=${deptAId}&pageSize=1`);
@@ -793,11 +797,21 @@ export async function run(ctx: E2EContext): Promise<void> {
   check('status=currently_in', currentlyIn.json.total === 1 && sameSet(idsOf(currentlyIn), [arunId]), currentlyIn.json);
 
   const presentOnly = await regFilter(`departmentId=${deptAId}&status=present`);
-  check('status=present', presentOnly.json.total === 1 && sameSet(idsOf(presentOnly), [arunId]), presentOnly.json);
+  check('status=present names nobody today: verdicts wait for the day to end', presentOnly.json.total === 0, presentOnly.json);
+  const checkedOutToday = await regFilter(`departmentId=${deptAId}&status=checked_out`);
+  check('status=checked_out does not list somebody still in', checkedOutToday.json.total === 0, checkedOutToday.json);
 
   if (!holidayToday) {
     const absentA = await regFilter(`departmentId=${deptAId}&status=absent`);
-    check('status=absent', absentA.json.total === 1 && sameSet(idsOf(absentA), [priyaId]), absentA.json);
+    check('status=absent names nobody today either', absentA.json.total === 0, absentA.json);
+    const yetToCheckIn = await regFilter(`departmentId=${deptAId}&status=yet_to_check_in`);
+    check(
+      'status=yet_to_check_in names the one with no punch',
+      yetToCheckIn.json.total === 1 &&
+        sameSet(idsOf(yetToCheckIn), [priyaId]) &&
+        itemsOf(yetToCheckIn.json)[0]?.dayStatus === 'yet_to_check_in',
+      yetToCheckIn.json,
+    );
 
     const weeklyOff = await regFilter(`departmentId=${deptBId}&status=weekly_off`);
     check(
@@ -818,11 +832,11 @@ export async function run(ctx: E2EContext): Promise<void> {
       onLeave.json,
     );
 
-    const absentB = await regFilter(`departmentId=${deptBId}&status=absent`);
+    const notInB = await regFilter(`departmentId=${deptBId}&status=yet_to_check_in`);
     check(
-      'absent excludes people on leave and on their weekly off',
-      absentB.status === 200 && absentB.json.total === 0,
-      absentB.json,
+      'yet to check in excludes people on leave and on their weekly off',
+      notInB.status === 200 && notInB.json.total === 0,
+      notInB.json,
     );
   }
 
@@ -1048,8 +1062,8 @@ export async function run(ctx: E2EContext): Promise<void> {
   const ghostCalendar = await admin.get('/admin/hr/employees/99999999/calendar');
   check('an unknown employee’s calendar is a 404', ghostCalendar.status === 404, ghostCalendar.status);
 
-  /* The attendance view's month: the calendar, with each day's record and punches beside it. */
-  const monthView = await admin.get(`/admin/hr/employees/${priyaId}/attendance-month?month=${month}`);
+  /* The attendance view's days: the calendar month, with each day's record and punches beside it. */
+  const monthView = await admin.get(`/admin/hr/employees/${priyaId}/attendance-days?month=${month}`);
   const viewDays = (monthView.json.days as Json[] | undefined) ?? [];
   const viewD3 = viewDays.find((day) => day.date === d3);
   check(
@@ -1094,12 +1108,59 @@ export async function run(ctx: E2EContext): Promise<void> {
       (typeof monthView.json.shift?.startsAt === 'string' && typeof monthView.json.shift?.name === 'string'),
     monthView.json.shift,
   );
-  const badViewMonth = await admin.get(`/admin/hr/employees/${priyaId}/attendance-month?month=2026-13`);
+  const badViewMonth = await admin.get(`/admin/hr/employees/${priyaId}/attendance-days?month=2026-13`);
   check('the attendance view refuses an impossible month', badViewMonth.status === 422, badViewMonth.status);
-  const ghostView = await admin.get('/admin/hr/employees/99999999/attendance-month');
+  const ghostView = await admin.get('/admin/hr/employees/99999999/attendance-days');
   check('and an unknown employee is a 404', ghostView.status === 404, ghostView.status);
-  const raviView = await ravi.get(`/admin/hr/employees/${priyaId}/attendance-month`);
+  const raviView = await ravi.get(`/admin/hr/employees/${priyaId}/attendance-days`);
   check('a telecaller cannot read the attendance view', raviView.status === 403, raviView.status);
+
+  /* A week: what the table and punch views page through. */
+  const weekFrom = daysAgo(6);
+  const weekView = await admin.get(`/admin/hr/employees/${priyaId}/attendance-days?from=${weekFrom}&to=${today}`);
+  const weekDays = (weekView.json.days as Json[] | undefined) ?? [];
+  check(
+    'the attendance view serves a week as a range of dates',
+    weekView.status === 200 &&
+      weekView.json.month === null &&
+      weekView.json.from === weekFrom &&
+      weekView.json.to === today &&
+      weekDays.length === 7 &&
+      weekDays[0]?.date === weekFrom &&
+      weekDays[6]?.date === today,
+    { status: weekView.status, from: weekView.json.from, to: weekView.json.to, length: weekDays.length },
+  );
+  check(
+    'with the same verdicts as the month for the dates they share',
+    weekDays
+      .filter((day) => String(day.date).slice(0, 7) === month)
+      .every((day) => viewDays.find((other) => other.date === day.date)?.status === day.status),
+    weekDays.map((day) => `${day.date}:${day.status}`),
+  );
+  const halfRange = await admin.get(`/admin/hr/employees/${priyaId}/attendance-days?from=${weekFrom}`);
+  check('a range needs both ends', halfRange.status === 422 && Boolean(halfRange.json.errors?.to), halfRange.json);
+  const backwardsRange = await admin.get(`/admin/hr/employees/${priyaId}/attendance-days?from=${today}&to=${weekFrom}`);
+  check('a reversed range is refused', backwardsRange.status === 422, backwardsRange.status);
+  const longRange = await admin.get(
+    `/admin/hr/employees/${priyaId}/attendance-days?from=${daysAgo(40)}&to=${today}`,
+  );
+  check('a range longer than 31 days is refused', longRange.status === 422, longRange.status);
+
+  /* Each session carries where and how it was punched — what the day drawer shows. */
+  const arunDay = await admin.get(`/admin/hr/employees/${arunId}/attendance-days?from=${today}&to=${today}`);
+  const arunPunch = (arunDay.json.days as Json[] | undefined)?.[0]?.record?.sessions?.[0] as Json | undefined;
+  check(
+    'a session carries its punch evidence: flags, device time, coordinates and site',
+    arunDay.status === 200 &&
+      (arunDay.json.days as Json[])[0]?.record?.workMode === 'remote' &&
+      Array.isArray(arunPunch?.inFlags) &&
+      (arunPunch!.inFlags as string[]).includes('mock_location') &&
+      typeof arunPunch?.inDeviceAt === 'string' &&
+      'inLatitude' in (arunPunch ?? {}) &&
+      'inAccuracyMetres' in (arunPunch ?? {}) &&
+      'inLocationName' in (arunPunch ?? {}),
+    arunPunch,
+  );
 
   /* ------------------------------------------------------------ exceptions */
 
@@ -1185,7 +1246,7 @@ export async function run(ctx: E2EContext): Promise<void> {
     ['PATCH', `/admin/hr/employees/${priyaId}`, { role: 'hr_admin' }],
     ['GET', `/admin/hr/employees/${priyaId}/attendance`],
     ['GET', `/admin/hr/employees/${priyaId}/calendar`],
-    ['GET', `/admin/hr/employees/${priyaId}/attendance-month`],
+    ['GET', `/admin/hr/employees/${priyaId}/attendance-days`],
     ['GET', '/admin/hr/settings'],
     ['PATCH', '/admin/hr/settings', { defaultWeeklyOff: [] }],
     ['GET', `/admin/hr/attendance?status=absent&departmentId=${deptAId}`],

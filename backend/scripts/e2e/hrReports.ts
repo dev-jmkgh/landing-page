@@ -430,8 +430,8 @@ export async function run(ctx: E2EContext): Promise<void> {
   );
   const todayRow = items(dailyP2)[1] ?? {};
   check(
-    'the last row is today, present, with a first check-in',
-    todayRow.date === today && todayRow.status === 'present' && typeof todayRow.firstIn === 'string',
+    'the last row is today, checked in — no verdict until the day is over — with a first check-in',
+    todayRow.date === today && todayRow.status === 'checked_in' && typeof todayRow.firstIn === 'string',
     todayRow,
   );
   const dailyDept = await admin.get(`/admin/hr/reports/attendance/daily?${range}&departmentId=${departmentId}`);

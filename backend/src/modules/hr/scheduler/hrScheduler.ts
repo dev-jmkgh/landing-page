@@ -1,6 +1,7 @@
-import { query, type RowDataPacket } from '../../../db/pool';
+import { execute, query, type RowDataPacket } from '../../../db/pool';
 import { describeError, logger } from '../../../utils/logger';
 import { closeStaleSessions } from '../attendance/attendance.service';
+import { judgeEndedDays } from '../attendance/dayJudge';
 import { addDays, calendarForUsers, companyToday } from '../calendar/calendar.service';
 import { notifyHr } from '../notifications/hrNotifications.repository';
 import { companyInstant, shiftEndInstant } from '../reports/companyClock';
@@ -59,6 +60,8 @@ export type HrTickResult = {
   /** Rows actually written — a deduplicated repeat counts 0. */
   checkInReminders: number;
   checkOutReminders: number;
+  /** Days given their verdict by the nightly pass; 0 on every tick but the night's first. */
+  judgedDays: number;
   /** One entry per job that failed. The other jobs still ran. */
   failures: string[];
 };
@@ -139,12 +142,13 @@ async function checkInReminders(now: Date): Promise<number> {
     const byStart = new Map<string, number[]>();
     for (let start = 0; start < ids.length; start += CALENDAR_BATCH) {
       const batch = ids.slice(start, start + CALENDAR_BATCH);
-      // `today: workDate` so a day with nothing recorded reads as `upcoming`, not
-      // `absent` — the question is whether it is a working day, not how it ended.
+      // A working day with nothing recorded reads `yet_to_check_in` today (`upcoming` for a
+      // later date) — the question is whether it is a working day, not how it ended.
       const calendars = await calendarForUsers(batch, workDate, workDate, { today: workDate });
       for (const userId of batch) {
         const day = calendars.get(userId)?.[0];
-        if (!day || day.status !== 'upcoming' || day.attendance !== null || open.has(userId)) continue;
+        const notIn = day?.status === 'yet_to_check_in' || day?.status === 'upcoming';
+        if (!day || !notIn || day.attendance !== null || open.has(userId)) continue;
         const startsAt = people.get(userId)!;
         byStart.set(startsAt, [...(byStart.get(startsAt) ?? []), userId]);
       }
@@ -224,6 +228,40 @@ async function checkOutReminders(now: Date): Promise<number> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* The nightly verdict                                                         */
+/* -------------------------------------------------------------------------- */
+
+const JUDGED_ON_KEY = 'attendance_judged_on';
+
+/**
+ * Once a company day, on the first tick after midnight: every day that has ended gets its
+ * verdict on the hours worked — full day, half day or absent (`dayJudge.ts`). A day is
+ * never judged while it can still change: somebody who checked out at lunch may come back,
+ * and somebody who started late may stay on past their shift to make up the hours.
+ *
+ * The date of the last pass is kept in `hr_settings`, so a restart does not run it twice
+ * and a night the server was down is caught up on the next tick (the pass looks back 45
+ * days). Two instances racing at midnight would both run it, harmlessly: it only writes
+ * days whose verdict differs.
+ */
+async function judgeLastNight(now: Date): Promise<number> {
+  const today = companyToday(now);
+  const [last] = await query<RowDataPacket & { setting_value: string }>(
+    'SELECT setting_value FROM hr_settings WHERE setting_key = ? LIMIT 1',
+    [JUDGED_ON_KEY],
+  );
+  if (last?.setting_value === today) return 0;
+
+  const judged = await judgeEndedDays();
+  await execute(
+    `INSERT INTO hr_settings (setting_key, setting_value) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+    [JUDGED_ON_KEY, today],
+  );
+  return judged;
+}
+
+/* -------------------------------------------------------------------------- */
 /* One tick                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -241,10 +279,16 @@ export async function runHrSchedulerTick(now: Date = new Date()): Promise<HrTick
     closedSessions: 0,
     checkInReminders: 0,
     checkOutReminders: 0,
+    judgedDays: 0,
     failures: [],
   };
 
+  /*
+   * The nightly verdict first: the reminders read the calendar, and the days should carry
+   * their verdicts before anything reads them.
+   */
   const jobs: Array<[string, () => Promise<void>]> = [
+    ['nightly_verdict', async () => void (result.judgedDays = await judgeLastNight(now))],
     ['sweep', async () => void (result.closedSessions = await sweepStaleSessions())],
     ['check_in_reminders', async () => void (result.checkInReminders = await checkInReminders(now))],
     ['check_out_reminders', async () => void (result.checkOutReminders = await checkOutReminders(now))],
@@ -258,11 +302,12 @@ export async function runHrSchedulerTick(now: Date = new Date()): Promise<HrTick
     }
   }
 
-  if (result.closedSessions + result.checkInReminders + result.checkOutReminders > 0) {
+  if (result.closedSessions + result.checkInReminders + result.checkOutReminders + result.judgedDays > 0) {
     logger.info('HR scheduler tick', {
       closedSessions: result.closedSessions,
       checkInReminders: result.checkInReminders,
       checkOutReminders: result.checkOutReminders,
+      judgedDays: result.judgedDays,
     });
   }
   return result;

@@ -183,7 +183,7 @@ export function EmployeeAttendanceTab({
                   header: 'Status',
                   width: '10rem',
                   render: (row) => (
-                    <CellStack primary={<AttendanceStatusTag status={row.status} />}>
+                    <CellStack primary={<AttendanceStatusTag status={row.status} live={row.liveStatus} />}>
                       <DayMarkers missingPunch={row.missingPunch} flagged={row.flagged} source={row.source} />
                     </CellStack>
                   ),

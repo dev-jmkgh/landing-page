@@ -33,6 +33,9 @@ import { isAbort } from './shared';
 
 /** The order the month's totals are listed in. Statuses with no days are left out. */
 const SUMMARY_ORDER: CalendarDayStatus[] = [
+  'checked_in',
+  'checked_out',
+  'yet_to_check_in',
   'present',
   'late',
   'half_day',

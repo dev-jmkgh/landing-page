@@ -15,11 +15,10 @@ import {
   type RowDataPacket,
   type SqlParam,
 } from '../../../db/pool';
-import { badRequest, notFound } from '../../../utils/httpError';
+import { badRequest, notFound, validationFailed } from '../../../utils/httpError';
 import { clientIp } from '../../../utils/request';
 import { recordAudit } from '../../telecalling/activity/activity.repository';
 import {
-  addDays,
   calendarForUsers,
   companyToday,
   holidaysBetween,
@@ -39,6 +38,7 @@ import {
   type WorkLocation,
 } from './attendance.schema';
 import { dayFor, parseFlags, recomputeDayFor } from './attendance.service';
+import { ensureDaysJudged, rejudgeShiftDays } from './dayJudge';
 import {
   approve as approveRegularisation,
   findById as findRegularisation,
@@ -234,6 +234,7 @@ interface ShiftRow extends RowDataPacket {
   break_minutes: number;
   grace_minutes: number;
   half_day_minutes: number;
+  absent_minutes: number;
   /** A MySQL SET, read as its comma list ('sat,sun'), or '' for no weekly off. */
   weekly_off_days: string | null;
   is_active: number;
@@ -248,6 +249,7 @@ function toShift(row: ShiftRow): Shift {
     breakMinutes: Number(row.break_minutes),
     graceMinutes: Number(row.grace_minutes),
     halfDayMinutes: Number(row.half_day_minutes),
+    absentMinutes: Number(row.absent_minutes),
     isActive: row.is_active === 1,
     // Fallback [] rather than the company default: a shift row ALWAYS has the column
     // (NOT NULL, default 'sun'), so an empty value means the shift genuinely has none.
@@ -260,7 +262,21 @@ function sortWeekdays(days: Weekday[]): Weekday[] {
   return WEEKDAYS.filter((day) => days.includes(day));
 }
 
-const SHIFT_COLUMNS = `id, name, starts_at, ends_at, break_minutes, grace_minutes, half_day_minutes, weekly_off_days, is_active`;
+const SHIFT_COLUMNS = `id, name, starts_at, ends_at, break_minutes, grace_minutes, half_day_minutes, absent_minutes, weekly_off_days, is_active`;
+
+/**
+ * The two thresholds must be in order: the half-day minimum (absent under) cannot exceed
+ * the full-day minimum (half day under), or no day could ever be a half day and a day in
+ * between would be judged by whichever rule SQL reached first. Equal is allowed — a shift
+ * with no half days at all.
+ */
+function checkThresholds(fullDayMinutes: number, absentMinutes: number) {
+  if (absentMinutes > fullDayMinutes) {
+    throw validationFailed({
+      absentMinutes: 'The half-day minimum must not be more than the full-day minimum.',
+    });
+  }
+}
 
 hrAttendanceAdminRouter.get(
   '/shifts',
@@ -279,6 +295,7 @@ hrAttendanceAdminRouter.post(
   validateBody(shiftSchema),
   asyncHandler(async (request, response) => {
     const input = request.body as z.infer<typeof shiftSchema>;
+    checkThresholds(input.halfDayMinutes, input.absentMinutes ?? 0);
 
     const existing = await queryOne<RowDataPacket & { id: number }>(
       'SELECT id FROM hr_shifts WHERE name = ? LIMIT 1',
@@ -295,8 +312,8 @@ hrAttendanceAdminRouter.post(
     const result = await execute(
       `INSERT INTO hr_shifts
          (name, starts_at, ends_at, break_minutes, grace_minutes, half_day_minutes,
-          weekly_off_days, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          absent_minutes, weekly_off_days, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.name,
         `${input.startsAt}:00`,
@@ -304,6 +321,7 @@ hrAttendanceAdminRouter.post(
         input.breakMinutes,
         input.graceMinutes,
         input.halfDayMinutes,
+        input.absentMinutes ?? 0,
         weeklyOffDays.join(','),
         input.isActive === false ? 0 : 1,
       ],
@@ -340,6 +358,13 @@ hrAttendanceAdminRouter.patch(
     );
     if (!current) throw notFound('Shift not found.');
 
+    // Either threshold may be sent alone; the pair is checked as it will be stored.
+    const fullDay = input.halfDayMinutes ?? Number(current.half_day_minutes);
+    const absentUnder = input.absentMinutes ?? Number(current.absent_minutes);
+    checkThresholds(fullDay, absentUnder);
+    const thresholdsChanged =
+      fullDay !== Number(current.half_day_minutes) || absentUnder !== Number(current.absent_minutes);
+
     /*
      * `weekly_off_days` follows the same COALESCE rule, and an EMPTY list still writes:
      * '' is not NULL, so "no weekly off" replaces the old value rather than being taken
@@ -353,6 +378,7 @@ hrAttendanceAdminRouter.patch(
               break_minutes = COALESCE(?, break_minutes),
               grace_minutes = COALESCE(?, grace_minutes),
               half_day_minutes = COALESCE(?, half_day_minutes),
+              absent_minutes = COALESCE(?, absent_minutes),
               weekly_off_days = COALESCE(?, weekly_off_days),
               is_active = COALESCE(?, is_active)
         WHERE id = ?`,
@@ -363,34 +389,47 @@ hrAttendanceAdminRouter.patch(
         input.breakMinutes ?? null,
         input.graceMinutes ?? null,
         input.halfDayMinutes ?? null,
+        input.absentMinutes ?? null,
         input.weeklyOffDays === undefined ? null : input.weeklyOffDays.join(','),
         input.isActive === undefined ? null : input.isActive ? 1 : 0,
         id,
       ],
     );
 
+    // New thresholds reach the finished days already worked on this shift, not only new ones.
+    const rejudged = thresholdsChanged ? await rejudgeShiftDays(id) : 0;
+
+    const meta: Record<string, unknown> = {};
+    if (input.weeklyOffDays !== undefined) {
+      meta.weeklyOffDays = {
+        before: sortWeekdays(parseWeekdays(current.weekly_off_days ?? '', [])),
+        after: input.weeklyOffDays,
+      };
+    }
+    if (thresholdsChanged) {
+      meta.thresholds = {
+        before: { fullDayMinutes: Number(current.half_day_minutes), absentMinutes: Number(current.absent_minutes) },
+        after: { fullDayMinutes: fullDay, absentMinutes: absentUnder },
+      };
+      meta.rejudgedDays = rejudged;
+    }
+
     await recordAudit({
       actor: request.actor!,
       action: 'hr_shift_updated',
       entityType: 'hr_shift',
       entityId: id,
-      summary: `Updated shift ${current.name}`,
-      meta:
-        input.weeklyOffDays === undefined
-          ? null
-          : {
-              weeklyOffDays: {
-                before: sortWeekdays(parseWeekdays(current.weekly_off_days ?? '', [])),
-                after: input.weeklyOffDays,
-              },
-            },
+      summary: thresholdsChanged
+        ? `Updated shift ${current.name}; ${rejudged} finished day${rejudged === 1 ? '' : 's'} re-judged`
+        : `Updated shift ${current.name}`,
+      meta: Object.keys(meta).length ? meta : null,
       ipAddress: clientIp(request),
     });
 
     const row = await queryOne<ShiftRow>(`SELECT ${SHIFT_COLUMNS} FROM hr_shifts WHERE id = ?`, [
       id,
     ]);
-    response.json({ success: true, shift: toShift(row!) });
+    response.json({ success: true, shift: toShift(row!), rejudged });
   }),
 );
 
@@ -474,9 +513,10 @@ const optionalQueryDate = z.preprocess(
 );
 
 /**
- * What the register's `status` filter can ask for. The first seven are the day's
- * CALENDAR status (see `calendar.service`); the last two are about sessions and cut
- * across it — somebody late can also be currently in.
+ * What the register's `status` filter can ask for — the day's CALENDAR status (see
+ * `calendar.service`). While a day is in progress that is `currently_in` (the calendar's
+ * `checked_in`), `checked_out` or `yet_to_check_in`; once it is over, the verdict.
+ * `not_checked_out` is about sessions and cuts across the rest.
  */
 export const REGISTER_STATUS_FILTERS = [
   'present',
@@ -487,6 +527,8 @@ export const REGISTER_STATUS_FILTERS = [
   'holiday',
   'weekly_off',
   'currently_in',
+  'checked_out',
+  'yet_to_check_in',
   'not_checked_out',
 ] as const;
 
@@ -548,9 +590,13 @@ function registerStatusCondition(
     weekday: Weekday;
     defaultWeeklyOff: Weekday[];
     isHoliday: boolean;
-    /** The date can be called absent: it has started, and tracking had begun by then. */
+    /** The date has a verdict: it is over, and tracking had begun by then. */
     judged: boolean;
+    /** Tracking had begun by the date. */
+    tracked: boolean;
     isPast: boolean;
+    /** The company's today: the day in progress, with live statuses instead of verdicts. */
+    isToday: boolean;
   },
 ): { sql: string; params: SqlParam[] } {
   const employed = {
@@ -575,11 +621,31 @@ function registerStatusCondition(
                          WHERE os.attendance_id = a.id AND os.ended_at IS NULL)`;
   const never = { sql: '1 = 0', params: [] as SqlParam[] };
 
+  // Attended, and closed: the in-progress twin of the calendar's `checked_in` test.
+  const closed = 'a.checked_out_at IS NOT NULL';
+
   switch (status) {
     case 'present':
     case 'late':
     case 'half_day':
-      return { sql: `(${employed.sql} AND a.status = ?)`, params: [...employed.params, status] };
+      // A verdict, so only for a day that is over; today's attended days are in or out.
+      if (facts.isToday) return never;
+      return {
+        sql: `(${employed.sql} AND a.status = ? AND (${closed} OR NOT ${open}))`,
+        params: [...employed.params, status],
+      };
+    case 'checked_out':
+      if (!facts.isToday) return never;
+      return {
+        sql: `(${employed.sql} AND a.status IN ('present','late','half_day') AND ${closed})`,
+        params: employed.params,
+      };
+    case 'yet_to_check_in':
+      if (!facts.isToday || facts.isHoliday || !facts.tracked) return never;
+      return {
+        sql: `(${employed.sql} AND ${notAttended} AND NOT (${weeklyOff.sql}) AND NOT ${onLeave.sql})`,
+        params: [...employed.params, ...weeklyOff.params, ...onLeave.params],
+      };
     case 'holiday':
       if (!facts.isHoliday) return never;
       return { sql: `(${employed.sql} AND ${notAttended})`, params: employed.params };
@@ -602,7 +668,7 @@ function registerStatusCondition(
         params: [...employed.params, ...weeklyOff.params, ...onLeave.params],
       };
     case 'currently_in':
-      return { sql: open, params: [] };
+      return { sql: `(${employed.sql} AND a.status IN ('present','late','half_day') AND ${open})`, params: employed.params };
     case 'not_checked_out':
       /*
        * Either the system already closed a forgotten session (a missing punch), or one is
@@ -627,11 +693,11 @@ function registerStatusCondition(
  * attendance rows would answer "who came in" while silently omitting the question the
  * register exists to answer, which is who did not.
  *
- * THE REGISTER JUDGES ITS OWN DATE. Read for today, somebody with no punch is `absent`
- * in `dayStatus` — not the calendar's `upcoming` — because "who has not come in" is the
- * question the register answers, and its `status` column has always said absent for
- * them. Leave, holidays and weekly offs still take precedence, so `absent` never names
- * somebody who was not expected in. A future date stays `upcoming`.
+ * TODAY IS IN PROGRESS. Read for today, `dayStatus` says where each person is — checked
+ * in, checked out, or yet to check in — rather than a verdict: nobody is absent, half day
+ * or late-and-done until the day is over and the nightly pass has judged it
+ * (`dayJudge.ts`). Leave, holidays and weekly offs still take precedence. A past date
+ * shows its verdict; a future one stays `upcoming`.
  */
 hrAttendanceAdminRouter.get(
   '/attendance',
@@ -643,6 +709,8 @@ hrAttendanceAdminRouter.get(
     const today = companyToday();
     const date = filters.date ?? today;
 
+    // The status filter below reads the stored verdicts, so days that ended get theirs first.
+    await ensureDaysJudged();
     const [settings, holidays] = await Promise.all([getHrSettings(), holidaysBetween(date, date)]);
     const trackedFrom = settings.attendanceTrackedFrom;
 
@@ -672,8 +740,10 @@ hrAttendanceAdminRouter.get(
         weekday: weekdayOf(date),
         defaultWeeklyOff: settings.defaultWeeklyOff,
         isHoliday: holidays.some((holiday) => !holiday.isOptional),
-        judged: date <= today && !(trackedFrom !== null && date < trackedFrom),
+        judged: date < today && !(trackedFrom !== null && date < trackedFrom),
+        tracked: !(trackedFrom !== null && date < trackedFrom),
         isPast: date < today,
+        isToday: date === today,
       });
       conditions.push(condition.sql);
       whereParams.push(...condition.params);
@@ -715,16 +785,11 @@ hrAttendanceAdminRouter.get(
       params,
     );
 
-    /*
-     * The calendar for exactly this page's people — one batch, five queries. For today
-     * the classifier is told the day has been reached (`today` = tomorrow), which is the
-     * "register judges its own date" rule above; any other date is classified as is.
-     */
+    // The calendar for exactly this page's people — one batch, five queries.
     const calendars = await calendarForUsers(
       rows.map((row) => row.user_id),
       date,
       date,
-      { today: date === today ? addDays(today, 1) : today },
     );
 
     const iso = (v: Date | string | null) => (v ? new Date(v).toISOString() : null);

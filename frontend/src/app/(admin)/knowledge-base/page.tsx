@@ -386,7 +386,10 @@ export default function KnowledgeBasePage() {
               <strong>Organisation:</strong> add departments and designations. Set “Attendance
               tracked from” to the go-live date, so payroll does not count earlier days as absent.
             </li>
-            <li><strong>Workplaces:</strong> add office sites and shifts (with weekly offs).</li>
+            <li>
+              <strong>Workplaces:</strong> add office sites and shifts — with weekly offs and the
+              day rules (e.g. 7h a full day, 3h 30m a half day, less is absent).
+            </li>
             <li>
               <strong>Employees:</strong> approve sign-ups or add people; fill in each record
               (department, designation, manager, joining date) and set the attendance rule.
@@ -439,9 +442,13 @@ export default function KnowledgeBasePage() {
           </ol>
           <p>
             Loss of pay counts absent days and unpaid leave. Weekly offs, holidays and paid
-            leave are paid. A day worked shorter than the shift’s half-day threshold is a half
-            day — even if it started late — so half of it is loss of pay unless half-day leave
-            covers it. For somebody who joined or left during the period, the days outside
+            leave are paid. Each shift has two day rules, judged after the day is over (a nightly
+            job just after midnight): worked at least the <em>full-day</em> minimum is a full day;
+            at least the <em>half-day</em> minimum is a half day (half of it loss of pay unless
+            half-day leave covers it); less than that is absent. Until midnight a day shows as
+            present or late, so checking out for lunch, or starting late and staying on to make up
+            the hours, is never marked short early. Changing a shift’s day rules re-judges the
+            finished days on it, except days in an approved pay period. For somebody who joined or left during the period, the days outside
             their employment are not paid and are shown separately from loss of pay.
           </p>
         </section>

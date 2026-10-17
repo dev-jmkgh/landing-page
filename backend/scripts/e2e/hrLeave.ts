@@ -887,9 +887,8 @@ export async function run(ctx: E2EContext): Promise<void> {
   const teamToday = await manager.client.get('/hr/team/members');
   const wanda = items(teamToday).find((member) => Number(member.id) === wfhWorker.id);
   check(
-    'the team view shows them in, working from home',
-    wanda?.today?.currentlyIn === true && wanda?.today?.leave?.kind === 'wfh' &&
-      ['present', 'late', 'half_day'].includes(String(wanda?.today?.status)),
+    'the team view shows them checked in, working from home',
+    wanda?.today?.currentlyIn === true && wanda?.today?.leave?.kind === 'wfh' && wanda?.today?.status === 'checked_in',
     wanda?.today,
   );
 

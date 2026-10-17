@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { calendarQuerySchema, WORK_MODES } from '../attendance/attendance.schema';
-import { isIsoDate } from '../calendar/calendar.service';
+import { daysBetween, isIsoDate } from '../calendar/calendar.service';
 import {
   HR_APPROVAL_STATUSES,
   HR_EMPLOYMENT_STATUSES,
@@ -221,6 +221,34 @@ export const employeeAttendanceQuerySchema = pageQuerySchema.extend({
 });
 
 export const employeeCalendarQuerySchema = calendarQuerySchema;
+
+/**
+ * The attendance view's days: a whole month (the calendar), or a range of up to 31 days
+ * (the week the table and punch views page through). A range needs both ends; with
+ * neither, it is the current month.
+ */
+export const attendanceDaysQuerySchema = z
+  .object({
+    month: calendarQuerySchema.shape.month,
+    from: z.preprocess(blankAsUndefined, calendarDateField.optional()),
+    to: z.preprocess(blankAsUndefined, calendarDateField.optional()),
+  })
+  .superRefine((value, context) => {
+    if ((value.from === undefined) !== (value.to === undefined)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [value.from === undefined ? 'from' : 'to'],
+        message: 'Give both the start and the end of the range.',
+      });
+      return;
+    }
+    if (value.from === undefined || value.to === undefined) return;
+    if (value.from > value.to) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: 'The end must be on or after the start.' });
+    } else if (daysBetween(value.from, value.to) > 30) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: 'A range can cover at most 31 days.' });
+    }
+  });
 
 /* -------------------------------------------------------------------------- */
 /* Settings                                                                    */

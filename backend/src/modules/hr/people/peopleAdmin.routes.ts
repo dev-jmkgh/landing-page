@@ -10,7 +10,7 @@ import { validateBody, validateQuery } from '../../../middleware/validate';
 import { badRequest, notFound } from '../../../utils/httpError';
 import { clientIp } from '../../../utils/request';
 import { recordAudit } from '../../telecalling/activity/activity.repository';
-import { assignmentFor, historyFor, summaryFor } from '../attendance/attendance.service';
+import { assignmentFor, historyFor, sessionEvidenceFor, summaryFor } from '../attendance/attendance.service';
 import { calendarFor, companyToday, monthBounds } from '../calendar/calendar.service';
 import { listHrUsers } from '../hr.repository';
 import { getHrSettings, updateHrSettings } from '../settings/hrSettings';
@@ -31,6 +31,7 @@ import {
   updateDesignation,
 } from './people.repository';
 import {
+  attendanceDaysQuerySchema,
   departmentCreateSchema,
   departmentPatchSchema,
   designationCreateSchema,
@@ -396,44 +397,58 @@ hrPeopleAdminRouter.get(
 );
 
 /**
- * One employee's month for the attendance view: every date as the classifier sees it,
- * each with its recorded day — punches included — beside it, the month's totals, and the
- * shift they are on now.
+ * One employee's days for the attendance view — a month for the calendar, or a range (the
+ * week the table and punch views show): every date as the classifier sees it, each with
+ * its recorded day beside it, the period's totals, and the shift they are on now.
  *
  * The calendar alone cannot draw a punch timeline (it carries first in and last out, not
  * the sessions), and the paged attendance list cannot draw a calendar (a day with no row
- * is invisible there). A month is at most 31 days, so both are read whole: a bounded
- * aggregate the same size as the calendar it extends, in four queries however many days
- * have punches.
+ * is invisible there). The period is at most 31 days, so both are read whole: a bounded
+ * aggregate the size of a calendar month, in five queries however many days have punches.
+ *
+ * Each session carries its EVIDENCE (`sessionEvidenceFor`): where each punch was made, how
+ * accurate the fix was, how far from the site, and the matched site's name — what the
+ * day drawer shows beside each check-in and check-out.
  *
  * `shift` is the CURRENT assignment, for the timeline's shift band on days with no record.
  * A recorded day carries its own shift snapshot (`record.shiftStartsAt`), which wins.
  */
 hrPeopleAdminRouter.get(
-  '/employees/:id/attendance-month',
+  '/employees/:id/attendance-days',
   requireRole('supervisor'),
-  validateQuery(employeeCalendarQuerySchema),
+  validateQuery(attendanceDaysQuerySchema),
   asyncHandler(async (request, response) => {
     const id = parseId(request.params.id);
-    const { month } = response.locals.query as z.infer<typeof employeeCalendarQuerySchema>;
+    const filters = response.locals.query as z.infer<typeof attendanceDaysQuerySchema>;
 
     if (!(await findAccountState(id))) throw notFound('Employee not found.');
 
-    const period = month ?? companyToday().slice(0, 7);
-    const { start, end } = monthBounds(period);
+    const month = filters.from ? null : (filters.month ?? companyToday().slice(0, 7));
+    const { start, end } = month ? monthBounds(month) : { start: filters.from!, end: filters.to! };
+
     const [days, recorded, summary, assignment] = await Promise.all([
       calendarFor(id, start, end, { includePending: true }),
       historyFor(id, start, end),
       summaryFor(id, start, end),
       assignmentFor(id),
     ]);
+    const evidence = await sessionEvidenceFor(
+      recorded.map((day) => day.id).filter((dayId): dayId is number => dayId !== null),
+    );
 
-    const byDate = new Map(recorded.map((day) => [day.workDate, day]));
+    const byDate = new Map(
+      recorded.map((day) => [
+        day.workDate,
+        { ...day, sessions: day.sessions.map((session) => ({ ...session, ...evidence.get(session.id) })) },
+      ]),
+    );
     const shift = assignment.shift;
 
     response.json({
       success: true,
-      month: period,
+      month,
+      from: start,
+      to: end,
       shift: shift
         ? { name: shift.name, startsAt: shift.startsAt, endsAt: shift.endsAt, breakMinutes: shift.breakMinutes }
         : null,

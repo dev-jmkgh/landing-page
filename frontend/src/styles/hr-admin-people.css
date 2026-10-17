@@ -623,6 +623,27 @@
   color: var(--ink-400);
 }
 
+/* While the day is going: in (green), out for now (blue), not in yet (muted). */
+.hrp-cal__cell[data-status='checked_in'] {
+  background-color: var(--success-050);
+}
+
+.hrp-cal__cell[data-status='checked_in'] .hrp-cal__status {
+  color: var(--success-600);
+}
+
+.hrp-cal__cell[data-status='checked_out'] {
+  background-color: var(--info-050);
+}
+
+.hrp-cal__cell[data-status='checked_out'] .hrp-cal__status {
+  color: var(--info-600);
+}
+
+.hrp-cal__cell[data-status='yet_to_check_in'] .hrp-cal__status {
+  color: var(--ink-500);
+}
+
 .hrp-cal__cell[data-today='true'] {
   box-shadow: inset 0 0 0 2px var(--accent-500);
 }

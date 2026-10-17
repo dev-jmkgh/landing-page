@@ -38,7 +38,10 @@ type ShiftForm = {
   endsAt: string;
   breakMinutes: string;
   graceMinutes: string;
+  /** The full-day minimum, in minutes (the API's `halfDayMinutes`). */
   halfDayMinutes: string;
+  /** The half-day minimum, in minutes: under it a finished day is absent. '0' = never. */
+  absentMinutes: string;
   /** Sunday by default — the column's own default, chosen visibly rather than implied. */
   weeklyOffDays: Weekday[];
 };
@@ -49,9 +52,88 @@ const BLANK_SHIFT: ShiftForm = {
   endsAt: '18:00',
   breakMinutes: '60',
   graceMinutes: '10',
-  halfDayMinutes: '240',
+  halfDayMinutes: '420',
+  absentMinutes: '210',
   weeklyOffDays: ['sun'],
 };
+
+/** Minutes as "7h", "3h 30m", "45m" — the words the day rules are described in. */
+function hoursLabel(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest}m`;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
+/** The day rules in one line, e.g. "7h or more: full day · 3h 30m – 6h 59m: half day · under 3h 30m: absent". */
+function describeDayRules(fullDay: number, absentUnder: number): string {
+  if (fullDay <= 0) return 'Every finished day counts as a full day.';
+  const full = `${hoursLabel(fullDay)} or more: full day`;
+  if (absentUnder <= 0) return `${full} · under ${hoursLabel(fullDay)}: half day · never absent for short hours`;
+  if (absentUnder >= fullDay) return `${full} · under ${hoursLabel(fullDay)}: absent (no half days)`;
+  return `${full} · ${hoursLabel(absentUnder)} – ${hoursLabel(fullDay - 1)}: half day · under ${hoursLabel(absentUnder)}: absent`;
+}
+
+/**
+ * A length of time as hours and minutes, held as a count of minutes. Two small number
+ * boxes rather than one minutes box: "7 h 0 m" is how a shift policy is written down,
+ * and nobody should have to work out that seven hours is 420.
+ */
+function DurationField({
+  id,
+  label,
+  minutes,
+  onChange,
+  hint,
+}: {
+  id: string;
+  label: string;
+  minutes: string;
+  onChange: (minutes: string) => void;
+  hint?: string;
+}) {
+  const total = Math.max(0, Number(minutes) || 0);
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  const set = (nextHours: number, nextMinutes: number) =>
+    onChange(String(Math.max(0, Math.min(24, nextHours)) * 60 + Math.max(0, Math.min(59, nextMinutes))));
+
+  return (
+    <fieldset className="field hrw-duration">
+      <legend className="field__label">{label}</legend>
+      <div className="hrw-duration__inputs">
+        <label className="hrw-duration__part" htmlFor={`${id}-h`}>
+          <input
+            id={`${id}-h`}
+            className="input"
+            type="number"
+            min={0}
+            max={24}
+            inputMode="numeric"
+            value={hours}
+            onChange={(event) => set(Number(event.target.value) || 0, rest)}
+          />
+          <span>h</span>
+        </label>
+        <label className="hrw-duration__part" htmlFor={`${id}-m`}>
+          <input
+            id={`${id}-m`}
+            className="input"
+            type="number"
+            min={0}
+            max={59}
+            step={5}
+            inputMode="numeric"
+            value={rest}
+            onChange={(event) => set(hours, Number(event.target.value) || 0)}
+          />
+          <span>m</span>
+        </label>
+      </div>
+      {hint ? <p className="field__hint">{hint}</p> : null}
+    </fieldset>
+  );
+}
 
 function shiftFormFrom(shift: Shift): ShiftForm {
   return {
@@ -61,6 +143,7 @@ function shiftFormFrom(shift: Shift): ShiftForm {
     breakMinutes: String(shift.breakMinutes),
     graceMinutes: String(shift.graceMinutes),
     halfDayMinutes: String(shift.halfDayMinutes),
+    absentMinutes: String(shift.absentMinutes ?? 0),
     weeklyOffDays: [...(shift.weeklyOffDays ?? [])],
   };
 }
@@ -199,6 +282,7 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
       breakMinutes: Number(shiftForm.breakMinutes),
       graceMinutes: Number(shiftForm.graceMinutes),
       halfDayMinutes: Number(shiftForm.halfDayMinutes),
+      absentMinutes: Number(shiftForm.absentMinutes),
       weeklyOffDays: shiftForm.weeklyOffDays,
     };
 
@@ -206,14 +290,22 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
       setError('Name the shift.');
       return;
     }
+    if (body.absentMinutes > body.halfDayMinutes) {
+      setError('The half-day minimum must not be more than the full-day minimum.');
+      return;
+    }
 
     setSaving(true);
 
     try {
       if (editingShift) {
-        await attendanceAdminApi.updateShift(editingShift.id, body);
+        const { rejudged } = await attendanceAdminApi.updateShift(editingShift.id, body);
         setNotice(
-          `${body.name} saved. Weekly off: ${describeWeekdays(body.weeklyOffDays)}. Days already recorded keep their hours; how days are classified follows the new weekly off.`,
+          `${body.name} saved. Weekly off: ${describeWeekdays(body.weeklyOffDays)}. ${
+            rejudged > 0
+              ? `${rejudged} finished ${rejudged === 1 ? 'day was' : 'days were'} re-judged with the new day rules (days in an approved pay period are left as paid).`
+              : 'Days already recorded keep their hours; how days are classified follows the new settings.'
+          }`,
         );
       } else {
         await attendanceAdminApi.createShift(body);
@@ -539,18 +631,40 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
               />
             </div>
 
-            <div className="field">
-              <label className="field__label" htmlFor="hr-shift-half">
-                Half day under (minutes)
-              </label>
-              <input
-                id="hr-shift-half"
-                className="input"
-                inputMode="numeric"
-                value={shiftForm.halfDayMinutes}
-                onChange={(e) => setShiftForm({ ...shiftForm, halfDayMinutes: e.target.value })}
+          </div>
+
+          {/*
+            How a finished day is judged from the hours worked. Two minimums, as a policy
+            is written: "7 hours a full day, 3½ a half day, less is absent".
+          */}
+          <div className="hrw-dayrules" role="group" aria-labelledby="hr-shift-rules-title">
+            <p className="hrw-dayrules__title" id="hr-shift-rules-title">
+              Day rules
+            </p>
+            <div className="tc-form__grid hrw-dayrules__fields">
+              <DurationField
+                id="hr-shift-full"
+                label="Full day: at least"
+                minutes={shiftForm.halfDayMinutes}
+                onChange={(halfDayMinutes) => setShiftForm({ ...shiftForm, halfDayMinutes })}
+                hint="A finished day with fewer hours worked is not a full day."
+              />
+              <DurationField
+                id="hr-shift-halfmin"
+                label="Half day: at least"
+                minutes={shiftForm.absentMinutes}
+                onChange={(absentMinutes) => setShiftForm({ ...shiftForm, absentMinutes })}
+                hint="Fewer hours than this is absent. 0h 0m: short hours never make a day absent."
               />
             </div>
+            <p className="hrw-dayrules__summary" aria-live="polite">
+              {describeDayRules(Number(shiftForm.halfDayMinutes) || 0, Number(shiftForm.absentMinutes) || 0)}
+            </p>
+            <p className="field__hint">
+              Judged after the day is over (midnight), on the hours worked across all of the day’s sessions — so
+              somebody who checks out for lunch, or starts late and stays on to make up the time, is not marked short
+              while the day is still going. Until then the day shows as present or late.
+            </p>
           </div>
 
           <WeekdayPicker
@@ -633,12 +747,16 @@ export function HrWorkplacesPanel({ onUnauthorized }: { onUnauthorized: () => vo
               render: (row) => minutesAsHours(row.breakMinutes),
             },
             {
-              key: 'half',
-              header: 'Half day under',
-              width: '9rem',
-              align: 'end',
+              key: 'rules',
+              header: 'Full day · half day',
+              width: '11rem',
               nowrap: true,
-              render: (row) => minutesAsHours(row.halfDayMinutes),
+              render: (row) => (
+                <CellStack
+                  primary={`${minutesAsHours(row.halfDayMinutes)} · ${row.absentMinutes > 0 ? minutesAsHours(row.absentMinutes) : '—'}`}
+                  secondary={row.absentMinutes > 0 ? `under ${minutesAsHours(row.absentMinutes)}: absent` : 'never absent for short hours'}
+                />
+              ),
             },
             {
               key: 'actions',

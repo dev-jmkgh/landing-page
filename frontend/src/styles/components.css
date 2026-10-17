@@ -1204,6 +1204,13 @@
 /* --- Tables (admin) ------------------------------------------------------ */
 
 .table-wrap {
+  /*
+   * The containing block for visually hidden text inside the table — an "Actions" header,
+   * a caption (`.sr-only` is absolutely positioned). Without it those 1px spans are placed
+   * against an ancestor outside this scroller, escape its clip, and widen the whole page
+   * by the table's width on a phone.
+   */
+  position: relative;
   width: 100%;
   overflow-x: auto;
   border: 1px solid var(--line-200);

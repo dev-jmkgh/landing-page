@@ -229,7 +229,17 @@ export const shiftSchema = z.object({
   endsAt: z.string().regex(/^\d{2}:\d{2}$/, 'Use HH:MM.'),
   breakMinutes: z.coerce.number().int().min(0).max(480),
   graceMinutes: z.coerce.number().int().min(0).max(240),
+  /**
+   * The FULL-DAY minimum: a finished day with fewer minutes worked is not a full day.
+   * (Named for what falls under it — a half day — before the absent threshold existed.)
+   */
   halfDayMinutes: z.coerce.number().int().min(0).max(1440),
+  /**
+   * The HALF-DAY minimum: a finished day with fewer minutes worked is absent. 0 means
+   * short hours never make a day absent. Must not exceed `halfDayMinutes` — checked in
+   * the routes, against the stored value when only one of the two is sent.
+   */
+  absentMinutes: z.coerce.number().int().min(0).max(1440).optional(),
   isActive: z.boolean().optional(),
   /*
    * The shift's rest days. Optional on create (the column defaults to Sunday) and an
@@ -270,7 +280,10 @@ export type Shift = {
   endsAt: string;
   breakMinutes: number;
   graceMinutes: number;
+  /** The full-day minimum: a finished day worked for less is a half day (or absent). */
   halfDayMinutes: number;
+  /** The half-day minimum: a finished day worked for less is absent. 0 = never. */
+  absentMinutes: number;
   isActive: boolean;
   /**
    * Rest days, Sunday-first order. Always present on the admin shift endpoints.
@@ -332,6 +345,12 @@ export type AttendanceDay = {
   missingPunch: boolean;
   /** True when a punch on this day was flagged for review (see `PunchFlag`). */
   flagged: boolean;
+  /**
+   * Where the day stands while it is NOT OVER, when `status` (the roll-up so far) is not
+   * yet a verdict: in right now, or checked out for now. Null once the day is over —
+   * then `status` is the verdict (see `dayJudge.ts`).
+   */
+  liveStatus: 'checked_in' | 'checked_out' | null;
   sessions: AttendanceSession[];
 };
 

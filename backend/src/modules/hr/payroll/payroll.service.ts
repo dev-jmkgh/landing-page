@@ -8,6 +8,7 @@ import {
 } from '../calendar/calendar.service';
 import type { Page } from '../hr.schema';
 import { notifyHr } from '../notifications/hrNotifications.repository';
+import { judgeEndedDays } from '../attendance/dayJudge';
 import { getHrSettings } from '../settings/hrSettings';
 import {
   allRunPayslips,
@@ -363,6 +364,10 @@ export async function processRun(
    */
   const ended = run.periodEnd < today;
   const calculatedThrough = ended ? run.periodEnd : today;
+
+  // Pay is worked out from the days' verdicts, so every day that has ended gets its own
+  // first — unthrottled, unlike the pass reads make.
+  await judgeEndedDays();
 
   const [settings, candidates] = await Promise.all([
     getHrSettings(),

@@ -600,13 +600,6 @@
  */
 .hr-pay-table-wrap {
   container-type: inline-size;
-  /*
-   * The containing block for the visually hidden header text (`.sr-only` is absolutely
-   * positioned). Without it that 1px span is placed against an ancestor outside this
-   * scroller, so it escapes the overflow clip and widens the whole page — 1061px on a
-   * 390px phone.
-   */
-  position: relative;
 }
 
 .hr-pay-slip-head {

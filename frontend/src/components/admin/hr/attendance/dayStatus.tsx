@@ -33,8 +33,19 @@ export function DayStatusTag({ status }: { status: CalendarDayStatus }) {
   return <Tag tone={DAY_STATUS_TONE[status]}>{DAY_STATUS_LABELS[status]}</Tag>;
 }
 
-/** The attendance roll-up's own status, for a day that has a row. */
-export function AttendanceStatusTag({ status }: { status: AttendanceStatus }) {
+/**
+ * The attendance roll-up's own status, for a day that has a row — or, while the day is
+ * still going, where it stands (`live`): checked in or checked out, since a verdict on
+ * its hours only comes after midnight.
+ */
+export function AttendanceStatusTag({
+  status,
+  live,
+}: {
+  status: AttendanceStatus;
+  live?: 'checked_in' | 'checked_out' | null;
+}) {
+  if (live) return <DayStatusTag status={live} />;
   return <Tag tone={ATTENDANCE_TONE[status]}>{ATTENDANCE_STATUS_LABELS[status]}</Tag>;
 }
 

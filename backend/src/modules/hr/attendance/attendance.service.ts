@@ -1,6 +1,7 @@
 import { execute, query, queryOne, type RowDataPacket } from '../../../db/pool';
 import { logger } from '../../../utils/logger';
 import { notifyHr } from '../notifications/hrNotifications.repository';
+import { DAY_STATUS_CASE, JUDGED_STATUSES, ensureDaysJudged } from './dayJudge';
 import {
   LOCAL_NOW,
   LOCAL_TODAY,
@@ -52,6 +53,7 @@ interface AssignmentRow extends RowDataPacket {
   shift_break_minutes: number | null;
   shift_grace_minutes: number | null;
   shift_half_day_minutes: number | null;
+  shift_absent_minutes: number | null;
 }
 
 export type Assignment = {
@@ -86,7 +88,8 @@ export async function assignmentFor(userId: number): Promise<Assignment> {
             s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at,
             s.break_minutes AS shift_break_minutes,
             s.grace_minutes AS shift_grace_minutes,
-            s.half_day_minutes AS shift_half_day_minutes
+            s.half_day_minutes AS shift_half_day_minutes,
+            s.absent_minutes AS shift_absent_minutes
        FROM hr_users u
        LEFT JOIN hr_work_locations l ON l.id = u.work_location_id
        LEFT JOIN hr_shifts s         ON s.id = u.shift_id
@@ -122,6 +125,7 @@ export async function assignmentFor(userId: number): Promise<Assignment> {
           breakMinutes: Number(row.shift_break_minutes ?? 0),
           graceMinutes: Number(row.shift_grace_minutes ?? 0),
           halfDayMinutes: Number(row.shift_half_day_minutes ?? 0),
+          absentMinutes: Number(row.shift_absent_minutes ?? 0),
           isActive: true,
         }
       : null;
@@ -255,6 +259,8 @@ interface AttendanceRow extends RowDataPacket {
   flagged: number;
   session_count: number;
   open_session_started_at: Date | string | null;
+  /** 1 while the work date is today or later — the day is still in progress. */
+  day_not_over: number;
 }
 
 /**
@@ -277,7 +283,8 @@ const DAY_SELECT = `
            WHERE s.attendance_id = a.id AND s.ended_at IS NOT NULL) AS session_count,
          (SELECT s.started_at FROM hr_attendance_sessions s
            WHERE s.attendance_id = a.id AND s.ended_at IS NULL
-           ORDER BY s.id DESC LIMIT 1) AS open_session_started_at
+           ORDER BY s.id DESC LIMIT 1) AS open_session_started_at,
+         (a.work_date >= ${LOCAL_TODAY}) AS day_not_over
     FROM hr_attendance a
 `;
 
@@ -303,6 +310,11 @@ function toDay(row: AttendanceRow, sessions: AttendanceSession[] = []): Attendan
     openSessionStartedAt: iso(row.open_session_started_at),
     missingPunch: Number(row.missing_punch) === 1,
     flagged: Number(row.flagged) === 1,
+    liveStatus: row.open_session_started_at
+      ? 'checked_in'
+      : Number(row.day_not_over) === 1 && row.checked_out_at
+        ? 'checked_out'
+        : null,
     sessions,
   };
 }
@@ -372,6 +384,85 @@ async function sessionsFor(attendanceIds: number[]): Promise<Map<number, Attenda
   return byDay;
 }
 
+/** Where and how each punch of a session was made — for the admin's view of a day. */
+export type SessionEvidence = {
+  inDeviceAt: string | null;
+  outDeviceAt: string | null;
+  inLatitude: number | null;
+  inLongitude: number | null;
+  outLatitude: number | null;
+  outLongitude: number | null;
+  /** From the assigned site the check-in was judged against, when there was one. */
+  inDistanceMetres: number | null;
+  outDistanceMetres: number | null;
+  inAccuracyMetres: number | null;
+  outAccuracyMetres: number | null;
+  /** The site the check-in was matched to, if any. */
+  inLocationName: string | null;
+  inFlags: PunchFlag[];
+  outFlags: PunchFlag[];
+};
+
+interface EvidenceRow extends RowDataPacket {
+  id: number;
+  in_device_at: Date | string | null;
+  out_device_at: Date | string | null;
+  in_lat: string | null;
+  in_lng: string | null;
+  out_lat: string | null;
+  out_lng: string | null;
+  in_distance_metres: number | null;
+  out_distance_metres: number | null;
+  in_accuracy_metres: number | null;
+  out_accuracy_metres: number | null;
+  location_name: string | null;
+  in_flags: string;
+  out_flags: string;
+}
+
+/**
+ * The evidence behind each session, by session id: coordinates, accuracy, distance from
+ * the site, the handset's own clock and the flags. ADMIN READS ONLY — the employee's app
+ * never needs its own coordinates echoed back, so `sessionsFor` leaves them out.
+ *
+ * One query for every day asked for. DECIMAL coordinates arrive as strings from the driver
+ * (deliberately, see `toLocation` in the admin routes) and are cast here.
+ */
+export async function sessionEvidenceFor(attendanceIds: number[]): Promise<Map<number, SessionEvidence>> {
+  const bySession = new Map<number, SessionEvidence>();
+  if (attendanceIds.length === 0) return bySession;
+
+  // Ids from rows just read: integers by construction (see `sessionsFor`).
+  const rows = await query<EvidenceRow>(
+    `SELECT s.id, s.in_device_at, s.out_device_at, s.in_lat, s.in_lng, s.out_lat, s.out_lng,
+            s.in_distance_metres, s.out_distance_metres, s.in_accuracy_metres, s.out_accuracy_metres,
+            l.name AS location_name, s.in_flags, s.out_flags
+       FROM hr_attendance_sessions s
+       LEFT JOIN hr_work_locations l ON l.id = s.in_location_id
+      WHERE s.attendance_id IN (${attendanceIds.map((id) => Number(id)).join(',')})`,
+  );
+
+  const number = (value: string | number | null) => (value === null ? null : Number(value));
+  for (const row of rows) {
+    bySession.set(Number(row.id), {
+      inDeviceAt: iso(row.in_device_at),
+      outDeviceAt: iso(row.out_device_at),
+      inLatitude: number(row.in_lat),
+      inLongitude: number(row.in_lng),
+      outLatitude: number(row.out_lat),
+      outLongitude: number(row.out_lng),
+      inDistanceMetres: number(row.in_distance_metres),
+      outDistanceMetres: number(row.out_distance_metres),
+      inAccuracyMetres: number(row.in_accuracy_metres),
+      outAccuracyMetres: number(row.out_accuracy_metres),
+      inLocationName: row.location_name,
+      inFlags: parseFlags(row.in_flags),
+      outFlags: parseFlags(row.out_flags),
+    });
+  }
+  return bySession;
+}
+
 /**
  * The day the attendance screen is about.
  *
@@ -416,6 +507,8 @@ export async function historyFor(
   from: string,
   to: string,
 ): Promise<AttendanceDay[]> {
+  // Days that ended since the last pass get their verdict before they are listed.
+  await ensureDaysJudged();
   const rows = await query<AttendanceRow>(
     `${DAY_SELECT}
       WHERE a.user_id = ? AND a.work_date BETWEEN ? AND ?
@@ -491,9 +584,11 @@ export async function recomputeDayFor(userId: number, workDate: string): Promise
   );
 
   /*
-   * Status, decided after the totals are known — from scratch, every time.
+   * Status, decided after the totals are known — from scratch, every time, by the shared
+   * rule in `dayJudge.ts` (`DAY_STATUS_CASE`):
    *
-   *   half_day  the day is CLOSED and worked less than the shift's half-day threshold
+   *   absent    the day is finished and OVER, and worked less than the half-day minimum
+   *   half_day  the day is finished and over, and worked less than the full-day minimum
    *   late      otherwise, when the first check-in was after start + grace
    *   present   otherwise
    *
@@ -503,25 +598,21 @@ export async function recomputeDayFor(userId: number, workDate: string): Promise
    * four-hour afternoon session afterwards left it a half day. Deriving the status
    * again from the totals fixes both. Lateness is still on the row (`late_minutes`).
    *
-   * Only while the day is closed: a half-day flag on somebody two hours into their
-   * shift would be wrong and alarming. Rows written as absent or on leave are left alone.
+   * Only once the day is over: a short-hours verdict on somebody who checked out for
+   * lunch, or who started late and is still making up the hours, would be wrong and
+   * alarming. Until then the day reads present (or late). Rows written as on leave are
+   * left alone.
    */
   await execute(
     `UPDATE hr_attendance a
        LEFT JOIN hr_shifts s ON s.id = a.shift_id
-        SET a.status = CASE
-              WHEN a.checked_out_at IS NOT NULL
-               AND a.worked_minutes IS NOT NULL
-               AND s.id IS NOT NULL
-               AND a.worked_minutes < s.half_day_minutes THEN 'half_day'
-              WHEN a.late_minutes > 0 THEN 'late'
-              ELSE 'present'
-            END
+        SET a.status = ${DAY_STATUS_CASE}
       WHERE a.user_id = ? AND a.work_date = ?
-        AND a.status IN ('present', 'late', 'half_day')`,
+        AND a.status IN ${JUDGED_STATUSES}`,
     [userId, workDate],
   );
 }
+
 
 /* -------------------------------------------------------------------------- */
 /* Check in                                                                    */
@@ -915,6 +1006,7 @@ export async function summaryFor(
   from: string,
   to: string,
 ): Promise<AttendanceSummary> {
+  await ensureDaysJudged();
   const row = await queryOne<
     RowDataPacket & {
       days_present: number;

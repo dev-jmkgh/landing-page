@@ -287,7 +287,7 @@ export async function run(ctx: E2EContext): Promise<void> {
   const holidayDay = byDate.get(holidayDate);
   check(
     'core: a holiday is a holiday (unless it is a weekly off, which wins only when not a holiday)',
-    holidayDay?.status === 'holiday' || holidayDay?.status === 'upcoming' || holidayDay?.status === 'present',
+    ['holiday', 'upcoming', 'present', 'checked_in', 'checked_out'].includes(String(holidayDay?.status)),
     holidayDay,
   );
   check(
@@ -386,4 +386,164 @@ export async function run(ctx: E2EContext): Promise<void> {
     fullDay.status === 200 && fullDay.json.day?.status === 'present' && Number(fullDay.json.day?.workedMinutes) === 450,
     fullDay.json.day,
   );
+
+  /* ------------------------------------------------ full day, half day, absent */
+  /*
+   * Two thresholds: 7h or more is a full day, 3h30 or more a half day, less is absent.
+   * The shift's `halfDayMinutes` is the full-day minimum; `absentMinutes` the half-day one.
+   */
+  const backwards = await adminAsBearer.patch(`/admin/hr/shifts/${shiftId}`, { halfDayMinutes: 420, absentMinutes: 480 });
+  check(
+    'core: a half-day minimum above the full-day minimum is refused',
+    backwards.status === 422 && typeof backwards.json.errors?.absentMinutes === 'string',
+    backwards.json,
+  );
+  const badCreate = await adminAsBearer.post('/admin/hr/shifts', {
+    name: 'Core backwards shift',
+    startsAt: '09:00',
+    endsAt: '18:00',
+    breakMinutes: 60,
+    graceMinutes: 10,
+    halfDayMinutes: 200,
+    absentMinutes: 300,
+  });
+  check('core: and on a new shift too', badCreate.status === 422, badCreate.json);
+
+  const thresholds = await adminAsBearer.patch(`/admin/hr/shifts/${shiftId}`, { halfDayMinutes: 420, absentMinutes: 210 });
+  check(
+    'core: a shift takes a full-day and a half-day minimum',
+    thresholds.status === 200 && thresholds.json.shift?.halfDayMinutes === 420 && thresholds.json.shift?.absentMinutes === 210,
+    thresholds.json,
+  );
+
+  const judge = async (sessions: Array<{ startAt: string; endAt: string }>) =>
+    adminAsBearer.put(`/admin/hr/attendance/${halfDayUser.id}/${twoDaysAgo}`, { sessions, reason: 'Threshold check' });
+  const underHalf = await judge([{ startAt: '09:00', endAt: '10:00' }]);
+  check('core: under the half-day minimum is absent', underHalf.json.day?.status === 'absent', underHalf.json.day);
+  const betweenTwo = await judge([{ startAt: '09:00', endAt: '13:00' }]);
+  check('core: between the two minimums is a half day', betweenTwo.json.day?.status === 'half_day', betweenTwo.json.day);
+  const overFull = await judge([{ startAt: '09:00', endAt: '17:00' }]);
+  check('core: at or over the full-day minimum is a full day', overFull.json.day?.status === 'present', overFull.json.day);
+
+  const viewDay = async () =>
+    ((await adminAsBearer.get(`/admin/hr/employees/${halfDayUser.id}/attendance-days?from=${twoDaysAgo}&to=${twoDaysAgo}`))
+      .json.days as Json[] | undefined)?.[0];
+  await judge([{ startAt: '09:00', endAt: '12:00' }]);
+  const absentDay = await viewDay();
+  check('core: a three-hour day is absent under these minimums', absentDay?.record?.status === 'absent', absentDay?.record);
+  check(
+    'core: and the calendar counts it absent unless the date is a day off',
+    ['absent', 'weekly_off', 'holiday'].includes(String(absentDay?.status)),
+    absentDay?.status,
+  );
+
+  const relaxed = await adminAsBearer.patch(`/admin/hr/shifts/${shiftId}`, { absentMinutes: 120 });
+  check(
+    'core: lowering the half-day minimum re-judges the finished days on the shift',
+    relaxed.status === 200 && Number(relaxed.json.rejudged) >= 1,
+    relaxed.json,
+  );
+  const rejudgedDay = await viewDay();
+  check('core: the three-hour day is now a half day', rejudgedDay?.record?.status === 'half_day', rejudgedDay?.record);
+
+  const unchanged = await adminAsBearer.patch(`/admin/hr/shifts/${shiftId}`, { graceMinutes: 10 });
+  check('core: an edit that leaves the thresholds alone re-judges nothing', unchanged.json.rejudged === 0, unchanged.json);
+
+  /* ------------------------------------------------ the verdict waits for the day to end */
+  /*
+   * A check-out is not the end of the day: somebody may come back after lunch, or stay on
+   * late to make up the hours. Short hours make a day half or absent only once it is over
+   * — after midnight, judged by the scheduler's nightly pass.
+   */
+  const { judgeEndedDays } = await import('../../src/modules/hr/attendance/dayJudge');
+  const { runHrSchedulerTick } = await import('../../src/modules/hr/scheduler/hrScheduler');
+  const istNow = new Date(Date.now() + 330 * 60_000).toISOString().slice(11, 16);
+  if (istNow >= '00:20') {
+    const shortToday = await adminAsBearer.put(`/admin/hr/attendance/${halfDayUser.id}/${today}`, {
+      sessions: [{ startAt: '00:05', endAt: '00:15' }],
+      reason: 'Ten minutes today',
+    });
+    check(
+      'core: ten minutes today, checked out, is not absent while the day is still going',
+      shortToday.status === 200 && ['present', 'late'].includes(String(shortToday.json.day?.status)),
+      shortToday.json.day,
+    );
+    check(
+      'core: and the record says where the day stands: checked out, for now',
+      shortToday.json.day?.liveStatus === 'checked_out',
+      shortToday.json.day,
+    );
+    const todayView = (
+      (await adminAsBearer.get(`/admin/hr/employees/${halfDayUser.id}/attendance-days?from=${today}&to=${today}`)).json
+        .days as Json[] | undefined
+    )?.[0];
+    check(
+      'core: the calendar reads it as checked out — or as the day off it is',
+      ['checked_out', 'weekly_off', 'holiday'].includes(String(todayView?.status)),
+      todayView?.status,
+    );
+    const stillToday = await judgeEndedDays();
+    const [todayRow] = (await utcDb.query('SELECT status FROM hr_attendance WHERE user_id = ? AND work_date = ?', [
+      halfDayUser.id,
+      today,
+    ])) as unknown as [Array<{ status: string }>];
+    check(
+      'core: and the pass leaves it alone until the day is over',
+      ['present', 'late'].includes(String(todayRow[0]?.status)),
+      { stillToday, row: todayRow[0] },
+    );
+
+    // The same ten minutes on a day that is over: move the record back five days.
+    const fiveDaysAgo = new Date(Date.parse(`${today}T12:00:00Z`) - 5 * 86_400_000).toISOString().slice(0, 10);
+    await utcDb.query('UPDATE hr_attendance SET work_date = ? WHERE user_id = ? AND work_date = ?', [
+      fiveDaysAgo,
+      halfDayUser.id,
+      today,
+    ]);
+    const statusOf = async () =>
+      String(
+        (
+          (await utcDb.query('SELECT status FROM hr_attendance WHERE user_id = ? AND work_date = ?', [
+            halfDayUser.id,
+            fiveDaysAgo,
+          ])) as unknown as [Array<{ status: string }>]
+        )[0][0]?.status,
+      );
+    const judgedNow = await judgeEndedDays();
+    check(
+      'core: once the day is over, the pass judges its hours: ten minutes is absent',
+      judgedNow >= 1 && (await statusOf()) === 'absent',
+      { judgedNow, status: await statusOf() },
+    );
+
+    // The nightly job: the first tick of the company day judges; later ticks that day do not.
+    await utcDb.query("UPDATE hr_attendance SET status = 'present' WHERE user_id = ? AND work_date = ?", [
+      halfDayUser.id,
+      fiveDaysAgo,
+    ]);
+    await utcDb.query(
+      "INSERT INTO hr_settings (setting_key, setting_value) VALUES ('attendance_judged_on', '2000-01-01') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
+    );
+    const firstTick = await runHrSchedulerTick();
+    check(
+      'core: the first scheduler tick of the day gives ended days their verdict',
+      firstTick.failures.length === 0 && firstTick.judgedDays >= 1 && (await statusOf()) === 'absent',
+      { firstTick, status: await statusOf() },
+    );
+    const secondTick = await runHrSchedulerTick();
+    const [marker] = (await utcDb.query("SELECT setting_value FROM hr_settings WHERE setting_key = 'attendance_judged_on'")) as unknown as [
+      Array<{ setting_value: string }>,
+    ];
+    check(
+      'core: and runs once a night — a later tick the same day does not run it again',
+      secondTick.judgedDays === 0 && marker[0]?.setting_value === today,
+      { secondTick, marker: marker[0] },
+    );
+  } else {
+    console.log('  (core: just after midnight — the day-not-over checks are skipped)');
+  }
+
+  // Back to the shift the rest of the suite expects.
+  const reset = await adminAsBearer.patch(`/admin/hr/shifts/${shiftId}`, { halfDayMinutes: 240, absentMinutes: 0 });
+  check('core: the shift goes back to one threshold', reset.status === 200 && reset.json.shift?.absentMinutes === 0, reset.json);
 }

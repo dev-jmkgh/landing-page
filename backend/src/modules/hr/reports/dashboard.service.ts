@@ -14,6 +14,7 @@ import {
   companyToday,
   eachDate,
   holidaysBetween,
+  verdictOf,
   type CalendarDayStatus,
   type LeaveKind,
 } from '../calendar/calendar.service';
@@ -330,16 +331,18 @@ export async function adminDashboard(input: { date?: string; includePayroll: boo
     const calendars = await calendarForUsers(ids.slice(start, start + CALENDAR_BATCH), trendFrom, date);
     for (const days of calendars.values()) {
       for (const day of days) {
+        // Counted by verdict: somebody checked in or out today counts as present (or late).
+        const verdict = verdictOf(day);
         const point = trend.get(day.date);
         if (point) {
-          if (day.status === 'present') point.present += 1;
-          else if (day.status === 'late') point.late += 1;
-          else if (day.status === 'half_day') point.halfDay += 1;
-          else if (day.status === 'absent') point.absent += 1;
-          else if (day.status === 'on_leave') point.onLeave += 1;
+          if (verdict === 'present') point.present += 1;
+          else if (verdict === 'late') point.late += 1;
+          else if (verdict === 'half_day') point.halfDay += 1;
+          else if (verdict === 'absent') point.absent += 1;
+          else if (verdict === 'on_leave') point.onLeave += 1;
         }
         if (day.date === date) {
-          statusCounts.set(day.status, (statusCounts.get(day.status) ?? 0) + 1);
+          statusCounts.set(verdict, (statusCounts.get(verdict) ?? 0) + 1);
           if (day.leave?.kind === 'wfh') wfh += 1;
           if (day.leave?.kind === 'field') field += 1;
         }
