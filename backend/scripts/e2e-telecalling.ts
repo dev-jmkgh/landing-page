@@ -3030,6 +3030,7 @@ async function main(): Promise<void> {
       ['hrRequests', () => import('./e2e/hrRequests')],
       ['hrPayroll', () => import('./e2e/hrPayroll')],
       ['hrReports', () => import('./e2e/hrReports')],
+      ['stockbot', () => import('./e2e/stockbot')],
     ];
 
     /*

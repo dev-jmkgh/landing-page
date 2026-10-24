@@ -1,0 +1,110 @@
+# Opening-range breakout bot
+
+Runs inside the API process (`backend/src/modules/stockbot/`). Every trading day it
+takes the high and low each tracked stock trades between **09:15:00 and 09:15:30 IST**,
+freezes them as that day's levels, and emails `ADMIN_EMAILS` when a stock first trades
+above its high or below its low. Alerts only: it places no orders.
+
+Tracked stocks are the Angel One account's holdings plus every entry in
+`watchlists.json`. SmartAPI has no watchlist endpoint, so that file mirrors the
+client's watchlists by hand.
+
+## A trading day
+
+| IST | What happens |
+|---|---|
+| 09:00 | Scheduler claims the day, logs in (TOTP generated from the secret), downloads the instrument list, reads holdings and `watchlists.json`, opens the market feed |
+| 09:15:00–09:15:30 | Records every packet stamped inside the window |
+| 09:15:33 | Freezes and saves the levels; **email: "Opening range set for N stocks"** |
+| until 15:30 | **Email: "Breakout: …"** at most once a minute while new breaks arrive. Each level is reported once a day. |
+| 15:30 | Closes the feed, logs out, marks the day `closed` |
+
+Saturdays and Sundays are skipped. On an exchange holiday nothing trades in the window,
+the day ends `no_data`, and one notice email says so.
+
+## Setting it up on the server
+
+1. Deploy as usual (`sudo /var/www/jmkglobalholdings/deploy/deploy.sh`). It applies
+   migration 036, which adds `stockbot_days`, `stockbot_levels` and `stockbot_breakouts`.
+
+2. Add the credentials to `/var/www/jmkglobalholdings/backend/.env`:
+
+   ```
+   ANGEL_CLIENT_ID=<client id>
+   ANGEL_PIN=<MPIN>
+   ANGEL_TOTP_SECRET=<base32 TOTP secret>
+   ANGEL_API_KEY=<SmartAPI app key>
+   ANGEL_STATIC_IPS=3.110.84.46
+   ```
+
+3. Create the watchlist file. The data directory defaults to `stockbot` next to
+   `UPLOAD_DIR`, which on this server is inside the one directory the service may write:
+
+   ```
+   sudo -u jmk mkdir -p /var/www/jmkglobalholdings/storage/stockbot
+   sudo -u jmk nano /var/www/jmkglobalholdings/storage/stockbot/watchlists.json
+   ```
+
+   ```json
+   { "watchlists": { "Watchlist 1": ["RELIANCE", "TCS", "INFY"], "Banks": ["HDFCBANK", "BSE:SBIN"] } }
+   ```
+
+   A bare symbol means NSE (`STOCKBOT_PREFERRED_EXCHANGE`); prefix `BSE:` for BSE.
+   Indices work by name (`NIFTY`). The file is re-read every morning, so edits need no
+   restart.
+
+4. Test, then restart the API so it reads the new `.env`:
+
+   ```
+   cd /var/www/jmkglobalholdings/backend
+   sudo -u jmk -H env NODE_ENV=production npm run stockbot:prod -- check
+   sudo systemctl restart jmk-global-backend
+   journalctl -u jmk-global-backend -n 50 --no-pager | grep -i "stock bot"
+   ```
+
+   The log should say `Stock bot: scheduler on`. There is nothing else to schedule.
+
+## Commands
+
+| Command (from `backend/`, as `jmk`) | |
+|---|---|
+| `npm run stockbot:prod -- check` | Logs in, reads holdings and watchlists, listens to the feed for 15 s, logs out. Writes nothing, sends nothing. Refused 09:00–15:35 on weekdays (a second login can disturb the live session) unless `--force`. |
+| `npm run stockbot:prod -- status` | Today's day status, levels and breakouts, from the database. Add a date for another day. |
+
+Prefix both with `env NODE_ENV=production` on the server. In development use
+`npm run stockbot -- …` (runs from `src` with tsx).
+
+## Rules that matter
+
+- **Do not deploy between 09:10 and 09:16 IST.** A restart across 09:15:30 loses that
+  day's opening range, and it cannot be rebuilt. A restart at any other time is safe:
+  the new process resumes from the saved levels within a minute, and breaks during the
+  gap are still caught, because the feed's day high and low include them.
+- **A refused login stops the bot for the day** and sends one notice. Angel locks an
+  account after repeated failed logins, so it never retries a wrong PIN. An invalid TOTP
+  is retried once, with the next code. Keep the server clock synced
+  (`timedatectl status` → "System clock synchronized: yes").
+- **Orders, if ever added, work only from `ANGEL_STATIC_IPS`.** Login and market data
+  work from anywhere. `check` prints whether this machine may place orders.
+- **Feed limits:** 1,000 instruments per connection, three connections, so 3,000 at most.
+
+## How the levels are measured
+
+From Angel's SmartStream feed in SNAP_QUOTE mode, using the exchange's own day high and
+low from the last packet stamped inside the window. The stream is snapshots, not every
+trade, so this is more exact than the highest price we happen to receive. It includes
+the opening price from the pre-open auction, as a broker's 09:15 candle does. A packet
+counts only if its last trade was that morning: on a holiday the feed still sends
+snapshots, carrying the previous session's prices. A stock that did not trade in the 30
+seconds has no range and is not watched that day; the morning email lists them.
+
+## Troubleshooting
+
+| Log line / email | Meaning |
+|---|---|
+| `Stock bot: not configured` | One or more `ANGEL_*` values missing. |
+| `Stock bot is configured but its settings are invalid` | The `problems` list names the variable. |
+| Notice "no market data this morning" | Holiday, or the feed did not connect before 09:15:30. |
+| Notice "no breakout alerts today" | The API was down or restarting at 09:15. |
+| Notice "Angel One refused the login" | Wrong credentials; nothing more happens that day. |
+| `lost the day lease to another process` | Two API processes share the database; only one trades a day. |

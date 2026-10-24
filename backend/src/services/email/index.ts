@@ -42,6 +42,17 @@ export {
 } from './templates/employeeVerification';
 
 export {
+  stockbotLevelsEmail,
+  stockbotBreakoutsEmail,
+  stockbotNoticeEmail,
+  formatPrice,
+  formatTradeDate,
+  type StockbotLevelRow,
+  type StockbotLevelsEmailData,
+  type StockbotBreakoutRow,
+} from './templates/stockbot';
+
+export {
   dailyTelecallingReportEmail,
   formatReportDay,
   TEAM_TABLE_LIMIT,

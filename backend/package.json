@@ -21,7 +21,9 @@
     "test:telecalling": "tsx scripts/e2e-telecalling.ts",
     "test:ratelimit": "tsx scripts/check-rate-limit.ts",
     "admin:password": "node scripts/set-admin-password.mjs",
-    "leads:duplicates": "node scripts/list-duplicate-lead-phones.mjs"
+    "leads:duplicates": "node scripts/list-duplicate-lead-phones.mjs",
+    "stockbot": "tsx src/modules/stockbot/cli.ts",
+    "stockbot:prod": "node dist/modules/stockbot/cli.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1117.0",
@@ -39,6 +41,7 @@
     "multer": "^2.2.0",
     "mysql2": "^3.12.0",
     "nodemailer": "^9.0.5",
+    "ws": "^8.22.0",
     "xlsx": "file:vendor/xlsx-0.20.3.tgz",
     "zod": "^3.24.1"
   },
@@ -52,6 +55,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.5",
     "@types/nodemailer": "^6.4.17",
+    "@types/ws": "^8.18.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   },

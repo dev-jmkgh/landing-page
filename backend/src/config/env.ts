@@ -141,6 +141,36 @@ const schema = z.object({
   HR_SCHEDULER: optionalSwitch,
 
   /**
+   * The opening-range breakout bot (modules/stockbot): whether THIS process runs its
+   * trading-day clock. Unset means on under NODE_ENV=production, where it still does
+   * nothing until the ANGEL_* credentials below are present.
+   */
+  STOCKBOT_SCHEDULER: optionalSwitch,
+
+  /**
+   * Angel One SmartAPI login for the bot. Read only by modules/stockbot, validated there
+   * (stockbot.config.ts) rather than here: a typo in a trading credential must switch the
+   * bot off with a log line, not stop the website's API from starting.
+   *
+   * ANGEL_PIN is the account MPIN, ANGEL_TOTP_SECRET the base32 secret shown when TOTP
+   * was enabled for SmartAPI. ANGEL_STATIC_IPS lists the IPs registered on the SmartAPI
+   * app, comma-separated — Angel accepts orders only from those.
+   */
+  ANGEL_CLIENT_ID: z.string().default(''),
+  ANGEL_PIN: z.string().default(''),
+  ANGEL_TOTP_SECRET: z.string().default(''),
+  ANGEL_API_KEY: z.string().default(''),
+  ANGEL_STATIC_IPS: z.string().default(''),
+
+  /** NSE or BSE: where a bare watchlist symbol, and a dual-listed holding, is tracked. */
+  STOCKBOT_PREFERRED_EXCHANGE: z.string().default('NSE'),
+  /**
+   * Holds watchlists.json and the cached instrument list. Defaults to `stockbot` beside
+   * UPLOAD_DIR, which on the server is inside the one directory the service may write.
+   */
+  STOCKBOT_DATA_DIR: z.string().default(''),
+
+  /**
    * Sign-in identity for the fallback admin account. This is a *credential*, not a
    * notification recipient — it is deliberately not named ADMIN_EMAIL any more,
    * because one letter of difference from ADMIN_EMAILS is too easy to misread.
@@ -398,6 +428,10 @@ function parseDatabaseUrl(url: string) {
   };
 }
 
+const uploadDirectory = path.isAbsolute(raw.UPLOAD_DIR)
+  ? raw.UPLOAD_DIR
+  : path.resolve(process.cwd(), raw.UPLOAD_DIR);
+
 const database = raw.DATABASE_URL
   ? parseDatabaseUrl(raw.DATABASE_URL)
   : {
@@ -543,10 +577,26 @@ export const config = {
     failClosed: raw.RECAPTCHA_FAIL_CLOSED,
   },
 
+  /**
+   * The opening-range breakout bot. Raw values: `modules/stockbot/stockbot.config.ts`
+   * validates them and decides whether the bot can run. Never log this object — it holds
+   * the trading account's PIN and TOTP secret.
+   */
+  stockbot: {
+    schedulerEnabled: raw.STOCKBOT_SCHEDULER ?? isProduction,
+    clientId: raw.ANGEL_CLIENT_ID.trim(),
+    pin: raw.ANGEL_PIN.trim(),
+    totpSecret: raw.ANGEL_TOTP_SECRET,
+    apiKey: raw.ANGEL_API_KEY.trim(),
+    staticIps: raw.ANGEL_STATIC_IPS,
+    preferredExchange: raw.STOCKBOT_PREFERRED_EXCHANGE.trim().toUpperCase(),
+    dataDirectory: raw.STOCKBOT_DATA_DIR.trim()
+      ? path.resolve(process.cwd(), raw.STOCKBOT_DATA_DIR.trim())
+      : path.join(path.dirname(uploadDirectory), 'stockbot'),
+  },
+
   uploads: {
-    directory: path.isAbsolute(raw.UPLOAD_DIR)
-      ? raw.UPLOAD_DIR
-      : path.resolve(process.cwd(), raw.UPLOAD_DIR),
+    directory: uploadDirectory,
     maxBytes: Math.round(raw.MAX_UPLOAD_MB * 1024 * 1024),
     maxSizeLabel: `${raw.MAX_UPLOAD_MB} MB`,
     allowedExtensions: ['.pdf', '.doc', '.docx'] as const,

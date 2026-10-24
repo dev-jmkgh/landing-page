@@ -7,6 +7,7 @@ import {
   type TelecallingReportScheduler,
 } from './modules/telecalling/reports/dailyReport.scheduler';
 import { startHrScheduler, type HrScheduler } from './modules/hr/scheduler/hrScheduler';
+import { startStockbotScheduler, type StockbotScheduler } from './modules/stockbot/stockbot.scheduler';
 import { ensureStorageReady, storageReport } from './services/storage';
 import { verifyMailer } from './services/mailer';
 import { describeError, logger } from './utils/logger';
@@ -75,6 +76,15 @@ async function start(): Promise<void> {
   const hrScheduler: HrScheduler | null = config.hr.schedulerEnabled ? startHrScheduler() : null;
   logger.info('HR scheduler', { scheduler: hrScheduler ? 'on' : 'off' });
 
+  /*
+   * The opening-range breakout bot's trading-day clock. Same rules again; it also stays
+   * off until the ANGEL_* credentials are present and valid, and logs why.
+   */
+  const stockbotScheduler: StockbotScheduler | null = config.stockbot.schedulerEnabled
+    ? startStockbotScheduler()
+    : null;
+  if (!config.stockbot.schedulerEnabled) logger.info('Stock bot scheduler', { scheduler: 'off' });
+
   const shutdown = (signal: string) => {
     logger.info(`Received ${signal}, shutting down`);
 
@@ -83,6 +93,9 @@ async function start(): Promise<void> {
     const schedulerStopped = Promise.all([
       reportScheduler ? reportScheduler.stop() : Promise.resolve(),
       hrScheduler ? hrScheduler.stop() : Promise.resolve(),
+      // Closes the market feed and releases the day's lease first, so the next process
+      // can resume the session at once instead of waiting the lease out.
+      stockbotScheduler ? stockbotScheduler.stop() : Promise.resolve(),
     ]);
 
     server.close(() => {
