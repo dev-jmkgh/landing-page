@@ -5,9 +5,15 @@ takes the high and low each tracked stock trades between **09:15:00 and 09:15:30
 freezes them as that day's levels, and emails `ADMIN_EMAILS` when a stock first trades
 above its high or below its low. Alerts only: it places no orders.
 
-Tracked stocks are the Angel One account's holdings plus every entry in
-`watchlists.json`. SmartAPI has no watchlist endpoint, so that file mirrors the
-client's watchlists by hand.
+Tracked stocks, rebuilt every morning with nothing to maintain:
+
+- the Angel One account's holdings;
+- every NSE F&O stock (about 210 — the underlyings of current stock futures, read from
+  Angel's instrument list, so additions and removals follow the exchange);
+- optionally, extra stocks listed in `watchlists.json`.
+
+The client's own Angel One watchlists cannot be read: SmartAPI has no watchlist endpoint
+and the app has no export. The F&O list stands in for them.
 
 ## A trading day
 
@@ -15,8 +21,8 @@ client's watchlists by hand.
 |---|---|
 | 09:00 | Scheduler claims the day, logs in (TOTP generated from the secret), downloads the instrument list, reads holdings and `watchlists.json`, opens the market feed |
 | 09:15:00–09:15:30 | Records every packet stamped inside the window |
-| 09:15:33 | Freezes and saves the levels; **email: "Opening range set for N stocks"** |
-| until 15:30 | **Email: "Breakout: …"** at most once a minute while new breaks arrive. Each level is reported once a day. |
+| 09:15:33 | Freezes and saves the levels; **email: "Opening range set for N stocks"** (first 60 in the body, all of them in `levels.csv`) |
+| until 15:30 | **Email: "Breakout: …"** at most once a minute while new breaks arrive (first 40 in the body, the rest in `breakouts.csv`). Each level is reported once a day. |
 | 15:30 | Closes the feed, logs out, marks the day `closed` |
 
 Saturdays and Sundays are skipped. On an exchange holiday nothing trades in the window,
@@ -37,8 +43,9 @@ the day ends `no_data`, and one notice email says so.
    ANGEL_STATIC_IPS=3.110.84.46
    ```
 
-3. Create the watchlist file. The data directory defaults to `stockbot` next to
-   `UPLOAD_DIR`, which on this server is inside the one directory the service may write:
+3. Optional — only for stocks outside holdings and F&O. The data directory defaults to
+   `stockbot` next to `UPLOAD_DIR`, which on this server is inside the one directory the
+   service may write:
 
    ```
    sudo -u jmk mkdir -p /var/www/jmkglobalholdings/storage/stockbot

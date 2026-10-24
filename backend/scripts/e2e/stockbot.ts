@@ -236,6 +236,40 @@ export async function run(ctx: E2EContext): Promise<void> {
     built.unresolved,
   );
 
+  console.log('\nstockbot — F&O stocks from the instrument master');
+  const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const expiryIn = (days: number) => {
+    const date = new Date(Date.now() + days * 86_400_000);
+    return `${String(date.getUTCDate()).padStart(2, '0')}${MONTH_NAMES[date.getUTCMonth()]}${date.getUTCFullYear()}`;
+  };
+  const future = (token: string, name: string, expiry: string, type = 'FUTSTK') => ({
+    ...row('NFO', token, `${name}FUT`, name, type),
+    expiry,
+  });
+  const fnoIndex = new InstrumentIndex([
+    row('NSE', '2885', 'RELIANCE-EQ', 'RELIANCE'),
+    row('NSE', '11536', 'TCS-EQ', 'TCS'),
+    row('NSE', '9001', '011NSETEST-EQ', '011NSETEST'),
+    row('NSE', '9002', 'OLDFUT-EQ', 'OLDFUT'),
+    future('1', 'RELIANCE', expiryIn(20)),
+    future('2', 'RELIANCE', expiryIn(50)), // next month: same stock, counted once
+    future('3', 'TCS', expiryIn(20)),
+    future('4', '011NSETEST', '27NOV2036'), // the exchange's test instrument
+    future('5', 'OLDFUT', '27JAN2000'), // expired
+    future('6', 'RELIANCE', expiryIn(20), 'OPTSTK'), // options do not define the list
+    future('7', 'NIFTY', expiryIn(20), 'FUTIDX'), // nor do index futures
+    future('8', 'GHOST', expiryIn(20)), // no NSE cash listing
+  ]);
+  const fnoList = fnoIndex.fnoStocks();
+  check('F&O stocks are the underlyings of current stock futures, once each', fnoList.instruments.map((item) => item.symbol).join() === 'RELIANCE-EQ,TCS-EQ', fnoList.instruments);
+  check("the exchange's test instruments and expired contracts are left out", !fnoList.instruments.some((item) => /NSETEST|OLDFUT/.test(item.symbol)));
+  check('an underlying with no cash listing is reported', fnoList.unresolved.join() === 'GHOST', fnoList.unresolved);
+  check('futures rows do not enter the cash index', fnoIndex.size === 4, fnoIndex.size);
+  const withFno = targetsModule.buildTargetList([{ exchange: 'NSE', symboltoken: '2885', tradingsymbol: 'RELIANCE-EQ' }], {}, fnoIndex, 'NSE');
+  check('F&O stocks join the target list with no watchlist at all', withFno.targets.size === 2, [...withFno.targets.keys()]);
+  check('a held F&O stock is tracked once, with both reasons', [...(withFno.targets.get('NSE:2885')?.sources ?? [])].sort().join() === 'fno,holdings');
+  check('the unlisted underlying is reported, not dropped', withFno.unresolved.some((entry) => entry.startsWith('F&O: GHOST')), withFno.unresolved);
+
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'stockbot-e2e-'));
   try {
     const file = path.join(scratch, 'watchlists.json');
@@ -340,6 +374,22 @@ export async function run(ctx: E2EContext): Promise<void> {
   });
   check('a breakout subject names the first three and counts the rest', breakMail.subject === 'Breakout: S0 above 1,000.00, S1 below 1,001.00, S2 above 1,002.00 +2 more', breakMail.subject);
   check('prices use Indian grouping with paise', email.formatPrice(123456.5) === '1,23,456.50');
+  check('a short levels email has no attachment', levelsMail.attachments.length === 0);
+
+  const manyLevels = Array.from({ length: 213 }, (_, n) => ({
+    symbol: `S${String(n).padStart(3, '0')}-EQ`,
+    exchange: 'NSE',
+    high: 100 + n,
+    low: 99 + n,
+    sources: n === 0 ? ['fno', 'watchlist:Mine, too'] : ['fno'],
+  }));
+  const bigMail = email.stockbotLevelsEmail({ tradeDate: day, levels: manyLevels, missing: [], unresolved: [] });
+  const csvText = bigMail.attachments[0]?.content.toString('utf8') ?? '';
+  check('a 213-stock levels email stays under Gmail\'s clipping size', Buffer.byteLength(bigMail.html) < 100_000, Buffer.byteLength(bigMail.html));
+  check('its table says how many are shown and where the rest are', bigMail.html.includes('Showing 60 of 213'));
+  check('the full list is attached as levels.csv', bigMail.attachments[0]?.filename === 'levels.csv' && csvText.trim().split('\r\n').length === 214);
+  check('CSV fields with commas are quoted', csvText.includes('"F&O, Mine, too"'), csvText.split('\r\n')[1]);
+  check('the plain-text part keeps every row', bigMail.text.includes('S212'));
 
   await tradingDays(ctx, levels);
 }

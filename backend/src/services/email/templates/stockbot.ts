@@ -19,7 +19,30 @@ import {
  *
  * Read on a phone in the first minutes of the session, so the subject carries the
  * substance — symbols and directions — and the body is a table to glance at.
+ *
+ * With the F&O list the bot tracks some 200 stocks, and every table cell here carries
+ * its own inline styles (the only styling email clients honour): a full table would pass
+ * Gmail's ~102 KB limit, past which it hides the rest of the message behind "View entire
+ * message". So the HTML table stops at a limit and the complete list rides along as a CSV
+ * attachment; the plain-text part, which is small, always has every row.
  */
+
+/** Structurally a mailer attachment; templates stay free of the transport. */
+export type StockbotAttachment = { filename: string; content: Buffer; contentType: string };
+export type StockbotEmail = EmailDocument & { attachments: StockbotAttachment[] };
+
+export const LEVELS_TABLE_LIMIT = 60;
+export const BREAKOUTS_TABLE_LIMIT = 40;
+
+function csvField(value: string | number | null): string {
+  const text = value === null ? '' : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function csv(header: readonly string[], rows: readonly (readonly (string | number | null)[])[]): Buffer {
+  const lines = [header, ...rows].map((row) => row.map(csvField).join(','));
+  return Buffer.from(`${lines.join('\r\n')}\r\n`, 'utf8');
+}
 
 const PRICE = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const TIME = new Intl.DateTimeFormat('en-IN', {
@@ -78,19 +101,33 @@ const LEVEL_COLUMNS: readonly DataColumn[] = [
 ];
 
 function sourceLabel(sources: readonly string[]): string {
-  return sources.map((source) => source.replace(/^watchlist:/, '')).join(', ');
+  return sources
+    .map((source) => {
+      if (source === 'fno') return 'F&O';
+      if (source === 'holdings') return 'Holding';
+      return source.replace(/^watchlist:/, '');
+    })
+    .join(', ');
 }
 
-export function stockbotLevelsEmail(data: StockbotLevelsEmailData): EmailDocument {
+/** `Showing 60 of 213 — all 213 are in the attached levels.csv.` */
+function truncationNote(shown: number, total: number, filename: string): string | null {
+  return shown < total ? `Showing ${shown} of ${total} — all ${total} are in the attached ${filename}.` : null;
+}
+
+export function stockbotLevelsEmail(data: StockbotLevelsEmailData): StockbotEmail {
   const day = formatTradeDate(data.tradeDate);
-  const rows: DataCell[][] = data.levels.map((level) => [
+  const levels = [...data.levels].sort((a, b) => displaySymbol(a.symbol).localeCompare(displaySymbol(b.symbol)));
+  const rows: DataCell[][] = levels.map((level) => [
     { text: displaySymbol(level.symbol), sub: `${level.exchange} · ${sourceLabel(level.sources)}` },
     formatPrice(level.high),
     formatPrice(level.low),
     level.high !== null && level.low !== null ? formatPrice(level.high - level.low) : '—',
   ]);
+  const shown = rows.slice(0, LEVELS_TABLE_LIMIT);
+  const note = truncationNote(shown.length, rows.length, 'levels.csv');
 
-  const headline = `Opening range set for ${data.levels.length} stock${data.levels.length === 1 ? '' : 's'}`;
+  const headline = `Opening range set for ${levels.length} stock${levels.length === 1 ? '' : 's'}`;
   const notes: string[] = [];
   if (data.missing.length > 0) {
     notes.push(
@@ -99,7 +136,7 @@ export function stockbotLevelsEmail(data: StockbotLevelsEmailData): EmailDocumen
     );
   }
   if (data.unresolved.length > 0) {
-    notes.push(`Watchlist entries that matched no stock: ${data.unresolved.join('; ')}`);
+    notes.push(`Not tracked (no matching stock): ${data.unresolved.join('; ')}`);
   }
 
   return {
@@ -113,7 +150,7 @@ export function stockbotLevelsEmail(data: StockbotLevelsEmailData): EmailDocumen
             'You will get an email when a stock trades above its high or below its low.',
         ),
         sectionHeading(headline),
-        dataTable({ columns: LEVEL_COLUMNS, rows, emptyText: 'No stock traded in the window.' }),
+        dataTable({ columns: LEVEL_COLUMNS, rows: shown, emptyText: 'No stock traded in the window.', note }),
         ...(notes.length > 0 ? [sectionHeading('Also'), callout('Worth knowing', notes, 'warn')] : []),
       ].join('\n'),
     }),
@@ -124,6 +161,25 @@ export function stockbotLevelsEmail(data: StockbotLevelsEmailData): EmailDocumen
       ...textTable(LEVEL_COLUMNS, rows),
       ...(notes.length > 0 ? ['', ...notes] : []),
     ]),
+    attachments: note
+      ? [
+          {
+            filename: 'levels.csv',
+            contentType: 'text/csv',
+            content: csv(
+              ['symbol', 'exchange', 'high', 'low', 'width', 'tracked_because'],
+              levels.map((level) => [
+                displaySymbol(level.symbol),
+                level.exchange,
+                level.high,
+                level.low,
+                level.high !== null && level.low !== null ? Number((level.high - level.low).toFixed(2)) : null,
+                sourceLabel(level.sources),
+              ]),
+            ),
+          },
+        ]
+      : [],
   };
 }
 
@@ -152,7 +208,7 @@ function breakLabel(direction: 'up' | 'down'): string {
   return direction === 'up' ? 'Above high' : 'Below low';
 }
 
-export function stockbotBreakoutsEmail(data: { tradeDate: string; breakouts: StockbotBreakoutRow[] }): EmailDocument {
+export function stockbotBreakoutsEmail(data: { tradeDate: string; breakouts: StockbotBreakoutRow[] }): StockbotEmail {
   const rows: DataCell[][] = data.breakouts.map((item) => [
     TIME.format(item.detectedAt),
     { text: displaySymbol(item.symbol), sub: item.exchange },
@@ -168,6 +224,8 @@ export function stockbotBreakoutsEmail(data: { tradeDate: string; breakouts: Sto
     .map((item) => `${displaySymbol(item.symbol)} ${item.direction === 'up' ? 'above' : 'below'} ${formatPrice(item.level)}`);
   const more = data.breakouts.length - named.length;
   const subject = `Breakout: ${named.join(', ')}${more > 0 ? ` +${more} more` : ''}`;
+  const shown = rows.slice(0, BREAKOUTS_TABLE_LIMIT);
+  const note = truncationNote(shown.length, rows.length, 'breakouts.csv');
 
   return {
     subject,
@@ -180,11 +238,31 @@ export function stockbotBreakoutsEmail(data: { tradeDate: string; breakouts: Sto
             'price that crossed the level; "Last" is the price when it was seen. Each level is ' +
             'reported once a day.',
         ),
-        dataTable({ columns: BREAKOUT_COLUMNS, rows }),
+        dataTable({ columns: BREAKOUT_COLUMNS, rows: shown, note }),
         paragraph(`Trading day: ${formatTradeDate(data.tradeDate)}.`, { muted: true, size: 13 }),
       ].join('\n'),
     }),
     text: renderText([subject, '', ...textTable(BREAKOUT_COLUMNS, rows)]),
+    attachments: note
+      ? [
+          {
+            filename: 'breakouts.csv',
+            contentType: 'text/csv',
+            content: csv(
+              ['time_ist', 'symbol', 'exchange', 'break', 'level', 'traded', 'last'],
+              data.breakouts.map((item) => [
+                TIME.format(item.detectedAt),
+                displaySymbol(item.symbol),
+                item.exchange,
+                breakLabel(item.direction),
+                item.level,
+                item.price,
+                item.lastPrice,
+              ]),
+            ),
+          },
+        ]
+      : [],
   };
 }
 

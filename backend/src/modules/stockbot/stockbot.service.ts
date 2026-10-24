@@ -251,7 +251,7 @@ export async function runTradingSession(
 
       if (targets.targets.size === 0) {
         await sendNoticeOnce(notify, tradeDate, 'nothing to track', [
-          'The client has no holdings and watchlists.json lists no stock that could be matched.',
+          'No holdings, no F&O stocks in the instrument list, and no extra stocks in watchlists.json.',
           ...(unresolved.length > 0 ? [`Unmatched entries: ${unresolved.join('; ')}`] : []),
         ]);
         return await finish('failed', 'No instruments to track.');

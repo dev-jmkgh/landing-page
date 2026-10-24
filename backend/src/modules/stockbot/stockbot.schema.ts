@@ -99,6 +99,8 @@ export type Target = {
 };
 
 export const HOLDINGS_SOURCE = 'holdings';
+/** Every stock with a current NSE future, rebuilt each morning from the instrument master. */
+export const FNO_SOURCE = 'fno';
 export const WATCHLIST_SOURCE_PREFIX = 'watchlist:';
 
 export function instrumentKey(exchange: Exchange, token: string): string {
@@ -106,9 +108,10 @@ export function instrumentKey(exchange: Exchange, token: string): string {
 }
 
 /**
- * `watchlists.json` in the data directory. SmartAPI has no watchlist endpoint, so this
- * file mirrors the client's watchlists by hand. It is read afresh every morning, so an
- * edit takes effect the next trading day without a restart.
+ * `watchlists.json` in the data directory: OPTIONAL extra stocks beyond holdings and the
+ * F&O list. SmartAPI has no watchlist endpoint and the Angel One app cannot export one,
+ * so the client's own watchlists cannot be pulled; the F&O list stands in for them. Read
+ * afresh every morning, so an edit takes effect the next trading day without a restart.
  *
  *   { "watchlists": { "Watchlist 1": ["RELIANCE", "TCS", "BSE:SBIN"] } }
  */

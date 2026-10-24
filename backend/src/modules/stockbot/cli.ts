@@ -55,7 +55,7 @@ async function check(args: string[]): Promise<void> {
     () => true,
     () => false,
   );
-  line(`  watchlists.json  ${watchlistExists ? 'present' : 'missing — holdings only'}`);
+  line(`  watchlists.json  ${watchlistExists ? 'present' : 'none (optional: extra stocks beyond holdings and F&O)'}`);
 
   const today = companyDate();
   const times = marketTimes(today);
@@ -82,13 +82,15 @@ async function check(args: string[]): Promise<void> {
     const index = await loadInstruments(settings.cacheDirectory);
     line(`  instruments      ${index.size} NSE/BSE cash instruments`);
 
+    line(`  F&O stocks       ${index.fnoStocks().instruments.length}`);
+
     const watchlists = await readWatchlists(settings.watchlistFile);
     const targets = buildTargetList(holdings, watchlists, index, settings.preferredExchange);
     line(`  watchlists       ${Object.keys(watchlists).length} (${Object.values(watchlists).flat().length} entries)`);
     line(`  targets          ${targets.targets.size} unique instruments`);
     for (const entry of targets.unresolved) line(`    not resolved:  ${entry}`);
     // Thrown, not fail(): process.exit inside this try would skip the logout below.
-    if (targets.targets.size === 0) throw new Error('nothing to track: no holdings and no resolvable watchlist entries');
+    if (targets.targets.size === 0) throw new Error('nothing to track: no holdings, no F&O stocks and no watchlist entries');
 
     const symbols = new Map([...targets.targets.values()].map(({ instrument }) => [`${instrument.exchange}:${instrument.token}`, instrument.symbol]));
     const latest = new Map<string, QuotePacket>();

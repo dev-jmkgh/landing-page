@@ -4,6 +4,7 @@ import type { InstrumentIndex } from './instruments';
 import type { Holding } from './smartapi.client';
 import {
   EXCHANGES,
+  FNO_SOURCE,
   HOLDINGS_SOURCE,
   WATCHLIST_SOURCE_PREFIX,
   instrumentKey,
@@ -14,8 +15,11 @@ import {
 } from './stockbot.schema';
 
 /**
- * The day's target list: the client's holdings plus every watchlist in watchlists.json,
- * one entry per instrument however many lists name it.
+ * The day's target list: the client's holdings, every NSE F&O stock, and any extra
+ * stocks in watchlists.json — one entry per instrument however many lists name it.
+ *
+ * The F&O list replaces the client's own watchlists, which Angel offers no way to read:
+ * SmartAPI has no watchlist endpoint and the app has no export.
  *
  * Holdings move to the preferred exchange when the company is listed there, so a stock
  * held through BSE and watched on NSE is tracked once, on NSE — two listings would give
@@ -102,6 +106,11 @@ export function buildTargetList(
     };
     add(index.listingOn(instrument, preferred) ?? instrument, HOLDINGS_SOURCE);
   }
+
+  // F&O is an NSE list, so these stay on NSE whatever the preferred exchange.
+  const fno = index.fnoStocks();
+  for (const instrument of fno.instruments) add(instrument, FNO_SOURCE);
+  for (const name of fno.unresolved) unresolved.push(`F&O: ${name} (no NSE cash listing)`);
 
   for (const [name, entries] of Object.entries(watchlists)) {
     for (const entry of entries) {
