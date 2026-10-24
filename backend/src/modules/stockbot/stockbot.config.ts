@@ -1,7 +1,7 @@
 import { isIPv4 } from 'node:net';
 import path from 'node:path';
 import { config } from '../../config/env';
-import { EXCHANGES, type Exchange } from './stockbot.schema';
+import { CASH_EXCHANGES, type CashExchange } from './stockbot.schema';
 import { base32Decode } from './totp';
 
 /**
@@ -19,7 +19,7 @@ export type StockbotSettings = {
   apiKey: string;
   /** IPs registered on the SmartAPI app. Orders are accepted only from these. */
   staticIps: string[];
-  preferredExchange: Exchange;
+  preferredExchange: CashExchange;
   dataDirectory: string;
   watchlistFile: string;
   cacheDirectory: string;
@@ -68,8 +68,8 @@ export function loadStockbotSettings(): StockbotSettingsResult {
     problems.push('ANGEL_STATIC_IPS must be IPv4 addresses, comma-separated (Angel accepts only IPv4)');
   }
 
-  const preferred = EXCHANGES.find((exchange) => exchange === raw.preferredExchange);
-  if (!preferred) problems.push(`STOCKBOT_PREFERRED_EXCHANGE must be ${EXCHANGES.join(' or ')}`);
+  const preferred = CASH_EXCHANGES.find((exchange) => exchange === raw.preferredExchange);
+  if (!preferred) problems.push(`STOCKBOT_PREFERRED_EXCHANGE must be ${CASH_EXCHANGES.join(' or ')}`);
 
   if (problems.length > 0 || !totpSecret || !preferred) {
     return { ok: false, configured: true, problems };

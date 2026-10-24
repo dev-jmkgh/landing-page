@@ -3,7 +3,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { companyDate } from '../telecalling/companyTime';
 import { logger } from '../../utils/logger';
-import type { Exchange, Instrument } from './stockbot.schema';
+import type { CashExchange, Exchange, Instrument } from './stockbot.schema';
 
 /**
  * Angel's instrument master: every tradable token, as one public JSON file (~150,000
@@ -60,6 +60,8 @@ export class InstrumentIndex {
   private readonly byToken = new Map<string, Instrument>();
   private readonly indexByName = new Map<string, Instrument>();
   private readonly fnoUnderlyings = new Set<string>();
+  /** NFO/BFO futures and options, by exact trading symbol (`BFO:SENSEX26OCT73800CE`). */
+  private readonly contractBySymbol = new Map<string, Instrument>();
 
   /** `asOf` decides which futures are current; the master lists only live contracts plus tests. */
   constructor(rows: Iterable<MasterRow>, asOf: Date = new Date()) {
@@ -67,17 +69,30 @@ export class InstrumentIndex {
     const latestExpiry = asOf.getTime() + FNO_EXPIRY_HORIZON_DAYS * 86_400_000;
 
     for (const row of rows) {
-      if (row.exch_seg === 'NFO' && row.instrumenttype === 'FUTSTK' && typeof row.name === 'string') {
-        const expiry = parseExpiry(row.expiry);
-        if (expiry >= earliestExpiry && expiry <= latestExpiry && !TEST_UNDERLYING.test(row.name)) {
-          this.fnoUnderlyings.add(row.name);
+      const exchange = row.exch_seg;
+      if (typeof row.symbol !== 'string') continue;
+      if (typeof row.token !== 'string' && typeof row.token !== 'number') continue;
+
+      if (exchange === 'NFO' || exchange === 'BFO') {
+        if (exchange === 'NFO' && row.instrumenttype === 'FUTSTK' && typeof row.name === 'string') {
+          const expiry = parseExpiry(row.expiry);
+          if (expiry >= earliestExpiry && expiry <= latestExpiry && !TEST_UNDERLYING.test(row.name)) {
+            this.fnoUnderlyings.add(row.name);
+          }
         }
+        // Only reachable by exact symbol from a watchlist entry. The master lists live
+        // contracts only, so an expired one simply stops resolving and is reported.
+        this.contractBySymbol.set(`${exchange}:${row.symbol.toUpperCase()}`, {
+          exchange,
+          token: String(row.token),
+          symbol: row.symbol,
+          name: typeof row.name === 'string' && row.name ? row.name : row.symbol,
+          isIndex: false,
+        });
         continue;
       }
 
-      const exchange = row.exch_seg;
-      if ((exchange !== 'NSE' && exchange !== 'BSE') || typeof row.symbol !== 'string') continue;
-      if (typeof row.token !== 'string' && typeof row.token !== 'number') continue;
+      if (exchange !== 'NSE' && exchange !== 'BSE') continue;
 
       const instrument: Instrument = {
         exchange,
@@ -100,9 +115,13 @@ export class InstrumentIndex {
     return this.byToken.get(`${exchange}:${token}`) ?? null;
   }
 
-  /** A cash instrument by trading symbol, bare NSE symbol, or index name. */
+  /**
+   * A cash instrument by trading symbol, bare NSE symbol, or index name; a derivative
+   * contract by its exact trading symbol.
+   */
   resolve(exchange: Exchange, symbol: string): Instrument | null {
     const wanted = symbol.trim().toUpperCase();
+    if (exchange === 'NFO' || exchange === 'BFO') return this.contractBySymbol.get(`${exchange}:${wanted}`) ?? null;
     const exact = this.bySymbol.get(`${exchange}:${wanted}`);
     if (exact) return exact;
     if (exchange === 'NSE') {
@@ -114,8 +133,8 @@ export class InstrumentIndex {
     return this.indexByName.get(`${exchange}:${wanted}`) ?? null;
   }
 
-  /** The same company's listing on another exchange, matched by name. */
-  listingOn(instrument: Instrument, exchange: Exchange): Instrument | null {
+  /** The same company's listing on another cash exchange, matched by name. */
+  listingOn(instrument: Instrument, exchange: CashExchange): Instrument | null {
     if (instrument.exchange === exchange) return instrument;
     if (instrument.isIndex) return null;
     return this.resolve(exchange, instrument.name);

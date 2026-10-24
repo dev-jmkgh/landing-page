@@ -57,8 +57,11 @@ the day ends `no_data`, and one notice email says so.
    ```
 
    A bare symbol means NSE (`STOCKBOT_PREFERRED_EXCHANGE`); prefix `BSE:` for BSE.
-   Indices work by name (`NIFTY`). The file is re-read every morning, so edits need no
-   restart.
+   Indices work by name (`NIFTY`). Futures and options are named by segment and Angel's
+   exact trading symbol: `BFO:SENSEX26OCT73800CE`, `NFO:NIFTY27OCT2622700CE`. A contract
+   stops resolving the day after it expires; the morning email then lists it under "Not
+   tracked", which is the cue to update the file. The file is re-read every morning, so
+   edits need no restart.
 
 4. Test, then restart the API so it reads the new `.env`:
 

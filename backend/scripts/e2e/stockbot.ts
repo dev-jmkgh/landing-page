@@ -102,7 +102,16 @@ export async function run(ctx: E2EContext): Promise<void> {
   check('a last-traded time in seconds is scaled too', snapSeconds?.lastTradeTime?.getTime() === Math.floor(t(4_000) / 1000) * 1000);
   check('a seconds timestamp is read as seconds', feed.epochMs(1_761_191_100) === 1_761_191_100_000);
   check('a millisecond timestamp is left alone', feed.epochMs(1_761_191_100_000) === 1_761_191_100_000);
-  check('an unknown exchange segment is ignored', feed.parsePacket(quotePacket({ exchangeType: 2, token: '9', at: t(0), last: 1 })) === null);
+  check('an unsupported segment (MCX) is ignored', feed.parsePacket(quotePacket({ exchangeType: 5, token: '9', at: t(0), last: 1 })) === null);
+  check('exchange type 2 is NFO', feed.parsePacket(quotePacket({ exchangeType: 2, token: '43650', at: t(0), last: 120.5 }))?.exchange === 'NFO');
+  const bfo = feed.parsePacket(quotePacket({ exchangeType: 4, token: '866735', at: t(0), last: 337.85, high: 470, low: 330, mode: 3, lastTraded: t(0) }));
+  check('exchange type 4 is BFO, priced in paise like the rest', bfo?.exchange === 'BFO' && bfo?.lastPrice === 337.85 && bfo?.dayHigh === 470, bfo);
+  const mixedPlan = feed.planConnections([
+    { exchange: 'NSE', token: '2885' },
+    { exchange: 'BFO', token: '866735' },
+    { exchange: 'NFO', token: '43650' },
+  ]);
+  check('contracts subscribe under their own segments', JSON.stringify(mixedPlan) === JSON.stringify([[{ exchangeType: 1, tokens: ['2885'] }, { exchangeType: 4, tokens: ['866735'] }, { exchangeType: 2, tokens: ['43650'] }]]), mixedPlan);
   check('a short frame is ignored', feed.parsePacket(Buffer.alloc(20)) === null);
 
   const many = Array.from({ length: 2_500 }, (_, index) => ({ exchange: (index % 2 ? 'BSE' : 'NSE') as 'NSE' | 'BSE', token: String(index) }));
@@ -270,6 +279,27 @@ export async function run(ctx: E2EContext): Promise<void> {
   check('a held F&O stock is tracked once, with both reasons', [...(withFno.targets.get('NSE:2885')?.sources ?? [])].sort().join() === 'fno,holdings');
   check('the unlisted underlying is reported, not dropped', withFno.unresolved.some((entry) => entry.startsWith('F&O: GHOST')), withFno.unresolved);
 
+  console.log('\nstockbot — option and future contracts in a watchlist');
+  const contractIndex = new InstrumentIndex([
+    row('NSE', '2885', 'RELIANCE-EQ', 'RELIANCE'),
+    { ...row('BFO', '866735', 'SENSEX26OCT73800CE', 'SENSEX', 'OPTIDX'), expiry: expiryIn(5) },
+    { ...row('BFO', '863334', 'SENSEX26OCT73200PE', 'SENSEX', 'OPTIDX'), expiry: expiryIn(5) },
+    { ...row('NFO', '43650', 'NIFTY27OCT2622700CE', 'NIFTY', 'OPTIDX'), expiry: expiryIn(3) },
+  ]);
+  check('a BSE option resolves by its exact trading symbol', contractIndex.resolve('BFO', 'sensex26oct73800ce')?.token === '866735');
+  check('an NSE option too', contractIndex.resolve('NFO', 'NIFTY27OCT2622700CE')?.token === '43650');
+  check('a contract that is not listed (expired) does not resolve', contractIndex.resolve('BFO', 'SENSEX26SEP73800CE') === null);
+  check('a contract is not found under the cash segment', contractIndex.resolve('BSE', 'SENSEX26OCT73800CE') === null);
+  check('contracts do not count as cash instruments', contractIndex.size === 1);
+  const withContracts = targetsModule.buildTargetList(
+    [],
+    { 'Watchlist 4': ['BFO:SENSEX26OCT73800CE', 'bfo:SENSEX26OCT73200PE', 'BFO:SENSEX26SEP73800CE'] },
+    contractIndex,
+    'NSE',
+  );
+  check('watchlist contracts become targets on their segment', withContracts.targets.has('BFO:866735') && withContracts.targets.has('BFO:863334'), [...withContracts.targets.keys()]);
+  check('an expired contract is reported so the list can be refreshed', withContracts.unresolved.join() === 'Watchlist 4: BFO:SENSEX26SEP73800CE', withContracts.unresolved);
+
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'stockbot-e2e-'));
   try {
     const file = path.join(scratch, 'watchlists.json');
@@ -329,6 +359,19 @@ export async function run(ctx: E2EContext): Promise<void> {
   await repo.saveLevels(day, levels.map((level) => (level.token === 'A' ? { ...level, high: 103 } : level)));
   const resaved = await repo.loadLevels(day);
   check('saving again updates rather than duplicates', resaved.length === levels.length && resaved.find((level) => level.token === 'A')?.high === 103);
+
+  await repo.saveLevels(day, [
+    { exchange: 'BFO', token: '866735', symbol: 'SENSEX26OCT73800CE', sources: ['watchlist:Watchlist 4'], status: 'ok', high: 470, low: 330.05, open: 400, packetAt: new Date(t(20_000)) },
+  ]);
+  const contractLevel = (await repo.loadLevels(day)).find((level) => level.token === '866735');
+  check('a BFO contract level is stored and read back (migration 037)', contractLevel?.exchange === 'BFO' && contractLevel?.low === 330.05, contractLevel);
+  check(
+    'and a BFO break is recorded',
+    await repo.insertBreakout(day, { exchange: 'BFO', token: '866735', symbol: 'SENSEX26OCT73800CE', direction: 'down', level: 330.05, price: 329.5, lastPrice: 331, detectedAt: new Date(t(90_000)) }),
+  );
+  // Settle it so the alert-claim checks below see only the stock break.
+  await repo.claimAlerts(day, 'claim-bfo');
+  await repo.settleAlerts('claim-bfo');
 
   const event = { ...(up[0] ?? { exchange: 'NSE' as const, token: 'A', symbol: 'AAA-EQ', direction: 'up' as const, level: 102, price: 102.05, lastPrice: 101.9, detectedAt: new Date(t(41_000)) }), symbol: 'AAA-EQ' };
   check('a break is recorded once', await repo.insertBreakout(day, event));

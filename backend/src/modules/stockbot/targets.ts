@@ -3,12 +3,14 @@ import { logger } from '../../utils/logger';
 import type { InstrumentIndex } from './instruments';
 import type { Holding } from './smartapi.client';
 import {
+  CASH_EXCHANGES,
   EXCHANGES,
   FNO_SOURCE,
   HOLDINGS_SOURCE,
   WATCHLIST_SOURCE_PREFIX,
   instrumentKey,
   watchlistFileSchema,
+  type CashExchange,
   type Exchange,
   type Instrument,
   type Target,
@@ -33,8 +35,11 @@ export type TargetList = {
   unresolved: string[];
 };
 
-/** `NSE:RELIANCE` -> NSE/RELIANCE; `RELIANCE` -> the preferred exchange. */
-export function parseWatchlistEntry(entry: string, preferred: Exchange): { exchange: Exchange; symbol: string } {
+/**
+ * `NSE:RELIANCE` -> NSE/RELIANCE; `RELIANCE` -> the preferred exchange. A contract needs
+ * its segment and exact trading symbol: `BFO:SENSEX26OCT73800CE`, `NFO:NIFTY27OCT2622700CE`.
+ */
+export function parseWatchlistEntry(entry: string, preferred: CashExchange): { exchange: Exchange; symbol: string } {
   const separator = entry.indexOf(':');
   if (separator === -1) return { exchange: preferred, symbol: entry.trim() };
 
@@ -74,7 +79,7 @@ export function buildTargetList(
   holdings: readonly Holding[],
   watchlists: Record<string, readonly string[]>,
   index: InstrumentIndex,
-  preferred: Exchange,
+  preferred: CashExchange,
 ): TargetList {
   const targets = new Map<string, Target>();
   const unresolved: string[] = [];
@@ -87,7 +92,7 @@ export function buildTargetList(
   };
 
   for (const holding of holdings) {
-    const exchange = EXCHANGES.find((candidate) => candidate === holding.exchange);
+    const exchange = CASH_EXCHANGES.find((candidate) => candidate === holding.exchange);
     const token = holding.symboltoken === undefined ? '' : String(holding.symboltoken);
     const symbol = holding.tradingsymbol ?? '?';
     if (!exchange || !token) {

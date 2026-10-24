@@ -11,17 +11,26 @@ import { COMPANY_UTC_OFFSET } from '../telecalling/companyTime';
  * order.
  */
 
-export const EXCHANGES = ['NSE', 'BSE'] as const;
+/**
+ * The cash markets (stocks, indices) and their derivative segments (futures and options).
+ * Holdings, the preferred exchange and the F&O stock list are cash-only; a watchlist entry
+ * may also name a contract, e.g. `BFO:SENSEX26OCT73800CE`.
+ */
+export const CASH_EXCHANGES = ['NSE', 'BSE'] as const;
+export type CashExchange = (typeof CASH_EXCHANGES)[number];
+export const EXCHANGES = ['NSE', 'BSE', 'NFO', 'BFO'] as const;
 export type Exchange = (typeof EXCHANGES)[number];
 
 /**
- * SmartStream's numeric exchange segments for the two cash markets. The feed speaks in
- * these; everything else in the bot speaks in `Exchange`.
+ * SmartStream's numeric exchange segments. The feed speaks in these; everything else in
+ * the bot speaks in `Exchange`. Prices are paise in all four.
  */
-export const EXCHANGE_TYPE: Record<Exchange, number> = { NSE: 1, BSE: 3 };
+export const EXCHANGE_TYPE: Record<Exchange, number> = { NSE: 1, NFO: 2, BSE: 3, BFO: 4 };
 export const EXCHANGE_BY_TYPE: ReadonlyMap<number, Exchange> = new Map([
   [1, 'NSE'],
+  [2, 'NFO'],
   [3, 'BSE'],
+  [4, 'BFO'],
 ]);
 
 /* -------------------------------------------------------------------------- */

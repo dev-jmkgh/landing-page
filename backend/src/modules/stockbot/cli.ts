@@ -116,7 +116,12 @@ async function check(args: string[]): Promise<void> {
     feed.stop();
 
     line(`  feed             ${stats.connected} connection(s) open, ${packets} packets, ${latest.size}/${targets.targets.size} instruments heard from`);
-    for (const packet of [...latest.values()].slice(0, 8)) {
+    // One packet from each segment first (an option priced in the wrong unit would show
+    // here), then fill up to eight.
+    const received = [...latest.values()];
+    const firstPerSegment = [...new Map(received.map((packet) => [packet.exchange, packet])).values()];
+    const samples = [...new Set([...firstPerSegment, ...received])].slice(0, 8);
+    for (const packet of samples) {
       const symbol = symbols.get(`${packet.exchange}:${packet.token}`) ?? packet.token;
       line(
         `    ${symbol.padEnd(18)} last ${packet.lastPrice.toFixed(2).padStart(10)}  ` +
