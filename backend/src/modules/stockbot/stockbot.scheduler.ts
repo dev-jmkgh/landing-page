@@ -53,6 +53,7 @@ export function startStockbotScheduler(): StockbotScheduler | null {
     client: maskClientCode(settings.clientCode),
     staticIps: settings.staticIps,
     dataDirectory: settings.dataDirectory,
+    emails: settings.emailsEnabled ? 'on' : 'off',
   });
 
   const controller = new AbortController();

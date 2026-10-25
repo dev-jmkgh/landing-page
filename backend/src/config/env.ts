@@ -146,6 +146,12 @@ const schema = z.object({
    * nothing until the ANGEL_* credentials below are present.
    */
   STOCKBOT_SCHEDULER: optionalSwitch,
+  /**
+   * Whether the bot emails ADMIN_EMAILS: the 09:15 levels, the breakouts and the "did not
+   * run today" notices. Off unless set to 1 — the client asked for no emails. With it off
+   * everything is still recorded and `npm run stockbot:prod -- status` shows it.
+   */
+  STOCKBOT_EMAILS: optionalSwitch,
 
   /**
    * Angel One SmartAPI login for the bot. Read only by modules/stockbot, validated there
@@ -584,6 +590,7 @@ export const config = {
    */
   stockbot: {
     schedulerEnabled: raw.STOCKBOT_SCHEDULER ?? isProduction,
+    emailsEnabled: raw.STOCKBOT_EMAILS ?? false,
     clientId: raw.ANGEL_CLIENT_ID.trim(),
     pin: raw.ANGEL_PIN.trim(),
     totpSecret: raw.ANGEL_TOTP_SECRET,

@@ -160,7 +160,9 @@ export async function runTradingSession(
   overrides: Partial<SessionDeps> = {},
 ): Promise<SessionOutcome> {
   const deps: SessionDeps = { ...productionDeps, ...overrides };
-  const { notify } = deps;
+  // With emails off every send reports "skipped": the claims are still taken, so the day
+  // reads as handled and nothing queues up to be mailed if emails are switched on later.
+  const notify: Notify = settings.emailsEnabled ? deps.notify : async () => 'skipped';
   const tradeDate = deps.tradeDate();
   if (!isWeekday(tradeDate)) return { kind: 'idle', reason: 'weekend' };
   const times = deps.times(tradeDate);

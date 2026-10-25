@@ -20,6 +20,8 @@ export type StockbotSettings = {
   /** IPs registered on the SmartAPI app. Orders are accepted only from these. */
   staticIps: string[];
   preferredExchange: CashExchange;
+  /** STOCKBOT_EMAILS. Off: nothing is mailed; levels and breakouts are only recorded. */
+  emailsEnabled: boolean;
   dataDirectory: string;
   watchlistFile: string;
   cacheDirectory: string;
@@ -84,6 +86,7 @@ export function loadStockbotSettings(): StockbotSettingsResult {
       apiKey: raw.apiKey,
       staticIps,
       preferredExchange: preferred,
+      emailsEnabled: raw.emailsEnabled,
       dataDirectory: raw.dataDirectory,
       watchlistFile: path.join(raw.dataDirectory, 'watchlists.json'),
       cacheDirectory: path.join(raw.dataDirectory, 'cache'),

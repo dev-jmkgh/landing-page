@@ -2,8 +2,11 @@
 
 Runs inside the API process (`backend/src/modules/stockbot/`). Every trading day it
 takes the high and low each tracked stock trades between **09:15:00 and 09:15:30 IST**,
-freezes them as that day's levels, and emails `ADMIN_EMAILS` when a stock first trades
-above its high or below its low. Alerts only: it places no orders.
+freezes them as that day's levels, and records when a stock first trades above its high
+or below its low. It places no orders.
+
+**Emails are off** unless `STOCKBOT_EMAILS=1` (the client asked for none). With them off,
+the email steps below are skipped and the results are read with `status`.
 
 Tracked stocks, rebuilt every morning with nothing to maintain:
 

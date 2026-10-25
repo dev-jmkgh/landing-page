@@ -458,6 +458,7 @@ async function tradingDays(ctx: E2EContext, sampleLevels: import('../../src/modu
     apiKey: 'test-key',
     staticIps: [],
     preferredExchange: 'NSE' as const,
+    emailsEnabled: true,
     dataDirectory: os.tmpdir(),
     watchlistFile: 'unused',
     cacheDirectory: 'unused',
@@ -501,6 +502,8 @@ async function tradingDays(ctx: E2EContext, sampleLevels: import('../../src/modu
     login?: () => Promise<import('../../src/modules/stockbot/smartapi.client').AngelSession>;
     loadInstruments?: () => Promise<never>;
     abortAt?: number;
+    /** STOCKBOT_EMAILS; on unless a scenario says otherwise. */
+    emails?: boolean;
   }) {
     const sent: string[] = [];
     let logins = 0;
@@ -510,7 +513,7 @@ async function tradingDays(ctx: E2EContext, sampleLevels: import('../../src/modu
     const controller = new AbortController();
     if (options.abortAt) timers.push(setTimeout(() => controller.abort(), options.abortAt - Date.now()));
 
-    const outcome = await service.runTradingSession(settings, controller.signal, {
+    const outcome = await service.runTradingSession({ ...settings, emailsEnabled: options.emails ?? true }, controller.signal, {
       tradeDate: () => options.tradeDate,
       times: () => options.times,
       login:
@@ -589,6 +592,23 @@ async function tradingDays(ctx: E2EContext, sampleLevels: import('../../src/modu
 
   const again = await runDay({ tradeDate: normalDate, times: compressed() });
   check('a finished day is not run again', again.outcome.kind === 'final' && again.logins === 0, again.outcome);
+
+  console.log('\nstockbot — the same day with emails off (STOCKBOT_EMAILS unset)');
+  const quietDate = '2000-01-17';
+  const quiet = await runDay({
+    tradeDate: quietDate,
+    times: compressed(),
+    emails: false,
+    script: (times) => [
+      { at: times.rangeStart.getTime() + 100, packet: () => quote('A', 101, 99) },
+      { at: times.freezeAt.getTime() + 300, packet: () => quote('A', 101.5, 99) },
+    ],
+  });
+  check('the day still runs to the close', quiet.outcome.kind === 'ran' && 'status' in quiet.outcome && quiet.outcome.status === 'closed', quiet.outcome);
+  check('no email of any kind is sent', quiet.sent.length === 0, quiet.sent);
+  check('the levels are still saved', (await repo.loadLevels(quietDate)).find((level) => level.token === 'A')?.high === 101);
+  const quietBreaks = await repo.listBreakouts(quietDate);
+  check('the break is still recorded, and settled rather than left pending', quietBreaks.length === 1 && quietBreaks[0]?.alertedAt instanceof Date, quietBreaks);
 
   /* -------------------------------------------------------------- holiday */
   console.log('\nstockbot — a holiday');
