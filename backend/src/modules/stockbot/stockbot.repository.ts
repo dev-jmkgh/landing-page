@@ -1,4 +1,4 @@
-import { execute, query, queryOne, type RowDataPacket } from '../../db/pool';
+import { execute, query, queryOne, type RowDataPacket, type SqlParam } from '../../db/pool';
 import {
   FINAL_DAY_STATUSES,
   type BreakoutEvent,
@@ -337,6 +337,109 @@ export async function releaseAlerts(claim: string): Promise<void> {
     'UPDATE stockbot_breakouts SET alert_claim = NULL WHERE alert_claim = ? AND alerted_at IS NULL',
     [claim],
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The status page — every list one bounded page at a time                     */
+/* -------------------------------------------------------------------------- */
+
+export const PAGE_SIZE_MAX = 100;
+export const PAGE_MAX = 1_000;
+
+export type PageSlice<T> = { items: T[]; total: number };
+
+/**
+ * LIMIT and OFFSET are the only values interpolated into SQL here, so they are checked
+ * as bounded integers again even though the route's schema already did.
+ */
+function pageClause(limit: number, offset: number): string {
+  if (!Number.isInteger(limit) || limit < 1 || limit > PAGE_SIZE_MAX) throw new Error('bad page size');
+  if (!Number.isInteger(offset) || offset < 0 || offset > PAGE_SIZE_MAX * PAGE_MAX) throw new Error('bad offset');
+  return `LIMIT ${limit} OFFSET ${offset}`;
+}
+
+/** `AND symbol LIKE 'RELI%'` for an optional search, with LIKE's wildcards escaped. */
+function symbolFilter(search: string | null, params: SqlParam[]): string {
+  if (!search) return '';
+  params.push(`${search.replace(/[\\%_]/g, (character) => `\\${character}`)}%`);
+  return ' AND symbol LIKE ?';
+}
+
+interface CountRow extends RowDataPacket {
+  total: number;
+}
+
+/** A day's levels, the ones with a range first, then by symbol. */
+export async function levelsPage(
+  tradeDate: string,
+  search: string | null,
+  limit: number,
+  offset: number,
+): Promise<PageSlice<FrozenLevel>> {
+  const params: SqlParam[] = [tradeDate];
+  const filter = symbolFilter(search, params);
+  const count = await queryOne<CountRow>(
+    `SELECT COUNT(*) AS total FROM stockbot_levels WHERE trade_date = ?${filter}`,
+    params,
+  );
+  const rows = await query<LevelRow>(
+    `SELECT exchange, token, symbol, sources, status, range_high, range_low, open_price, packet_at
+       FROM stockbot_levels WHERE trade_date = ?${filter}
+      ORDER BY status = 'no_data', symbol, id ${pageClause(limit, offset)}`,
+    params,
+  );
+  return {
+    total: Number(count?.total ?? 0),
+    items: rows.map((row) => ({
+      exchange: row.exchange,
+      token: row.token,
+      symbol: row.symbol,
+      sources: row.sources ? row.sources.split(',') : [],
+      status: row.status,
+      high: decimal(row.range_high),
+      low: decimal(row.range_low),
+      open: decimal(row.open_price),
+      packetAt: row.packet_at,
+    })),
+  };
+}
+
+/** A day's breaks, newest first. */
+export async function breakoutsPage(
+  tradeDate: string,
+  search: string | null,
+  limit: number,
+  offset: number,
+): Promise<PageSlice<BreakoutRecord>> {
+  const params: SqlParam[] = [tradeDate];
+  const filter = symbolFilter(search, params);
+  const count = await queryOne<CountRow>(
+    `SELECT COUNT(*) AS total FROM stockbot_breakouts WHERE trade_date = ?${filter}`,
+    params,
+  );
+  const rows = await query<BreakoutRow>(
+    `SELECT ${BREAKOUT_COLUMNS} FROM stockbot_breakouts WHERE trade_date = ?${filter}
+      ORDER BY detected_at DESC, id DESC ${pageClause(limit, offset)}`,
+    params,
+  );
+  return { total: Number(count?.total ?? 0), items: rows.map(toBreakout) };
+}
+
+interface DateRow extends RowDataPacket {
+  trade_date: string | null;
+}
+
+/** The trading days the bot recorded either side of `tradeDate`, for day-to-day links. */
+export async function adjacentDays(tradeDate: string): Promise<{ previous: string | null; next: string | null }> {
+  const previous = await queryOne<DateRow>(
+    "SELECT DATE_FORMAT(MAX(trade_date), '%Y-%m-%d') AS trade_date FROM stockbot_days WHERE trade_date < ?",
+    [tradeDate],
+  );
+  const next = await queryOne<DateRow>(
+    "SELECT DATE_FORMAT(MIN(trade_date), '%Y-%m-%d') AS trade_date FROM stockbot_days WHERE trade_date > ?",
+    [tradeDate],
+  );
+  return { previous: previous?.trade_date ?? null, next: next?.trade_date ?? null };
 }
 
 /**

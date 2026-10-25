@@ -96,6 +96,12 @@ process.env.TELECALLING_REPORT_EMAILS = 'leftover-report-list@example.test';
 process.env.TELECALLING_REPORT_SCHEDULER = '0';
 
 /**
+ * The stock bot's status page is reached by a secret link; the stockbot section needs a
+ * known one. Never a real deployment's token.
+ */
+process.env.STOCKBOT_VIEW_TOKEN = 'e2e-stockbot-view-0123456789abcdef';
+
+/**
  * The API-wide rate limit is lifted for this suite.
  *
  * It is 120 requests a minute per IP, and this harness is a few hundred requests arriving

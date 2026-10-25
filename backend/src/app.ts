@@ -26,6 +26,7 @@ import { hrDocumentsRouter } from './modules/hr/requests/documents.routes';
 import { hrRequestsRouter } from './modules/hr/requests/requests.routes';
 import { hrRequestsAdminRouter } from './modules/hr/requests/requestsAdmin.routes';
 import { hrTeamRouter } from './modules/hr/team/team.routes';
+import { stockbotRouter } from './modules/stockbot/stockbot.routes';
 import { telecallingAdminRouter } from './modules/telecalling/admin.routes';
 import { mobileRouter } from './modules/telecalling/mobile.routes';
 import { logger } from './utils/logger';
@@ -135,6 +136,12 @@ export function createApp(): Express {
   app.use('/api/admin/hr', hrRequestsAdminRouter);
   app.use('/api/admin/hr', hrPayrollAdminRouter);
   app.use('/api/admin/hr', hrReportsAdminRouter);
+
+  /*
+   * The breakout bot's status page for the trader, who has no account here: the secret
+   * in the path is the credential (see stockbot.routes.ts). Read-only HTML.
+   */
+  app.use('/api/stockbot', stockbotRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

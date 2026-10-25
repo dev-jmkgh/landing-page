@@ -47,6 +47,8 @@ export {
   stockbotNoticeEmail,
   formatPrice,
   formatTradeDate,
+  displaySymbol,
+  sourceLabel,
   type StockbotLevelRow,
   type StockbotLevelsEmailData,
   type StockbotBreakoutRow,

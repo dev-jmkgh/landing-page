@@ -435,6 +435,72 @@ export async function run(ctx: E2EContext): Promise<void> {
   check('the plain-text part keeps every row', bigMail.text.includes('S212'));
 
   await tradingDays(ctx, levels);
+  await statusPage(ctx);
+}
+
+/** The trader's read-only page, over HTTP, against the days the scenarios above recorded. */
+async function statusPage(ctx: E2EContext) {
+  const { check } = ctx;
+  const repo = await import('../../src/modules/stockbot/stockbot.repository');
+  const client = ctx.makeClient(ctx.base);
+  const token = 'e2e-stockbot-view-0123456789abcdef';
+  const page = async (query = '') => {
+    const response = await client.getRaw(`/stockbot/${token}${query}`);
+    return { ...response, html: response.body.toString('utf8') };
+  };
+
+  console.log('\nstockbot — the status page');
+  check('a wrong token is a plain 404', (await client.getRaw('/stockbot/not-the-token-0123456789abcdef')).status === 404);
+  check('so is no token at all', (await client.getRaw('/stockbot/')).status === 404);
+
+  const closed = await page('?date=2000-01-04');
+  check('the right token gets the page', closed.status === 200 && (closed.headers.get('content-type') ?? '').startsWith('text/html'), closed.status);
+  check('it says how the day went', closed.html.includes('Closed for the day'));
+  check('it lists the break', closed.html.includes('Above high') && closed.html.includes('102.00'));
+  check('symbols read without the series suffix', closed.html.includes('AAA') && !closed.html.includes('AAA-EQ'));
+  check('a stock with no range says so', closed.html.includes('No trade in the window'));
+  const csp = closed.headers.get('content-security-policy') ?? '';
+  check('its CSP allows its own stylesheet by hash and no script', /style-src 'sha256-[A-Za-z0-9+/=]+'/.test(csp) && !csp.includes('unsafe') && !csp.includes('script-src'), csp);
+  check('it is never cached and never leaks the link as a referrer', closed.headers.get('cache-control') === 'no-store' && closed.headers.get('referrer-policy') === 'no-referrer');
+  check('a past day does not reload itself', !closed.html.includes('http-equiv="refresh"'));
+
+  const holiday = await page('?date=2000-01-05');
+  check('a holiday reads as no market data', holiday.html.includes('No market data'));
+  const refused = await page('?date=2000-01-06');
+  check('a refused login reads as did not run, with the reason', refused.html.includes('Did not run') && refused.html.includes('Login refused'));
+
+  const searched = await page('?date=2000-01-04&q=bbb');
+  check('search narrows the lists, case-insensitively', searched.html.includes('BBB') && !searched.html.includes('Above high') && searched.html.includes('No breakouts match.'));
+  const wildcard = await page('?date=2000-01-04&q=%25');
+  check('a LIKE wildcard in the search is ignored, not obeyed', wildcard.status === 200 && wildcard.html.includes('Above high'));
+  const badDate = await page('?date=2000-02-30');
+  check('an impossible date falls back to today rather than failing', badDate.status === 200);
+
+  // A big day, to page through.
+  const bigDay = '2000-01-18';
+  await repo.ensureDay(bigDay);
+  await repo.saveLevels(
+    bigDay,
+    Array.from({ length: 120 }, (_, n) => ({
+      exchange: 'NSE' as const,
+      token: `T${n}`,
+      symbol: n === 7 ? '<b>X</b>-EQ' : `S${String(n).padStart(3, '0')}-EQ`,
+      sources: ['fno'],
+      status: 'ok' as const,
+      high: 100 + n,
+      low: 99 + n,
+      open: 100,
+      packetAt: new Date(),
+    })),
+  );
+  const first = await page(`?date=${bigDay}`);
+  check('a long list is paged on the server, 50 rows at a time', first.html.includes('Page 1 of 3') && (first.html.match(/<tr>/g) ?? []).length === 51, (first.html.match(/<tr>/g) ?? []).length);
+  check('names from the data are escaped', first.html.includes('&lt;b&gt;X&lt;/b&gt;') && !first.html.includes('<b>X</b>'));
+  const third = await page(`?date=${bigDay}&lp=3`);
+  check('the last page has the rest', third.html.includes('Page 3 of 3') && third.html.includes('S119'));
+  const beyond = await page(`?date=${bigDay}&lp=999`);
+  check('a page past the end shows the last page', beyond.html.includes('Page 3 of 3') && beyond.html.includes('S119'));
+  check('day links step between recorded days', first.html.includes('?date=2000-01-17'), first.html.match(/href="\?date=[^"]+"/g));
 }
 
 /**

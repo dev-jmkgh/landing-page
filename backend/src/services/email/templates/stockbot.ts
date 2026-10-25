@@ -70,7 +70,7 @@ export function formatTradeDate(tradeDate: string): string {
 }
 
 /** Without the NSE series suffix, which nobody says out loud: `RELIANCE-EQ` -> `RELIANCE`. */
-function displaySymbol(symbol: string): string {
+export function displaySymbol(symbol: string): string {
   return symbol.replace(/-(EQ|BE|BZ|SM|ST)$/, '');
 }
 
@@ -100,7 +100,7 @@ const LEVEL_COLUMNS: readonly DataColumn[] = [
   { label: 'Width', align: 'right' },
 ];
 
-function sourceLabel(sources: readonly string[]): string {
+export function sourceLabel(sources: readonly string[]): string {
   return sources
     .map((source) => {
       if (source === 'fno') return 'F&O';

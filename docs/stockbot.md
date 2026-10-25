@@ -6,7 +6,28 @@ freezes them as that day's levels, and records when a stock first trades above i
 or below its low. It places no orders.
 
 **Emails are off** unless `STOCKBOT_EMAILS=1` (the client asked for none). With them off,
-the email steps below are skipped and the results are read with `status`.
+the email steps below are skipped and the results are read on the status page or with
+`status`.
+
+## The status page
+
+The trader has no account in any JMK app, so the page is a private link:
+`https://api.jmkglobalholdings.com/api/stockbot/<STOCKBOT_VIEW_TOKEN>`. Anyone with the
+link can read it; without it the address answers 404 like any unknown path. It shows the
+day's state (live, closed, holiday, did not run), the breakouts newest first, and every
+level, 50 rows a page, with a stock search and day-to-day links. Today's page reloads
+itself every minute while the market is open. It is read-only and shows only the bot's
+own output, never anything from the trading account.
+
+Turn it on by adding a token to the server `.env` and restarting the API:
+
+```
+echo "STOCKBOT_VIEW_TOKEN=$(openssl rand -hex 24)" | sudo tee -a /var/www/jmkglobalholdings/backend/.env > /dev/null
+sudo systemctl restart jmk-global-backend
+sudo grep '^STOCKBOT_VIEW_TOKEN=' /var/www/jmkglobalholdings/backend/.env   # the value for the link
+```
+
+To revoke a shared link, replace the value and restart.
 
 Tracked stocks, rebuilt every morning with nothing to maintain:
 

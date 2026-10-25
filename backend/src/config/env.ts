@@ -152,6 +152,13 @@ const schema = z.object({
    * everything is still recorded and `npm run stockbot:prod -- status` shows it.
    */
   STOCKBOT_EMAILS: optionalSwitch,
+  /**
+   * The secret in the status page's address, `/api/stockbot/<token>`: a read-only page of
+   * the day's levels and breakouts for the trader, who has no account in any JMK app.
+   * At least 24 characters (`openssl rand -hex 24`); unset or shorter, the page is off.
+   * Changing it revokes every copy of the old link.
+   */
+  STOCKBOT_VIEW_TOKEN: z.string().default(''),
 
   /**
    * Angel One SmartAPI login for the bot. Read only by modules/stockbot, validated there
@@ -591,6 +598,7 @@ export const config = {
   stockbot: {
     schedulerEnabled: raw.STOCKBOT_SCHEDULER ?? isProduction,
     emailsEnabled: raw.STOCKBOT_EMAILS ?? false,
+    viewToken: raw.STOCKBOT_VIEW_TOKEN.trim(),
     clientId: raw.ANGEL_CLIENT_ID.trim(),
     pin: raw.ANGEL_PIN.trim(),
     totpSecret: raw.ANGEL_TOTP_SECRET,
