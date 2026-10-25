@@ -22,7 +22,8 @@ own output, never anything from the trading account.
 Turn it on by adding a token to the server `.env` and restarting the API:
 
 ```
-echo "STOCKBOT_VIEW_TOKEN=$(openssl rand -hex 24)" | sudo tee -a /var/www/jmkglobalholdings/backend/.env > /dev/null
+# printf, not echo: the leading \n keeps it off the last line if .env has no final newline
+printf '\nSTOCKBOT_VIEW_TOKEN=%s\n' "$(openssl rand -hex 24)" | sudo tee -a /var/www/jmkglobalholdings/backend/.env > /dev/null
 sudo systemctl restart jmk-global-backend
 sudo grep '^STOCKBOT_VIEW_TOKEN=' /var/www/jmkglobalholdings/backend/.env   # the value for the link
 ```
