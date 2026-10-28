@@ -104,8 +104,10 @@ export type HrAdminDashboard = {
     /** Live, as of now: null unless the date is today. */
     currentlyIn: number | null;
     notCheckedOut: number | null;
-    /** Days flagged as a missing punch in the seven days ending `date`. */
+    /** Days flagged as a missing punch from `missingPunchesSince` to `date`. */
     missingPunches: number;
+    /** The first day the missing-punch figure covers (seven days ending `date`). */
+    missingPunchesSince: string;
     /** Flagged punches nobody has reviewed yet, up to `date`. */
     flaggedUnreviewed: number;
   };
@@ -115,6 +117,25 @@ export type HrAdminDashboard = {
   /** Null unless the signed-in administrator has the admin role — salary is sensitive. */
   payroll: { lastApproved: { period: string; totalNet: number; employeeCount: number } | null } | null;
 };
+
+/** A dashboard figure. Each links to the screen that lists its people (`figureLink`). */
+export type HrDashboardMetric =
+  | 'headcount'
+  | 'present'
+  | 'late'
+  | 'half_day'
+  | 'absent'
+  | 'on_leave'
+  | 'not_yet_in'
+  | 'weekly_off'
+  | 'wfh'
+  | 'field'
+  /** Live: today only. */
+  | 'currently_in'
+  | 'not_checked_out'
+  /** Rows of days, not of people: one person can appear on several dates. */
+  | 'missing_punches'
+  | 'flagged';
 
 /* -------------------------------------------------------------------------- */
 /* Reports                                                                     */

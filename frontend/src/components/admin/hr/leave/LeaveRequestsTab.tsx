@@ -363,7 +363,13 @@ export function LeaveRequestsTab({
                   render: (row) => (
                     <CellStack
                       primary={formatLeaveRange(row.startDate, row.endDate)}
-                      secondary={row.halfDay !== 'none' ? HALF_DAY_LABELS[row.halfDay] : undefined}
+                      secondary={
+                        row.compOffEarnedOn
+                          ? `For working ${formatLeaveRange(row.compOffEarnedOn, row.compOffEarnedOn)}`
+                          : row.halfDay !== 'none'
+                            ? HALF_DAY_LABELS[row.halfDay]
+                            : undefined
+                      }
                     />
                   ),
                 },

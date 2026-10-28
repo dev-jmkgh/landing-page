@@ -340,6 +340,361 @@
   color: var(--ink-700);
 }
 
+/* ------------------------------------------------- where everybody is (summary) */
+
+.hr-dash-hero {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, var(--blue-050) 0%, var(--surface) 55%);
+  box-shadow: var(--shadow-xs);
+}
+
+.hr-dash-hero-skeleton {
+  height: 9rem;
+  margin-bottom: var(--space-6);
+  border-radius: var(--radius-lg);
+}
+
+.hr-dash-hero__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+}
+
+.hr-dash-hero__eyebrow {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.hr-dash-hero__figure {
+  margin: 0.15rem 0 0;
+  font-family: var(--font-display);
+  line-height: 1.1;
+  color: var(--ink-900);
+}
+
+.hr-dash-hero__figure strong {
+  font-size: var(--text-4xl);
+  font-weight: 700;
+  color: var(--success-600);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-dash-hero__of {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  color: var(--ink-700);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-dash-hero__words {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--ink-500);
+}
+
+.hr-dash-hero__headcount {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-pill);
+  background-color: var(--surface);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--admin-brand, var(--navy-700));
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.hr-dash-hero__headcount:hover {
+  border-color: var(--blue-300);
+  box-shadow: var(--shadow-sm);
+}
+
+/* One bar, the headcount split by what the day is for each person. */
+.hr-dash-bar {
+  display: flex;
+  gap: 2px;
+  height: 0.8rem;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background-color: var(--line-100);
+}
+
+.hr-dash-bar__seg {
+  flex-basis: 0;
+  min-width: 6px;
+  height: 100%;
+}
+
+.hr-dash-seg--present {
+  background-color: var(--success-600);
+}
+
+.hr-dash-seg--late {
+  background-color: var(--warning-600);
+}
+
+.hr-dash-seg--half {
+  background-color: var(--accent-400);
+}
+
+.hr-dash-seg--absent {
+  background-color: var(--danger-600);
+}
+
+.hr-dash-seg--leave {
+  background-color: var(--blue-500);
+}
+
+.hr-dash-seg--off {
+  background-color: var(--blue-300);
+}
+
+/* Still to come, so striped rather than solid. */
+.hr-dash-seg--waiting {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--ink-400) 0 4px,
+    var(--line-200) 4px 8px
+  );
+}
+
+.hr-dash-seg--rest {
+  background-color: var(--line-200);
+}
+
+.hr-dash-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hr-dash-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--ink-700);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.hr-dash-legend__item strong {
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+a.hr-dash-legend__item:hover {
+  border-color: var(--line-200);
+  background-color: var(--surface);
+}
+
+.hr-dash-legend__item--static {
+  cursor: default;
+}
+
+.hr-dash-legend__swatch {
+  flex: none;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 3px;
+}
+
+/* ------------------------------------------------------------ figure groups */
+
+.hr-dash-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 25rem), 1fr));
+  gap: var(--space-6) var(--space-5);
+}
+
+.hr-dash-group__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.hr-dash-group__title {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.hr-dash-group__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-400);
+}
+
+.hr-dash-group__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10.5rem), 1fr));
+  gap: var(--space-3);
+}
+
+/*
+ * A figure: a link to the screen that lists its people, filtered. Zero is muted but still
+ * a link — an empty filtered list is a real answer. The tone colours the icon, the number
+ * and the hover border together.
+ */
+.hr-dash-tile {
+  --tile-color: var(--blue-600);
+  --tile-tint: var(--blue-100);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  min-height: 8.25rem;
+  padding: var(--space-4);
+  border: 1px solid var(--line-200);
+  border-radius: var(--radius-lg);
+  background-color: var(--surface);
+  box-shadow: var(--shadow-xs);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.hr-dash-tile:hover {
+  border-color: var(--tile-color);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* The radius is restated: the site-wide focus rule squares the corners it outlines. */
+.hr-dash-tile:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+
+.hr-dash-tile--good {
+  --tile-color: var(--success-600);
+  --tile-tint: var(--success-050);
+}
+
+.hr-dash-tile--warn {
+  --tile-color: var(--warning-600);
+  --tile-tint: var(--warning-050);
+}
+
+.hr-dash-tile--bad {
+  --tile-color: var(--danger-600);
+  --tile-tint: var(--danger-050);
+}
+
+/* The walked-in / in-right-now hue, as on the telecalling tiles. */
+.hr-dash-tile--accent {
+  --tile-color: #6d28d9;
+  --tile-tint: #ede9fe;
+}
+
+.hr-dash-tile--zero {
+  --tile-color: var(--ink-400);
+  --tile-tint: var(--surface-sunken);
+  background-color: var(--surface-muted);
+  box-shadow: none;
+}
+
+.hr-dash-tile__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hr-dash-tile__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-md);
+  background-color: var(--tile-tint);
+  color: var(--tile-color);
+}
+
+.hr-dash-tile__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.hr-dash-tile__value {
+  margin-top: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
+  color: var(--tile-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-dash-tile__hint {
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+}
+
+.hr-dash-tile__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: auto;
+  padding-top: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--tile-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hr-dash-tile:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .hr-dash-hero {
+    padding: var(--space-4);
+  }
+}
+
 /* The four queues, each a link to the section that clears it. */
 .hr-dash-attention {
   display: grid;

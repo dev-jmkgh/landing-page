@@ -149,7 +149,9 @@ export function LeaveTypesTab({ onUnauthorized }: { onUnauthorized: () => void }
                   width: '10rem',
                   nowrap: true,
                   render: (row) =>
-                    row.annualQuota !== null ? (
+                    row.isCompOff ? (
+                      <span className="tc-muted">Earned by working days off</span>
+                    ) : row.annualQuota !== null ? (
                       formatDays(row.annualQuota)
                     ) : (
                       <span className="tc-muted">Not tracked</span>

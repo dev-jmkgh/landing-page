@@ -3036,6 +3036,8 @@ async function main(): Promise<void> {
       ['hrRequests', () => import('./e2e/hrRequests')],
       ['hrPayroll', () => import('./e2e/hrPayroll')],
       ['hrReports', () => import('./e2e/hrReports')],
+      ['hrCompOff', () => import('./e2e/hrCompOff')],
+      ['hrAccount', () => import('./e2e/hrAccount')],
       ['stockbot', () => import('./e2e/stockbot')],
     ];
 

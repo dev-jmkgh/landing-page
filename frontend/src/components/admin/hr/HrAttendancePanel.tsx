@@ -12,6 +12,7 @@ import {
   REGISTER_STATUS_FILTER_LABELS,
   WORK_MODE_LABELS,
   attendanceAdminApi,
+  isRegisterStatusFilter,
   minutesAsHours,
   pageCount,
   type RegisterEntry,
@@ -26,6 +27,7 @@ import { EmployeeAttendanceView } from './attendance/EmployeeAttendanceView';
 import { ExceptionsView } from './attendance/ExceptionsView';
 import { isAbort } from './people/shared';
 import { useOrgLists } from './people/useOrgLists';
+import { readUrlDate, readUrlEnum, readUrlId, readUrlParam, useUrlParams } from './reports/shared';
 
 /**
  * The day register — who is in, who is late, who has not appeared — and the review queue
@@ -42,13 +44,17 @@ import { useOrgLists } from './people/useOrgLists';
 
 const PAGE_SIZE = 25;
 
-type Tab = 'register' | 'exceptions';
+const TAB_KEYS = ['register', 'exceptions'] as const;
+type Tab = (typeof TAB_KEYS)[number];
 
 /** The employee whose month is open, and the register date it was opened from. */
 type Viewing = { userId: number; name: string; date: string | null };
 
 export function HrAttendancePanel({ onUnauthorized }: { onUnauthorized: () => void }) {
-  const [tab, setTab] = useState<Tab>('register');
+  // The tab and each view's filters live in the address, so a dashboard figure can open
+  // exactly the list behind it, and a refresh or Back keeps it.
+  const [tab, setTab] = useState<Tab>(() => readUrlEnum('attTab', TAB_KEYS, 'register'));
+  useUrlParams({ attTab: tab === 'register' ? null : tab });
   /** Unreviewed exceptions, for the tab badge. Null when unknown — then no badge. */
   const [waiting, setWaiting] = useState<number | null>(null);
   const [viewing, setViewing] = useState<Viewing | null>(null);
@@ -139,13 +145,17 @@ function RegisterView({
   onOpenEmployee: (viewing: Viewing) => void;
 }) {
   /** Empty means "whatever the server calls today". */
-  const [date, setDate] = useState('');
+  const [date, setDate] = useState(() => readUrlDate('att-date'));
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
-  const [departmentId, setDepartmentId] = useState('');
+  const [departmentId, setDepartmentId] = useState(() => String(readUrlId('att-dept') ?? ''));
   const [locationId, setLocationId] = useState('');
-  const [status, setStatus] = useState<RegisterStatusFilter | ''>('');
+  const [status, setStatus] = useState<RegisterStatusFilter | ''>(() => {
+    const value = readUrlParam('att-status');
+    return isRegisterStatusFilter(value) ? value : '';
+  });
   const [page, setPage] = useState(1);
+  useUrlParams({ 'att-date': date || null, 'att-status': status || null, 'att-dept': departmentId || null });
 
   const [data, setData] = useState<RegisterPage | null>(null);
   const [loading, setLoading] = useState(true);

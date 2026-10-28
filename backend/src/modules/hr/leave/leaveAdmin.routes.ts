@@ -4,7 +4,7 @@ import { requireActor, requireCsrfForCookieSession, requireRole } from '../../..
 import { asyncHandler } from '../../../middleware/errorHandler';
 import { validateBody, validateQuery } from '../../../middleware/validate';
 import { queryOne, type RowDataPacket } from '../../../db/pool';
-import { badRequest, notFound } from '../../../utils/httpError';
+import { badRequest, conflict, notFound } from '../../../utils/httpError';
 import { clientIp } from '../../../utils/request';
 import { recordAudit } from '../../telecalling/activity/activity.repository';
 import { companyToday, holidaysBetween } from '../calendar/calendar.service';
@@ -68,14 +68,21 @@ const write = () => [requireRole('admin'), requireCsrfForCookieSession];
 const currentYear = () => Number(companyToday().slice(0, 4));
 
 async function findEmployee(userId: number) {
-  return queryOne<RowDataPacket & { id: number; name: string; employee_code: string }>(
-    'SELECT id, name, employee_code FROM hr_users WHERE id = ? LIMIT 1',
+  return queryOne<RowDataPacket & { id: number; name: string; employee_code: string; deleted_at: Date | null }>(
+    'SELECT id, name, employee_code, deleted_at FROM hr_users WHERE id = ? LIMIT 1',
     [userId],
   );
 }
 
 const NO_QUOTA_FOR_ARRANGEMENTS =
   'Only leave types carry an annual quota. Work from home and field work are never counted against a balance.';
+
+/*
+ * Compensatory leave has no quota or allocation to set: its balance is the weekly offs
+ * and holidays the employee worked in full, read from attendance (see compOff.service).
+ */
+const COMP_OFF_NOT_ALLOCATED =
+  'Compensatory leave has no quota. It is earned by working a full day on a weekly off or holiday.';
 
 /* -------------------------------------------------------------------------- */
 /* Leave types                                                                 */
@@ -143,6 +150,24 @@ hrLeaveAdminRouter.patch(
 
     const current = await findLeaveType(id);
     if (!current) throw notFound('Leave type not found.');
+
+    /*
+     * Compensatory leave's rules are what make it work: always leave, one whole day, and
+     * no quota (its balance is the days worked). Its name, code, paid flag, order and
+     * whether it is offered at all are HR's to change.
+     */
+    if (current.isCompOff) {
+      if (input.kind !== undefined && input.kind !== 'leave') {
+        throw badRequest('Compensatory leave is always leave.', { kind: 'Compensatory leave is always leave.' });
+      }
+      if (input.annualQuota !== undefined && input.annualQuota !== null) {
+        throw badRequest(COMP_OFF_NOT_ALLOCATED, { annualQuota: COMP_OFF_NOT_ALLOCATED });
+      }
+      if (input.allowHalfDay === true) {
+        const message = 'Compensatory leave is taken as a whole day, one for each full day worked.';
+        throw badRequest(message, { allowHalfDay: message });
+      }
+    }
 
     if (input.kind !== undefined && input.kind !== current.kind && (await countRequestsForType(id)) > 0) {
       const message = 'The kind of a leave type cannot change once requests have been made against it.';
@@ -225,11 +250,17 @@ hrLeaveAdminRouter.put(
 
     const employee = await findEmployee(input.userId);
     if (!employee) throw notFound('Employee not found.');
+    if (employee.deleted_at) {
+      throw conflict(`${employee.name} has been deleted, so their leave can no longer be changed.`, 'employee_deleted');
+    }
 
     const type = await findLeaveType(input.leaveTypeId);
     if (!type) throw notFound('Leave type not found.');
     if (type.kind !== 'leave') {
       throw badRequest(NO_QUOTA_FOR_ARRANGEMENTS, { leaveTypeId: NO_QUOTA_FOR_ARRANGEMENTS });
+    }
+    if (type.isCompOff) {
+      throw badRequest(COMP_OFF_NOT_ALLOCATED, { leaveTypeId: COMP_OFF_NOT_ALLOCATED });
     }
 
     const before = (await allocationsFor(input.userId, input.year)).get(type.id) ?? null;

@@ -18,6 +18,7 @@ interface LeaveTypeRow extends RowDataPacket {
   name: string;
   code: string;
   kind: LeaveKind;
+  is_comp_off: number;
   is_paid: number;
   annual_quota: string | null;
   allow_half_day: number;
@@ -32,7 +33,7 @@ interface LeaveTypeRow extends RowDataPacket {
  */
 export async function leaveTypesForYear(year: number): Promise<LeaveType[]> {
   const rows = await query<LeaveTypeRow>(
-    `SELECT t.id, t.name, t.code, t.kind, t.is_paid, t.annual_quota, t.allow_half_day,
+    `SELECT t.id, t.name, t.code, t.kind, t.is_comp_off, t.is_paid, t.annual_quota, t.allow_half_day,
             t.is_active, t.sort_order
        FROM hr_leave_types t
       WHERE t.is_active = 1
@@ -47,6 +48,7 @@ export async function leaveTypesForYear(year: number): Promise<LeaveType[]> {
     name: row.name,
     code: row.code,
     kind: row.kind,
+    isCompOff: Number(row.is_comp_off) === 1,
     isPaid: Number(row.is_paid) === 1,
     annualQuota: row.annual_quota === null ? null : Number(row.annual_quota),
     allowHalfDay: Number(row.allow_half_day) === 1,
@@ -56,7 +58,7 @@ export async function leaveTypesForYear(year: number): Promise<LeaveType[]> {
 }
 
 /**
- * How many people's balances are read at once. Each is two small indexed queries; ten
+ * How many people's balances are read at once. Each is a few small indexed queries; ten
  * in flight keeps an export of the whole company from taking every pooled connection
  * away from the requests other people are making meanwhile.
  */

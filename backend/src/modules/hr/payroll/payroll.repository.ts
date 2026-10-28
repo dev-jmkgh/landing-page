@@ -326,7 +326,8 @@ export async function listPayrollEmployees(filters: {
   page: number;
   pageSize: number;
 }): Promise<Page<PayrollEmployee>> {
-  const conditions: string[] = ["u.approval_status = 'approved'"];
+  // A deleted employee has no salary to set up.
+  const conditions: string[] = ["u.approval_status = 'approved'", 'u.deleted_at IS NULL'];
   const params: SqlParam[] = [];
 
   if (filters.q) {
@@ -597,6 +598,10 @@ export type PayrollCandidate = {
  * force at its end (latest effective_from on or before `periodEnd`).
  *
  * Active or not: someone deactivated on the 20th still worked the first nineteen days.
+ * DELETED is different: an administrator deleting an employee takes them out of every pay
+ * period not yet approved, the current one included (the user's rule, 2026-10-28). Only
+ * approved periods keep their payslips, and those are never recalculated.
+ *
  * A NULL joining date means employed throughout — HR has not recorded one, and refusing
  * to pay them would be the wrong failure. The caller splits off the ones without a
  * structure (reported, not paid).
@@ -613,6 +618,7 @@ export async function payrollCandidates(periodStart: string, periodEnd: string):
        LEFT JOIN hr_departments d  ON d.id = u.department_id
        LEFT JOIN hr_designations g ON g.id = u.designation_id
       WHERE u.approval_status = 'approved'
+        AND u.deleted_at IS NULL
         AND (u.joining_date IS NULL OR u.joining_date <= ?)
         AND (u.exit_date IS NULL OR u.exit_date >= ?)
       ORDER BY u.id ASC`,

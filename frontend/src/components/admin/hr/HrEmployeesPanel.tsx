@@ -15,6 +15,7 @@ import {
   type HrPaginated,
 } from '@/lib/hr';
 import { EmptyPanel, Pager, Tag, TableSkeleton } from '../telecalling/shared';
+import { readUrlEnum, useUrlParam } from './leave/shared';
 import { AddEmployeeDialog } from './people/AddEmployeeDialog';
 import { EmployeeDetail } from './people/EmployeeDetail';
 import { EmployeeDirectory } from './people/EmployeeDirectory';
@@ -55,11 +56,14 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'pending', label: 'Pending approval' },
   { key: 'rejected', label: 'Rejected' },
 ];
+const TAB_KEYS = TABS.map((item) => item.key);
 
 export function HrEmployeesPanel({ onUnauthorized }: { onUnauthorized: () => void }) {
   const org = useOrgLists(onUnauthorized);
 
-  const [tab, setTab] = useState<Tab>('directory');
+  // In the address (`?peopleTab=`), so the dashboard's Registrations card can open the queue.
+  const [tab, setTab] = useState<Tab>(() => readUrlEnum('peopleTab', TAB_KEYS, 'directory'));
+  useUrlParam('peopleTab', tab === 'directory' ? null : tab);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);

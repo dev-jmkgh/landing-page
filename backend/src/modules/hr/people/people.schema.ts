@@ -10,7 +10,7 @@ import {
   pageQuerySchema,
 } from '../hr.schema';
 import { hrSignupSchema } from '../hrAuth.routes';
-import { WEEKDAYS } from '../settings/hrSettings';
+import { COMP_OFF_VALIDITY, WEEKDAYS } from '../settings/hrSettings';
 
 /**
  * Request schemas and records for employee records and the organisation lists
@@ -215,6 +215,13 @@ export const employeePatchSchema = z
   });
 export type EmployeePatchInput = z.infer<typeof employeePatchSchema>;
 
+/**
+ * An administrator setting a new password for an employee who lost theirs. The same rules
+ * as signing up and as adding an employee: one set of password rules for the HR app.
+ */
+export const employeePasswordSchema = z.object({ password: hrSignupSchema.shape.password });
+export type EmployeePasswordInput = z.infer<typeof employeePasswordSchema>;
+
 export const employeeAttendanceQuerySchema = pageQuerySchema.extend({
   from: z.preprocess(blankAsUndefined, calendarDateField.optional()),
   to: z.preprocess(blankAsUndefined, calendarDateField.optional()),
@@ -273,11 +280,19 @@ export const settingsPatchSchema = z
       .min(1, 'Use a day from 1 to 28.')
       .max(28, 'Use a day from 1 to 28.')
       .optional(),
+    /* Compensatory leave: days after the worked weekly off or holiday to take it by. */
+    compOffValidityDays: z.coerce
+      .number()
+      .int('Use a whole number of days.')
+      .min(COMP_OFF_VALIDITY.min, `Use ${COMP_OFF_VALIDITY.min} to ${COMP_OFF_VALIDITY.max} days.`)
+      .max(COMP_OFF_VALIDITY.max, `Use ${COMP_OFF_VALIDITY.min} to ${COMP_OFF_VALIDITY.max} days.`)
+      .optional(),
   })
   .refine(
     (value) =>
       value.attendanceTrackedFrom !== undefined ||
       value.defaultWeeklyOff !== undefined ||
-      value.payrollCycleStartDay !== undefined,
+      value.payrollCycleStartDay !== undefined ||
+      value.compOffValidityDays !== undefined,
     { message: 'Nothing to change.', path: ['form'] },
   );

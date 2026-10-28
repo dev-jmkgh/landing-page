@@ -102,7 +102,8 @@ export async function shareDocument(input: {
 
   if (ownerId !== null) {
     const owner = await queryOne<RowDataPacket & { id: number }>(
-      'SELECT id FROM hr_users WHERE id = ? LIMIT 1',
+      // A deleted employee cannot be given new documents; their old ones stay listed.
+      'SELECT id FROM hr_users WHERE id = ? AND deleted_at IS NULL LIMIT 1',
       [ownerId],
     );
     if (!owner) throw badRequest('That employee does not exist.', { userId: 'Choose an employee from the list.' });

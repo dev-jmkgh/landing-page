@@ -5,11 +5,12 @@ import { LoadingOverlay } from '@/components/admin/Loader';
 import { FormAlert } from '@/components/forms/Fields';
 import { Icon } from '@/components/ui/Icon';
 import { hrReportsApi, type HrAdminDashboard } from '@/lib/hrReports';
-import { EmptyPanel, StatCard, StatGrid, StatGridSkeleton } from '../telecalling/shared';
+import { EmptyPanel, StatGridSkeleton } from '../telecalling/shared';
 import { AttendanceTrendCard } from './dashboard/AttendanceTrendCard';
 import { AttentionCards, DepartmentHeadcountCard, PayrollCard } from './dashboard/DashboardCards';
+import { DaySummary, MetricTile, TileGroup } from './dashboard/DayTiles';
 import { sectionLinkProps } from './dashboard/sectionLink';
-import { calendarDay, companyToday, count, readUrlDate, useServerData, useUrlParams } from './reports/shared';
+import { calendarDay, companyToday, readUrlDate, useServerData, useUrlParams } from './reports/shared';
 
 /**
  * HR's landing page: the day at a glance, then whatever is waiting for a decision.
@@ -18,6 +19,12 @@ import { calendarDay, companyToday, count, readUrlDate, useServerData, useUrlPar
  * the day's figures, the queues, a fourteen-day trend and (for administrators) the last
  * payroll — so the screen that opens first is never the slow one, and no tile can
  * disagree with its neighbour about which moment it describes.
+ *
+ * EVERY FIGURE OPENS ITS LIST. Each figure links to the screen that lists the same people
+ * with the filters set — the attendance register for one status, the exceptions queue, or
+ * the employee directory (`figureLink`). The server counts each figure with that screen's
+ * own query, so the number and the list's total agree, and the list is paged, searchable
+ * and exportable however many people there are.
  *
  * NOTHING IS INVENTED. The live figures (in right now, not checked out) only exist for
  * today; for an earlier date the server sends null and those tiles are not shown, rather
@@ -97,6 +104,7 @@ export function HrDashboardPanel({ onUnauthorized }: { onUnauthorized: () => voi
         </>
       ) : dashboard.loading ? (
         <>
+          <div className="skeleton hr-dash-hero-skeleton" />
           <h2 className="tc-section-title">The day</h2>
           <StatGridSkeleton count={8} />
           <h2 className="tc-section-title">Needs your attention</h2>
@@ -158,62 +166,63 @@ function DashboardBody({ data }: { data: HrAdminDashboard }) {
         {data.isToday
           ? 'So far today. People with nothing recorded yet are “not yet in”, not absent.'
           : 'As the attendance calendar classifies the day.'}{' '}
+        Each figure opens its list with the filters set.{' '}
         <a className="tc-link" {...sectionLinkProps('attendance')}>
           Open the attendance register
         </a>
       </p>
-      <StatGrid>
-        <StatCard value={count(headcount.total)} label="Headcount" icon="users" hint="Active employees" />
-        <StatCard value={count(today.present)} label="Present" tone={today.present > 0 ? 'good' : 'default'} icon="check" hint="On time" />
-        <StatCard value={count(today.late)} label="Late" tone={today.late > 0 ? 'warn' : 'default'} icon="clock" />
-        <StatCard value={count(today.halfDay)} label="Half day" tone={today.halfDay > 0 ? 'warn' : 'default'} />
-        <StatCard value={count(today.onLeave)} label="On leave" icon="calendar" />
-        {data.isToday ? (
-          <StatCard
-            value={count(today.notYetIn)}
-            label="Not yet in"
-            hint="A working day, nothing recorded yet"
-          />
-        ) : null}
-        {/* Today's absences are only ever the exception; an earlier day's are the figure. */}
-        {!data.isToday || today.absent > 0 ? (
-          <StatCard value={count(today.absent)} label="Absent" tone={today.absent > 0 ? 'bad' : 'default'} />
-        ) : null}
-        <StatCard value={count(today.wfh)} label="Working from home" hint="On an approved request" />
-        <StatCard value={count(today.field)} label="On field work" hint="On an approved request" />
-        {today.weeklyOff > 0 && !everyoneOff ? (
-          <StatCard value={count(today.weeklyOff)} label="Weekly off" hint="Their rest day" />
-        ) : null}
-        {today.currentlyIn !== null ? (
-          <StatCard value={count(today.currentlyIn)} label="In right now" tone="accent" hint="Checked in, shift not over" />
-        ) : null}
-        {today.notCheckedOut !== null ? (
-          <StatCard
-            value={count(today.notCheckedOut)}
-            label="Not checked out"
-            tone={today.notCheckedOut > 0 ? 'warn' : 'default'}
-            hint="Still checked in after their shift"
-          />
-        ) : null}
-      </StatGrid>
 
-      <h2 className="tc-section-title">Punches to look at</h2>
-      <StatGrid>
-        <StatCard
-          value={count(today.missingPunches)}
-          label="Missing punches"
-          tone={today.missingPunches > 0 ? 'warn' : 'default'}
-          icon="alert"
-          hint="Forgotten check-outs, 7 days to this date"
-        />
-        <StatCard
-          value={count(today.flaggedUnreviewed)}
-          label="Flagged punches to review"
-          tone={today.flaggedUnreviewed > 0 ? 'warn' : 'default'}
-          icon="shield"
-          hint="Mock location, clock or accuracy flags"
-        />
-      </StatGrid>
+      <DaySummary data={data} />
+
+      <div className="hr-dash-groups">
+        <TileGroup title="Attendance">
+          <MetricTile metric="present" value={today.present} hint="On time" data={data} />
+          <MetricTile metric="late" value={today.late} hint="After start time plus grace" data={data} />
+          <MetricTile metric="half_day" value={today.halfDay} hint="Less than a full day" data={data} />
+          {data.isToday ? (
+            <MetricTile metric="not_yet_in" value={today.notYetIn} hint="A working day, nothing recorded yet" data={data} />
+          ) : null}
+          {/* Today's absences are only ever the exception; an earlier day's are the figure. */}
+          {!data.isToday || today.absent > 0 ? (
+            <MetricTile metric="absent" value={today.absent} hint="No attendance, no leave" data={data} />
+          ) : null}
+        </TileGroup>
+
+        <TileGroup title="Away">
+          <MetricTile metric="on_leave" value={today.onLeave} hint="Approved leave" data={data} />
+          <MetricTile metric="wfh" value={today.wfh} hint="On an approved request" data={data} />
+          <MetricTile metric="field" value={today.field} hint="On an approved request" data={data} />
+          {!everyoneOff ? <MetricTile metric="weekly_off" value={today.weeklyOff} hint="Their rest day" data={data} /> : null}
+        </TileGroup>
+
+        {today.currentlyIn !== null && today.notCheckedOut !== null ? (
+          <TileGroup title="Right now" hint="Live, as of the last refresh">
+            <MetricTile metric="currently_in" value={today.currentlyIn} hint="Checked in, shift not over" data={data} />
+            <MetricTile
+              metric="not_checked_out"
+              value={today.notCheckedOut}
+              hint="Shift over, no check-out yet"
+              data={data}
+            />
+          </TileGroup>
+        ) : null}
+
+        <TileGroup title="Punches to look at">
+          <MetricTile
+            metric="missing_punches"
+            value={today.missingPunches}
+            hint="Forgotten check-outs, 7 days to this date"
+            data={data}
+          />
+          <MetricTile
+            metric="flagged"
+            value={today.flaggedUnreviewed}
+            label="Flagged punches"
+            hint="Mock location, clock or accuracy"
+            data={data}
+          />
+        </TileGroup>
+      </div>
 
       <h2 className="tc-section-title tc-section-title--with-hint">Needs your attention</h2>
       <p className="tc-section-hint">As of now. The date above does not apply.</p>

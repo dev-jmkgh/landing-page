@@ -7,7 +7,7 @@ import {
 } from '../../middleware/actor';
 import { asyncHandler } from '../../middleware/errorHandler';
 import { validateBody, validateQuery } from '../../middleware/validate';
-import { badRequest, notFound } from '../../utils/httpError';
+import { badRequest, conflict, notFound } from '../../utils/httpError';
 import { logger } from '../../utils/logger';
 import { clientIp } from '../../utils/request';
 import { recordAudit } from '../telecalling/activity/activity.repository';
@@ -120,7 +120,7 @@ hrAdminRouter.post(
     const id = parseId(request.params.id);
 
     const employee = await findHrUser(id);
-    if (!employee) throw notFound('Registration not found.');
+    if (!employee || employee.deletedAt) throw notFound('Registration not found.');
 
     if (employee.approvalStatus !== 'pending') {
       throw badRequest(
@@ -190,7 +190,7 @@ hrAdminRouter.post(
     const { reason } = request.body as { reason: string | null };
 
     const employee = await findHrUser(id);
-    if (!employee) throw notFound('Registration not found.');
+    if (!employee || employee.deletedAt) throw notFound('Registration not found.');
 
     if (employee.approvalStatus !== 'pending') {
       throw badRequest('That registration has already been decided.');
@@ -235,6 +235,9 @@ hrAdminRouter.post(
 
     const employee = await findHrUser(id);
     if (!employee) throw notFound('Employee not found.');
+    if (employee.deletedAt) {
+      throw conflict(`${employee.name} has been deleted and cannot be switched on or off.`, 'employee_deleted');
+    }
 
     const applied = await setHrUserActive(id, active);
     if (!applied) {

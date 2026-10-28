@@ -819,7 +819,11 @@ export async function run(ctx: E2EContext): Promise<void> {
   check('status=currently_in', currentlyIn.json.total === 1 && sameSet(idsOf(currentlyIn), [arunId]), currentlyIn.json);
 
   const presentOnly = await regFilter(`departmentId=${deptAId}&status=present`);
-  check('status=present names nobody today: verdicts wait for the day to end', presentOnly.json.total === 0, presentOnly.json);
+  check(
+    'status=present today names who checked in on time so far, as the dashboard counts them',
+    presentOnly.json.total === 1 && sameSet(idsOf(presentOnly), [arunId]),
+    presentOnly.json,
+  );
   const checkedOutToday = await regFilter(`departmentId=${deptAId}&status=checked_out`);
   check('status=checked_out does not list somebody still in', checkedOutToday.json.total === 0, checkedOutToday.json);
 

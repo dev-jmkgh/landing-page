@@ -337,6 +337,76 @@ export async function run(ctx: E2EContext): Promise<void> {
   const unrealDate = await admin.get('/admin/hr/dashboard?date=2026-02-30');
   check('an impossible date is a 400', unrealDate.status === 400, unrealDate.json);
 
+  /* --- every figure is the total of the screen it opens, with the same filters --- */
+
+  const totalOf = async (path: string): Promise<unknown> => (await admin.get(path)).json?.total;
+  const register = (status: string, date?: string) =>
+    totalOf(`/admin/hr/attendance?status=${status}${date ? `&date=${date}` : ''}&pageSize=1`);
+  const pairs: Array<[string, unknown, unknown]> = [
+    ['headcount → employees, active', after.headcount?.total, await totalOf('/admin/hr/employees?active=true&approval=approved&pageSize=1')],
+    ['present', after.today?.present, await register('present')],
+    ['late', after.today?.late, await register('late')],
+    ['half day', after.today?.halfDay, await register('half_day')],
+    ['absent', after.today?.absent, await register('absent')],
+    ['on leave', after.today?.onLeave, await register('on_leave')],
+    ['not yet in', after.today?.notYetIn, await register('yet_to_check_in')],
+    ['weekly off', after.today?.weeklyOff, await register('weekly_off')],
+    ['work from home', after.today?.wfh, await register('wfh')],
+    ['field work', after.today?.field, await register('field')],
+    ['in right now', after.today?.currentlyIn, await register('currently_in')],
+    ['not checked out', after.today?.notCheckedOut, await register('not_checked_out')],
+    [
+      'missing punches → exceptions',
+      after.today?.missingPunches,
+      await totalOf(
+        `/admin/hr/attendance/exceptions?type=missing_punch&from=${after.today?.missingPunchesSince}&to=${today}&pageSize=1`,
+      ),
+    ],
+    [
+      'flagged → exceptions',
+      after.today?.flaggedUnreviewed,
+      await totalOf(`/admin/hr/attendance/exceptions?type=flagged&reviewed=false&to=${today}&pageSize=1`),
+    ],
+  ];
+  const mismatched = pairs.filter(([, figure, total]) => typeof figure !== 'number' || figure !== total);
+  check('every dashboard figure is the total of the filtered screen it opens', mismatched.length === 0, mismatched);
+  check(
+    'the missing-punch figure covers the seven days ending the date',
+    after.today?.missingPunchesSince === addDays(today, -6),
+    after.today?.missingPunchesSince,
+  );
+
+  const presentToday = await admin.get('/admin/hr/attendance?status=present&pageSize=100');
+  check(
+    'the register filtered to present lists whoever checked in on time today',
+    ((presentToday.json?.items as Json[] | undefined) ?? []).some(
+      (row) => row.userId === puncher.id && row.dayStatus === 'checked_in',
+    ),
+    presentToday.json?.items,
+  );
+  const inNow = await admin.get('/admin/hr/attendance?status=currently_in&pageSize=100');
+  check(
+    'and filtered to in right now, them too',
+    ((inNow.json?.items as Json[] | undefined) ?? []).some((row) => row.userId === puncher.id),
+    inNow.json?.items,
+  );
+
+  const pastDate = addDays(today, -3);
+  check(
+    "a past day's figures match that day's register",
+    pastDay.json?.today?.absent === (await register('absent', pastDate)) &&
+      pastDay.json?.today?.onLeave === (await register('on_leave', pastDate)) &&
+      pastDay.json?.today?.present === (await register('present', pastDate)),
+    pastDay.json?.today,
+  );
+  check(
+    "and today's trend point is today's figures",
+    after.trend?.[13]?.present === after.today?.present &&
+      after.trend?.[13]?.late === after.today?.late &&
+      after.trend?.[13]?.onLeave === after.today?.onLeave,
+    { trend: after.trend?.[13], today: after.today },
+  );
+
   const supervisor = await ctx.createSignedInEmployee({
     name: `Report Supervisor ${tag}`,
     email: `rpt.supervisor.${tag}@example.test`,
@@ -348,6 +418,8 @@ export async function run(ctx: E2EContext): Promise<void> {
     supervisorDash.status === 200 && supervisorDash.json?.payroll === null,
     { status: supervisorDash.status, payroll: supervisorDash.json?.payroll },
   );
+  const supervisorRegister = await supervisor.client.get('/admin/hr/attendance?status=present&pageSize=1');
+  check('a supervisor can open the filtered register a figure links to', supervisorRegister.status === 200, supervisorRegister.status);
   const telecallerDash = await ctx.ravi.get('/admin/hr/dashboard');
   check('a telecaller is refused', telecallerDash.status === 403, telecallerDash.status);
   const hrTokenDash = await fresh.client.get('/admin/hr/dashboard');

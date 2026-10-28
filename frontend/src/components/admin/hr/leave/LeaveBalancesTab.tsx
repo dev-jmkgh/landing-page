@@ -162,11 +162,13 @@ export function LeaveBalancesTab({ onUnauthorized }: { onUnauthorized: () => voi
                     <CellStack
                       primary={row.leaveType.name}
                       secondary={
-                        row.allocation
-                          ? `Allocation${row.allocation.note ? `: ${row.allocation.note}` : ''}`
-                          : row.leaveType.annualQuota !== null
-                            ? `Quota ${formatDays(row.leaveType.annualQuota)} a year`
-                            : 'No quota'
+                        row.leaveType.isCompOff
+                          ? 'Earned by working weekly offs and holidays'
+                          : row.allocation
+                            ? `Allocation${row.allocation.note ? `: ${row.allocation.note}` : ''}`
+                            : row.leaveType.annualQuota !== null
+                              ? `Quota ${formatDays(row.leaveType.annualQuota)} a year`
+                              : 'No quota'
                       }
                     >
                       <span className="tc-mono tc-muted">{row.leaveType.code}</span>
@@ -229,21 +231,23 @@ export function LeaveBalancesTab({ onUnauthorized }: { onUnauthorized: () => voi
                   align: 'end',
                   width: '9rem',
                   nowrap: true,
-                  render: (row) => (
-                    <CellActions>
-                      <button
-                        type="button"
-                        className="btn btn--outline btn--sm"
-                        onClick={() => {
-                          setNotice(null);
-                          setEditing(row);
-                        }}
-                        aria-label={`Set the ${row.leaveType.name} allocation for ${employee.name}, ${year}`}
-                      >
-                        Set days
-                      </button>
-                    </CellActions>
-                  ),
+                  render: (row) =>
+                    // Compensatory leave is earned from attendance; there are no days to set.
+                    row.leaveType.isCompOff ? null : (
+                      <CellActions>
+                        <button
+                          type="button"
+                          className="btn btn--outline btn--sm"
+                          onClick={() => {
+                            setNotice(null);
+                            setEditing(row);
+                          }}
+                          aria-label={`Set the ${row.leaveType.name} allocation for ${employee.name}, ${year}`}
+                        >
+                          Set days
+                        </button>
+                      </CellActions>
+                    ),
                 },
               ]}
             />

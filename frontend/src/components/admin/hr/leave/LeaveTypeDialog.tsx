@@ -74,6 +74,8 @@ export function LeaveTypeDialog({
 
   const quotaAllowed = kind === 'leave';
   const quotaTracked = quotaAllowed && tracked;
+  // Compensatory leave's kind, quota and half-day rule are fixed: only the rest is editable.
+  const compOff = existing?.isCompOff === true;
 
   /* --------------------------------------------------------- validation */
 
@@ -262,90 +264,100 @@ export function LeaveTypeDialog({
             </div>
           </div>
 
-          <fieldset className="tc-choice-list" aria-describedby={id('kind-hint')}>
-            <legend>Kind</legend>
-            <div className="tc-choice">
-              {LEAVE_KINDS.map((value) => (
-                <label key={value}>
+          {compOff ? (
+            <FormAlert variant="info">
+              Compensatory leave has no quota. Each employee’s balance is the weekly offs and holidays they
+              worked a full day on, still within the time limit in HR settings. It is always a whole day, and
+              only HR administrators approve it — not team managers.
+            </FormAlert>
+          ) : (
+            <>
+            <fieldset className="tc-choice-list" aria-describedby={id('kind-hint')}>
+              <legend>Kind</legend>
+              <div className="tc-choice">
+                {LEAVE_KINDS.map((value) => (
+                  <label key={value}>
+                    <input
+                      type="radio"
+                      name={id('kind')}
+                      value={value}
+                      checked={kind === value}
+                      disabled={saving}
+                      onChange={() => {
+                        setKind(value);
+                        if (value !== 'leave') setTracked(false);
+                      }}
+                    />
+                    <span>{LEAVE_KIND_LABELS[value]}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="field__hint" id={id('kind-hint')}>
+                {KIND_HINTS[kind]}
+              </p>
+              {errorLine('kind')}
+            </fieldset>
+
+            <fieldset className="tc-choice-list" aria-describedby={id('quota-hint')}>
+              <legend>Annual quota</legend>
+              <div className="tc-choice">
+                <label>
                   <input
                     type="radio"
-                    name={id('kind')}
-                    value={value}
-                    checked={kind === value}
+                    name={id('quota-mode')}
+                    checked={!quotaTracked}
                     disabled={saving}
-                    onChange={() => {
-                      setKind(value);
-                      if (value !== 'leave') setTracked(false);
-                    }}
+                    onChange={() => setTracked(false)}
                   />
-                  <span>{LEAVE_KIND_LABELS[value]}</span>
+                  <span>No quota — untracked</span>
                 </label>
-              ))}
-            </div>
-            <p className="field__hint" id={id('kind-hint')}>
-              {KIND_HINTS[kind]}
-            </p>
-            {errorLine('kind')}
-          </fieldset>
-
-          <fieldset className="tc-choice-list" aria-describedby={id('quota-hint')}>
-            <legend>Annual quota</legend>
-            <div className="tc-choice">
-              <label>
-                <input
-                  type="radio"
-                  name={id('quota-mode')}
-                  checked={!quotaTracked}
-                  disabled={saving}
-                  onChange={() => setTracked(false)}
-                />
-                <span>No quota — untracked</span>
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name={id('quota-mode')}
-                  checked={quotaTracked}
-                  disabled={saving || !quotaAllowed}
-                  onChange={() => setTracked(true)}
-                />
-                <span>An annual quota</span>
-              </label>
-            </div>
-
-            {quotaTracked ? (
-              <div className={`${fieldClass('annualQuota')} hrl-quota-field`}>
-                <label className="field__label" htmlFor={id('quota')}>
-                  Days a year
+                <label>
+                  <input
+                    type="radio"
+                    name={id('quota-mode')}
+                    checked={quotaTracked}
+                    disabled={saving || !quotaAllowed}
+                    onChange={() => setTracked(true)}
+                  />
+                  <span>An annual quota</span>
                 </label>
-                <input
-                  id={id('quota')}
-                  className="input"
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  max={365}
-                  step={0.5}
-                  value={quota}
-                  disabled={saving}
-                  aria-invalid={fieldErrors.annualQuota ? true : undefined}
-                  aria-describedby={fieldErrors.annualQuota ? id('annualQuota-error') : undefined}
-                  onChange={(event) => setQuota(event.target.value)}
-                />
-                {errorLine('annualQuota')}
               </div>
-            ) : (
-              errorLine('annualQuota')
-            )}
 
-            <p className="field__hint" id={id('quota-hint')}>
-              {!quotaAllowed
-                ? 'Work from home and field work are never counted against a balance, so they have no quota.'
-                : quotaTracked
-                  ? 'Each employee is entitled to this many days per calendar year, unless an allocation for them says otherwise.'
-                  : 'No balance is kept or shown. An allocation on the Balances tab can still give one person a tracked entitlement.'}
-            </p>
-          </fieldset>
+              {quotaTracked ? (
+                <div className={`${fieldClass('annualQuota')} hrl-quota-field`}>
+                  <label className="field__label" htmlFor={id('quota')}>
+                    Days a year
+                  </label>
+                  <input
+                    id={id('quota')}
+                    className="input"
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    max={365}
+                    step={0.5}
+                    value={quota}
+                    disabled={saving}
+                    aria-invalid={fieldErrors.annualQuota ? true : undefined}
+                    aria-describedby={fieldErrors.annualQuota ? id('annualQuota-error') : undefined}
+                    onChange={(event) => setQuota(event.target.value)}
+                  />
+                  {errorLine('annualQuota')}
+                </div>
+              ) : (
+                errorLine('annualQuota')
+              )}
+
+              <p className="field__hint" id={id('quota-hint')}>
+                {!quotaAllowed
+                  ? 'Work from home and field work are never counted against a balance, so they have no quota.'
+                  : quotaTracked
+                    ? 'Each employee is entitled to this many days per calendar year, unless an allocation for them says otherwise.'
+                    : 'No balance is kept or shown. An allocation on the Balances tab can still give one person a tracked entitlement.'}
+              </p>
+            </fieldset>
+            </>
+          )}
 
           <div className="tc-choice-list">
             <div className="tc-choice">
@@ -359,17 +371,19 @@ export function LeaveTypeDialog({
                 <span>Paid — the day is paid in payroll</span>
               </label>
             </div>
-            <div className="tc-choice">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={allowHalfDay}
-                  disabled={saving}
-                  onChange={(event) => setAllowHalfDay(event.target.checked)}
-                />
-                <span>Half days allowed</span>
-              </label>
-            </div>
+            {compOff ? null : (
+              <div className="tc-choice">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={allowHalfDay}
+                    disabled={saving}
+                    onChange={(event) => setAllowHalfDay(event.target.checked)}
+                  />
+                  <span>Half days allowed</span>
+                </label>
+              </div>
+            )}
             {existing ? (
               <div className="tc-choice">
                 <label>

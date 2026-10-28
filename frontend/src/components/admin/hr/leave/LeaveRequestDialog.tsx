@@ -176,6 +176,16 @@ export function LeaveRequestDialog({
             {request.halfDay !== 'none' ? <Tag>{HALF_DAY_LABELS[request.halfDay]}</Tag> : null}
           </dd>
 
+          {request.compOffEarnedOn ? (
+            <>
+              <dt>Earned by working</dt>
+              <dd>
+                <span>{formatLeaveRange(request.compOffEarnedOn, request.compOffEarnedOn)}</span>
+                <span className="tc-muted">a weekly off or holiday, checked against attendance</span>
+              </dd>
+            </>
+          ) : null}
+
           <dt>Working days</dt>
           <dd>{formatDays(request.days)}</dd>
 

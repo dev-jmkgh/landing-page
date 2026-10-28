@@ -1,4 +1,4 @@
-import { withTransaction } from '../../../db/pool';
+import { query, withTransaction, type RowDataPacket } from '../../../db/pool';
 import { HttpError, badRequest, notFound } from '../../../utils/httpError';
 import { logger } from '../../../utils/logger';
 import type { Reviewer } from '../attendance/regularisation.service';
@@ -10,8 +10,11 @@ import {
   type LeaveDayCount,
 } from '../calendar/calendar.service';
 import { notifyHr } from '../notifications/hrNotifications.repository';
+import { getHrSettings } from '../settings/hrSettings';
+import { compOffUseBy, earns, freeCompOffDays, workedOffDay, type WorkedOffDay } from './compOff.service';
 import {
   allocationsFor,
+  claimedCompOffDays,
   findLeaveType,
   findOverlap,
   findRequestByClientKey,
@@ -80,6 +83,18 @@ function halfLabel(halfDay: HalfDay): string {
   return halfDay === 'first_half' ? ' (first half)' : halfDay === 'second_half' ? ' (second half)' : '';
 }
 
+/** `450` → `7h 30m`, `480` → `8h`. */
+function hoursText(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
+/** ` for working on 5 Oct 2026`, for a compensatory leave's notifications. */
+function earnedLabel(earnedOn: string | null): string {
+  return earnedOn ? ` for working on ${humanDate(earnedOn)}` : '';
+}
+
 /* -------------------------------------------------------------------------- */
 /* Balances                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -96,6 +111,13 @@ function entitlementFor(type: LeaveType, allocation: { days: number } | undefine
   return type.annualQuota;
 }
 
+/**
+ * COMPENSATORY LEAVE HAS NO QUOTA. Its `available` is the worked weekly offs and holidays
+ * still free to use (`freeCompOffDays`); `used` and `pending` are the year's requests like
+ * any type's; and `entitled` is the three together — every day earned that is used,
+ * asked for, or still usable — so `entitled - used - pending = available` holds for it
+ * as it does for every other balance.
+ */
 async function computeBalances(
   userId: number,
   year: number,
@@ -104,8 +126,22 @@ async function computeBalances(
 ): Promise<LeaveBalanceWithAllocation[]> {
   const allocations = await allocationsFor(userId, year, db);
   const usage = await usageFor(userId, year, db);
+  const free = types.some((type) => type.isCompOff) ? (await freeCompOffDays(userId, db)).length : 0;
 
   return types.map((type) => {
+    if (type.isCompOff) {
+      const { used, pending } = usage.get(type.id) ?? { used: 0, pending: 0 };
+      return {
+        leaveType: type,
+        year,
+        tracked: true,
+        entitled: roundDays(used + pending + free),
+        used,
+        pending,
+        available: free,
+        allocation: null,
+      };
+    }
     const allocation = type.kind === 'leave' ? allocations.get(type.id) : undefined;
     const entitled = entitlementFor(type, allocation);
     const { used, pending } = usage.get(type.id) ?? { used: 0, pending: 0 };
@@ -175,9 +211,19 @@ export async function findLeaveRequest(id: number): Promise<LeaveRequest | null>
 /* The rules                                                                   */
 /* -------------------------------------------------------------------------- */
 
-type Problem = { field: 'leaveTypeId' | 'startDate' | 'endDate' | 'halfDay' | 'form'; message: string };
+type Problem = {
+  field: 'leaveTypeId' | 'startDate' | 'endDate' | 'halfDay' | 'compOffEarnedOn' | 'form';
+  message: string;
+};
 
-type DraftRequest = { leaveTypeId: number; startDate: string; endDate: string; halfDay: HalfDay };
+type DraftRequest = {
+  leaveTypeId: number;
+  startDate: string;
+  endDate: string;
+  halfDay: HalfDay;
+  /** Compensatory leave only; ignored for every other type. */
+  compOffEarnedOn?: string | null;
+};
 
 type StaticAssessment = {
   type: LeaveType | null;
@@ -200,6 +246,74 @@ function nothingToApplyFor(start: string, end: string, count: LeaveDayCount): st
     return `${humanDate(start)} is ${list}${holiday ? ` (${holiday})` : ''}, so there is nothing to apply for.`;
   }
   return `Every date from ${humanRange(start, end)} is ${list}, so there is nothing to apply for.`;
+}
+
+/**
+ * Why a day worked does not earn compensatory leave, or null when it does. Worded for
+ * either reader — the employee applying, or the administrator approving.
+ */
+function whyNotEarned(day: WorkedOffDay): string | null {
+  const date = humanDate(day.date);
+  if (day.reason === null) return `${date} was a working day, so it does not earn compensatory leave.`;
+  if (day.date >= companyToday()) return `${date} is not over yet, so its hours are not final.`;
+  if (day.workedMinutes === null) {
+    return `There is no finished attendance on ${date} (no check-in, or no check-out). An attendance correction comes first.`;
+  }
+  if (day.requiredMinutes === null) {
+    return `${date} was worked without a shift, so there is no full day to measure it against. Please contact HR.`;
+  }
+  if (!day.over) return `The shift worked on ${date} has not ended yet, so its hours are not final.`;
+  if (!earns(day)) {
+    return `${hoursText(day.workedMinutes)} was worked on ${date}. Compensatory leave needs a full day on the shift: ${hoursText(
+      day.requiredMinutes,
+    )}.`;
+  }
+  return null;
+}
+
+/**
+ * The compensatory leave rules that need no lock: the day worked is named and earned it,
+ * and the day off is one whole day after it and within the validity. Whether the day
+ * worked is still unclaimed is `assessState`'s question, asked under the lock. (Half days
+ * are refused by the type's `allowHalfDay`, which the migration sets off for good.)
+ */
+async function compOffProblems(userId: number, draft: DraftRequest, today: string): Promise<Problem[]> {
+  const earnedOn = draft.compOffEarnedOn ?? null;
+  if (!earnedOn) return [{ field: 'compOffEarnedOn', message: 'Choose the weekly off or holiday you worked.' }];
+
+  const problems: Problem[] = [];
+  if (draft.startDate !== draft.endDate) {
+    problems.push({
+      field: 'endDate',
+      message: 'Compensatory leave is one day for each day worked. Apply for each day separately.',
+    });
+  }
+
+  const { compOffValidityDays } = await getHrSettings();
+  const useBy = compOffUseBy(earnedOn, compOffValidityDays);
+  if (useBy < today) {
+    problems.push({
+      field: 'compOffEarnedOn',
+      message: `Compensatory leave for ${humanDate(earnedOn)} had to be taken by ${humanDate(useBy)}.`,
+    });
+    return problems;
+  }
+
+  const why = whyNotEarned(await workedOffDay(userId, earnedOn));
+  if (why) {
+    problems.push({ field: 'compOffEarnedOn', message: why });
+  } else if (draft.startDate <= earnedOn) {
+    problems.push({
+      field: 'startDate',
+      message: `Compensatory leave is taken after the day worked. Choose a date after ${humanDate(earnedOn)}.`,
+    });
+  } else if (draft.startDate > useBy) {
+    problems.push({
+      field: 'startDate',
+      message: `Compensatory leave for ${humanDate(earnedOn)} must be taken by ${humanDate(useBy)}.`,
+    });
+  }
+  return problems;
 }
 
 /**
@@ -254,6 +368,8 @@ async function assessStatic(userId: number, draft: DraftRequest): Promise<Static
     }
   }
 
+  if (type?.isCompOff) problems.push(...(await compOffProblems(userId, draft, today)));
+
   // Only counted for a range the calendar can walk; the problems above already explain
   // anything else.
   let count: LeaveDayCount = { days: 0, excluded: [] };
@@ -296,6 +412,24 @@ async function assessState(
         overlap.end_date,
       )}${halfLabel(overlap.half_day)}.`,
     });
+  }
+
+  // Compensatory leave's balance is the days worked and not yet used; what matters is
+  // that THIS day worked is one of them. Read under the lock, so two requests sent at once
+  // cannot both name it (the unique key on `comp_off_claim` is the last word if they do).
+  if (type.isCompOff) {
+    const earnedOn = draft.compOffEarnedOn ?? null;
+    const free = await freeCompOffDays(userId, db);
+    if (earnedOn) {
+      const claimed = await claimedCompOffDays(db, userId, earnedOn, earnedOn);
+      if (claimed.has(earnedOn)) {
+        problems.push({
+          field: 'compOffEarnedOn',
+          message: `${humanDate(earnedOn)} has already been used for compensatory leave.`,
+        });
+      }
+    }
+    return { problems, tracked: true, available: free.length };
   }
 
   const year = Number(draft.startDate.slice(0, 4));
@@ -376,6 +510,27 @@ function isDuplicateKey(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'ER_DUP_ENTRY';
 }
 
+/** The duplicate was on the compensatory leave claim, not on the client key. */
+function isDuplicateClaim(error: unknown): boolean {
+  return isDuplicateKey(error) && String((error as { message?: string }).message).includes('uq_hr_leave_requests_comp_off');
+}
+
+/**
+ * Compensatory leave is decided by HR administrators, not by the employee's manager — so
+ * they are told when one is asked for. The admin portal's queue shows it as well.
+ */
+async function hrAdminIds(exceptUserId: number): Promise<number[]> {
+  const rows = await query<RowDataPacket & { id: number }>(
+    `SELECT id FROM hr_users
+      WHERE role = 'hr_admin' AND is_active = 1 AND approval_status = 'approved'
+        AND deleted_at IS NULL AND id <> ?
+      ORDER BY id ASC
+      LIMIT 50`,
+    [exceptUserId],
+  );
+  return rows.map((row) => row.id);
+}
+
 export type ApplyResult = { request: LeaveRequest; deduplicated: boolean };
 
 /**
@@ -403,6 +558,7 @@ export async function applyForLeave(
   if (assessment.problems.length > 0 || !assessment.type) throw refusal(assessment.problems);
   const type = assessment.type;
   const days = assessment.count.days;
+  const compOffEarnedOn = type.isCompOff ? (input.compOffEarnedOn ?? null) : null;
 
   let outcome: { id: number; deduplicated: boolean };
   try {
@@ -425,10 +581,16 @@ export async function applyForLeave(
         days,
         reason: input.reason,
         clientKey: input.clientKey,
+        compOffEarnedOn,
       });
       return { id, deduplicated: false };
     });
   } catch (error) {
+    if (isDuplicateClaim(error) && compOffEarnedOn) {
+      throw refusal([
+        { field: 'compOffEarnedOn', message: `${humanDate(compOffEarnedOn)} has already been used for compensatory leave.` },
+      ]);
+    }
     // The unique (user, client_key) key is the last word on a replay that raced past
     // both reads above.
     if (isDuplicateKey(error)) {
@@ -441,7 +603,16 @@ export async function applyForLeave(
   const row = (await findRequestRow(outcome.id))!;
   if (!outcome.deduplicated) {
     logger.info('HR leave requested', { userId, id: outcome.id, type: type.code, days });
-    if (row.manager_id) {
+    if (type.isCompOff) {
+      await notifyHr({
+        userIds: await hrAdminIds(userId),
+        kind: 'leave_submitted',
+        title: `${type.name} request from ${row.employee_name}`,
+        body: `${humanDate(row.start_date)}${earnedLabel(row.comp_off_earned_on)}. Waiting for an HR administrator's decision.`,
+        entityType: 'leave_request',
+        entityId: row.id,
+      });
+    } else if (row.manager_id) {
       await notifyHr({
         userIds: [row.manager_id],
         kind: 'leave_submitted',
@@ -531,7 +702,17 @@ export async function decideLeave(
       if (!row || row.status !== 'pending') throw badRequest('That request has already been decided.');
 
       const type = await findLeaveType(row.leave_type_id, connection);
-      if (type) {
+      if (type?.isCompOff) {
+        /*
+         * The day worked must still have earned it: its attendance may have been corrected
+         * since. Its lapse is not re-checked — the request was raised in time, and the day
+         * off was checked to fall within the validity then.
+         */
+        const why = row.comp_off_earned_on
+          ? whyNotEarned(await workedOffDay(row.user_id, row.comp_off_earned_on))
+          : 'The request does not say which weekly off or holiday was worked.';
+        if (why) throw badRequest(`This cannot be approved. ${why}`);
+      } else if (type) {
         const year = Number(row.start_date.slice(0, 4));
         const [balance] = await computeBalances(row.user_id, year, [type], connection);
         if (balance?.tracked && balance.entitled !== null) {
@@ -556,7 +737,9 @@ export async function decideLeave(
   }
 
   const after = (await findRequestRow(id))!;
-  const range = `${humanRange(after.start_date, after.end_date)}${halfLabel(after.half_day)}`;
+  const range = `${humanRange(after.start_date, after.end_date)}${halfLabel(after.half_day)}${earnedLabel(
+    after.comp_off_earned_on,
+  )}`;
 
   await notifyHr({
     userIds: [after.user_id],

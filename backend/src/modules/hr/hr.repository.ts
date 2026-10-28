@@ -54,6 +54,8 @@ export interface HrUserRow extends RowDataPacket {
   address: string | null;
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
+  deleted_at: Date | string | null;
+  deleted_by_name: string | null;
 }
 
 /*
@@ -74,7 +76,8 @@ const HR_USER_COLUMNS = `
   DATE_FORMAT(u.exit_date, '%Y-%m-%d')     AS exit_date,
   u.employment_type, u.employment_status,
   DATE_FORMAT(u.date_of_birth, '%Y-%m-%d') AS date_of_birth,
-  u.address, u.emergency_contact_name, u.emergency_contact_phone
+  u.address, u.emergency_contact_name, u.emergency_contact_phone,
+  u.deleted_at, u.deleted_by_name
 `;
 
 /** The joins every profile read goes through. Aliases: d, g, m (manager), l, s. */
@@ -128,6 +131,8 @@ export function toHrProfile(row: HrUserRow): HrEmployeeProfile {
     address: row.address,
     emergencyContactName: row.emergency_contact_name,
     emergencyContactPhone: row.emergency_contact_phone,
+    deletedAt: iso(row.deleted_at),
+    deletedByName: row.deleted_by_name,
   };
 }
 
@@ -192,7 +197,9 @@ export type HrRegistrationRow = HrEmployeeProfile & {
 export async function listHrUsers(
   filters: HrRegistrationFilters,
 ): Promise<{ items: HrRegistrationRow[]; total: number; page: number; pageSize: number }> {
-  const conditions: string[] = [];
+  // A deleted employee is in no list: not the directory, not the registrations queue,
+  // not its count. Their record is still reachable by id, for the history that names them.
+  const conditions: string[] = ['u.deleted_at IS NULL'];
   const params: Array<string | number> = [];
 
   if (filters.approval) {
@@ -231,7 +238,7 @@ export async function listHrUsers(
     params.push(filters.active ? 1 : 0);
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where = `WHERE ${conditions.join(' AND ')}`;
 
   /* Fixed strings chosen by a closed union — never caller text. */
   const orderBy =
@@ -306,7 +313,8 @@ export async function approveHrUser(id: number, adminId: number | null): Promise
             rejection_reason = NULL
       WHERE id = ?
         AND approval_status = 'pending'
-        AND email_verified_at IS NOT NULL`,
+        AND email_verified_at IS NOT NULL
+        AND deleted_at IS NULL`,
     [adminId, id],
   );
   return result.affectedRows > 0;
@@ -331,18 +339,22 @@ export async function rejectHrUser(
             approved_at      = NOW(),
             rejection_reason = ?
       WHERE id = ?
-        AND approval_status = 'pending'`,
+        AND approval_status = 'pending'
+        AND deleted_at IS NULL`,
     [adminId, reason, id],
   );
   return result.affectedRows > 0;
 }
 
-/** Switches an approved account off, or back on. Rejected rows are not reachable here. */
+/**
+ * Switches an approved account off, or back on. Rejected and deleted rows are not
+ * reachable here — a deleted employee must never be switched back on by this route.
+ */
 export async function setHrUserActive(id: number, active: boolean): Promise<boolean> {
   const result = await execute(
     `UPDATE hr_users
         SET is_active = ?
-      WHERE id = ? AND approval_status = 'approved'`,
+      WHERE id = ? AND approval_status = 'approved' AND deleted_at IS NULL`,
     [active ? 1 : 0, id],
   );
   return result.affectedRows > 0;

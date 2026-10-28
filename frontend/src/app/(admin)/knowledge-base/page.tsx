@@ -202,6 +202,13 @@ export default function KnowledgeBasePage() {
               holidays are free) and what will be left.
             </li>
             <li>Track requests, cancel pending ones (or approved ones not yet started), and see the holiday calendar.</li>
+            <li>
+              <strong>Compensatory leave:</strong> working a full day on a weekly off or a holiday
+              (at least the shift’s full-day hours) earns one day off. The employee picks the day
+              they worked and the day they want off, in one request; it must be taken within 30
+              days of the day worked (HR can change this). The app lists only the days that
+              qualify, and an HR administrator approves it.
+            </li>
           </ul>
 
           <h3>Payslips</h3>
@@ -255,6 +262,10 @@ export default function KnowledgeBasePage() {
             own request. A role change takes effect the next time the person’s app refreshes its
             sign-in (within a few minutes, or on next sign-in).
           </p>
+          <p>
+            Compensatory leave is the exception: it goes to HR admins (and the portal’s Leave
+            screen), never to a team manager, because it depends on the attendance record.
+          </p>
         </section>
 
         {/* ----------------------------------------------------------- portal */}
@@ -282,7 +293,8 @@ export default function KnowledgeBasePage() {
                   <td>
                     Approve or reject sign-ups; add employees; edit records (department,
                     designation, manager, joining date, access role, employment status); set the
-                    attendance rule; switch accounts off. Each record has attendance, calendar and
+                    attendance rule; switch accounts off; set a new password for someone who
+                    forgot theirs; delete an employee. Each record has attendance, calendar and
                     leave-balance tabs.
                   </td>
                 </tr>
@@ -301,8 +313,8 @@ export default function KnowledgeBasePage() {
                 <tr>
                   <td><strong>Leave</strong></td>
                   <td>
-                    Approve or reject leave; set an employee’s balance for a year; leave types and
-                    annual quotas; holidays.
+                    Approve or reject leave, compensatory leave included; set an employee’s
+                    balance for a year; leave types and annual quotas; holidays.
                   </td>
                 </tr>
                 <tr>
@@ -345,7 +357,8 @@ export default function KnowledgeBasePage() {
                   <td><strong>Organisation</strong></td>
                   <td>
                     Departments and designations; HR settings — the date attendance tracking
-                    starts, and the default weekly off.
+                    starts, the default weekly off, and how many days compensatory leave can be
+                    used within.
                   </td>
                 </tr>
                 <tr>
@@ -496,6 +509,32 @@ export default function KnowledgeBasePage() {
             <dd>
               No annual quota is set for it. Set one under Leave → Leave types, or a balance for
               one person under Leave → Balances.
+            </dd>
+
+            <dt>An employee forgot their HR app password.</dt>
+            <dd>
+              Open them under HR → Employees and choose <strong>Reset password</strong>. Type a
+              new one or press Generate, then give it to them in person or by phone — it is not
+              emailed. They are signed out on every phone and sign in again with the new password.
+            </dd>
+
+            <dt>What does deleting an employee do?</dt>
+            <dd>
+              They disappear from the employee list and are left out of the current pay period
+              and every later one; approved payslips stay as they were. They are signed out and
+              cannot sign in. Their pending leave, approved leave not yet started, open
+              corrections and HR requests are closed, and anyone who reported to them is left
+              without a manager. Their past attendance, leave and payslips are kept. The
+              confirmation asks you to type their employee code first. To stop someone signing
+              in for a while instead, use <strong>Switch off</strong>.
+            </dd>
+
+            <dt>An employee cannot pick a day for compensatory leave.</dt>
+            <dd>
+              Only finished weekly offs and holidays worked for at least the shift’s full-day
+              hours, within the time limit in HR settings, are offered. A missing check-out or a
+              short day means the attendance needs correcting first. A day already used, or asked
+              for, is not offered again.
             </dd>
 
             <dt>Somebody is missing from a pay period.</dt>

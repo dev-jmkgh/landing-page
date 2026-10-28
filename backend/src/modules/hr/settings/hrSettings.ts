@@ -27,19 +27,34 @@ export type HrSettings = {
    * the day.
    */
   payrollCycleStartDay: number;
+  /**
+   * Compensatory leave: how many days after the weekly off or holiday worked the day off
+   * must be taken by, 1 to 365. A worked day older than this has lapsed.
+   */
+  compOffValidityDays: number;
 };
 
 export const HR_SETTING_KEYS = {
   attendanceTrackedFrom: 'attendance_tracked_from',
   defaultWeeklyOff: 'default_weekly_off',
   payrollCycleStartDay: 'payroll_cycle_start_day',
+  compOffValidityDays: 'comp_off_validity_days',
 } as const;
 
 const DEFAULT_WEEKLY_OFF: Weekday[] = ['sun'];
 
+export const COMP_OFF_VALIDITY = { min: 1, max: 365, default: 30 } as const;
+
 function validCycleDay(value: string | number | null | undefined): number {
   const day = Number(value);
   return Number.isInteger(day) && day >= 1 && day <= 28 ? day : 1;
+}
+
+function validCompOffDays(value: string | number | null | undefined): number {
+  const days = value === null || value === undefined || value === '' ? NaN : Number(value);
+  return Number.isInteger(days) && days >= COMP_OFF_VALIDITY.min && days <= COMP_OFF_VALIDITY.max
+    ? days
+    : COMP_OFF_VALIDITY.default;
 }
 
 /** Parses a SET-style list (`'sat,sun'`) into weekdays, dropping anything unknown. */
@@ -71,6 +86,7 @@ export async function getHrSettings(): Promise<HrSettings> {
       ? parseWeekdays(map.get(HR_SETTING_KEYS.defaultWeeklyOff))
       : DEFAULT_WEEKLY_OFF,
     payrollCycleStartDay: validCycleDay(map.get(HR_SETTING_KEYS.payrollCycleStartDay)),
+    compOffValidityDays: validCompOffDays(map.get(HR_SETTING_KEYS.compOffValidityDays)),
   };
 }
 
@@ -92,6 +108,9 @@ export async function updateHrSettings(
   }
   if (patch.payrollCycleStartDay !== undefined) {
     writes.push([HR_SETTING_KEYS.payrollCycleStartDay, String(validCycleDay(patch.payrollCycleStartDay))]);
+  }
+  if (patch.compOffValidityDays !== undefined) {
+    writes.push([HR_SETTING_KEYS.compOffValidityDays, String(validCompOffDays(patch.compOffValidityDays))]);
   }
 
   for (const [key, value] of writes) {

@@ -6,6 +6,8 @@ import { mobileSyncLimiter } from '../../../middleware/rateLimit';
 import { validateBody, validateQuery } from '../../../middleware/validate';
 import { notFound } from '../../../utils/httpError';
 import { companyToday, holidaysBetween } from '../calendar/calendar.service';
+import { getHrSettings } from '../settings/hrSettings';
+import { freeCompOffDays } from './compOff.service';
 import { listLeaveTypes, listRequests } from './leave.repository';
 import {
   applySchema,
@@ -79,8 +81,21 @@ hrLeaveRouter.get(
       startDate: input.startDate,
       endDate: input.endDate ?? input.startDate,
       halfDay: input.halfDay,
+      compOffEarnedOn: input.compOffEarnedOn,
     });
     response.json({ success: true, ...preview });
+  }),
+);
+
+/**
+ * The weekly offs and holidays the employee worked a full day on and may still take
+ * compensatory leave for, oldest first. Bounded by the validity setting (365 days at most).
+ */
+hrLeaveRouter.get(
+  '/comp-off/days',
+  asyncHandler(async (request, response) => {
+    const [items, settings] = await Promise.all([freeCompOffDays(request.hrActor!.id), getHrSettings()]);
+    response.json({ success: true, validityDays: settings.compOffValidityDays, items });
   }),
 );
 

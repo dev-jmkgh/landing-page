@@ -27,8 +27,12 @@ import { LOCAL_NOW, LOCAL_TODAY } from './attendance.schema';
  * `a` is the attendance row and `s` its shift (no shift, no thresholds).
  */
 
-/** The company clock has passed the end of the work date — or of its overnight shift, if later. */
-const DAY_OVER = `${LOCAL_NOW} >= GREATEST(
+/**
+ * The company clock has passed the end of the work date — or of its overnight shift, if
+ * later. Exported for compensatory leave, which counts a worked day only once its hours
+ * are final.
+ */
+export const DAY_OVER = `${LOCAL_NOW} >= GREATEST(
         CAST(DATE_ADD(a.work_date, INTERVAL 1 DAY) AS DATETIME),
         CASE
           WHEN a.shift_ends_at IS NULL THEN CAST(DATE_ADD(a.work_date, INTERVAL 1 DAY) AS DATETIME)

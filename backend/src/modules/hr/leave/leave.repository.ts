@@ -93,6 +93,7 @@ interface LeaveTypeRow extends RowDataPacket {
   name: string;
   code: string;
   kind: LeaveKind;
+  is_comp_off: number;
   is_paid: number;
   annual_quota: string | number | null;
   allow_half_day: number;
@@ -100,7 +101,7 @@ interface LeaveTypeRow extends RowDataPacket {
   sort_order: number;
 }
 
-const TYPE_COLUMNS = 'id, name, code, kind, is_paid, annual_quota, allow_half_day, is_active, sort_order';
+const TYPE_COLUMNS = 'id, name, code, kind, is_comp_off, is_paid, annual_quota, allow_half_day, is_active, sort_order';
 
 export function toLeaveType(row: LeaveTypeRow): LeaveType {
   return {
@@ -108,6 +109,7 @@ export function toLeaveType(row: LeaveTypeRow): LeaveType {
     name: row.name,
     code: row.code,
     kind: row.kind,
+    isCompOff: Number(row.is_comp_off) === 1,
     isPaid: Number(row.is_paid) === 1,
     annualQuota: row.annual_quota === null ? null : Number(row.annual_quota),
     allowHalfDay: Number(row.allow_half_day) === 1,
@@ -191,13 +193,13 @@ export async function insertLeaveType(input: {
  * Built from a FIXED column map rather than COALESCE, because `annualQuota: null` is a
  * real instruction here — "make this type untracked" — and COALESCE cannot tell it from
  * "leave it alone". The keys come from this map, never from the request, so no column
- * name reaches the SQL from outside.
+ * name reaches the SQL from outside. `isCompOff` is not in it: the migration sets it.
  */
 export async function updateLeaveType(
   id: number,
-  patch: Partial<Omit<LeaveType, 'id'>>,
+  patch: Partial<Omit<LeaveType, 'id' | 'isCompOff'>>,
 ): Promise<void> {
-  const columns: Record<keyof Omit<LeaveType, 'id'>, string> = {
+  const columns: Record<keyof Omit<LeaveType, 'id' | 'isCompOff'>, string> = {
     name: 'name',
     code: 'code',
     kind: 'kind',
@@ -315,9 +317,11 @@ export interface LeaveRequestRow extends RowDataPacket {
   type_code: string;
   type_kind: LeaveKind;
   type_is_paid: number;
+  type_is_comp_off: number;
   start_date: string;
   end_date: string;
   half_day: HalfDay;
+  comp_off_earned_on: string | null;
   days: string | number;
   reason: string;
   status: LeaveStatus;
@@ -339,9 +343,10 @@ const REQUEST_SELECT = `
   SELECT r.id, r.user_id, u.manager_id,
          u.name AS employee_name, u.employee_code,
          r.leave_type_id, t.name AS type_name, t.code AS type_code,
-         t.kind AS type_kind, t.is_paid AS type_is_paid,
+         t.kind AS type_kind, t.is_paid AS type_is_paid, t.is_comp_off AS type_is_comp_off,
          DATE_FORMAT(r.start_date, '%Y-%m-%d') AS start_date,
          DATE_FORMAT(r.end_date, '%Y-%m-%d')   AS end_date,
+         DATE_FORMAT(r.comp_off_earned_on, '%Y-%m-%d') AS comp_off_earned_on,
          r.half_day, r.days, r.reason, r.status,
          r.reviewer_type, r.reviewer_name, r.reviewed_at, r.review_note,
          r.cancelled_at, r.created_at,
@@ -363,10 +368,12 @@ export function toLeaveRequest(row: LeaveRequestRow): LeaveRequest {
       code: row.type_code,
       kind: row.type_kind,
       isPaid: Number(row.type_is_paid) === 1,
+      isCompOff: Number(row.type_is_comp_off) === 1,
     },
     startDate: row.start_date,
     endDate: row.end_date,
     halfDay: row.half_day,
+    compOffEarnedOn: row.comp_off_earned_on,
     days: roundDays(Number(row.days)),
     reason: row.reason,
     status: row.status,
@@ -429,25 +436,43 @@ export async function insertRequest(
     days: number;
     reason: string;
     clientKey: string;
+    compOffEarnedOn: string | null;
   },
 ): Promise<number> {
   const result = await run(
     db,
     `INSERT INTO hr_leave_requests
-       (user_id, leave_type_id, start_date, end_date, half_day, days, reason, status, client_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+       (user_id, leave_type_id, start_date, end_date, half_day, comp_off_earned_on, days, reason, status, client_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
     [
       input.userId,
       input.leaveTypeId,
       input.startDate,
       input.endDate,
       input.halfDay,
+      input.compOffEarnedOn,
       input.days,
       input.reason,
       input.clientKey,
     ],
   );
   return result.insertId;
+}
+
+/**
+ * The worked days the employee has already named on a pending or approved compensatory
+ * leave request — the days that are spent. `comp_off_claim` is the generated column the
+ * unique key sits on, so this and the key agree on what "spent" means.
+ */
+export async function claimedCompOffDays(db: Db, userId: number, from: string, to: string): Promise<Set<string>> {
+  const rows = await select<RowDataPacket & { day: string }>(
+    db,
+    `SELECT DATE_FORMAT(comp_off_claim, '%Y-%m-%d') AS day
+       FROM hr_leave_requests
+      WHERE user_id = ? AND comp_off_claim BETWEEN ? AND ?`,
+    [userId, from, to],
+  );
+  return new Set(rows.map((row) => row.day));
 }
 
 /**
@@ -547,6 +572,9 @@ function requestConditions(filters: Omit<RequestFilters, 'order'>): { where: str
     const team = teamCondition(filters.team, 'u');
     conditions.push(team.sql);
     params.push(...team.params);
+    // Compensatory leave is decided by HR administrators only, so it never sits in a
+    // team manager's queue.
+    if (!filters.team.everyone) conditions.push('t.is_comp_off = 0');
   }
 
   return { where: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '', params };
@@ -561,7 +589,8 @@ export async function listRequests(
   const count = await queryOne<RowDataPacket & { total: number }>(
     `SELECT COUNT(*) AS total
        FROM hr_leave_requests r
-       JOIN hr_users u ON u.id = r.user_id
+       JOIN hr_users u       ON u.id = r.user_id
+       JOIN hr_leave_types t ON t.id = r.leave_type_id
        ${where}`,
     params,
   );
@@ -595,7 +624,8 @@ export async function countPendingRequests(filters: { userId?: number; team?: Te
   const row = await queryOne<RowDataPacket & { total: number }>(
     `SELECT COUNT(*) AS total
        FROM hr_leave_requests r
-       JOIN hr_users u ON u.id = r.user_id
+       JOIN hr_users u       ON u.id = r.user_id
+       JOIN hr_leave_types t ON t.id = r.leave_type_id
        ${where}`,
     params,
   );

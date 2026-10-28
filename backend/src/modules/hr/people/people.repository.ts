@@ -227,15 +227,19 @@ export async function countDirectReports(id: number): Promise<number> {
   return Number(row?.total ?? 0);
 }
 
-/** The bits of an account the reference checks need. */
+/**
+ * The bits of an account the reference checks need. A deleted account IS found — its
+ * attendance history stays readable — and says so in `deleted`.
+ */
 export async function findAccountState(
   id: number,
-): Promise<{ id: number; name: string; approvalStatus: string } | null> {
-  const row = await queryOne<RowDataPacket & { id: number; name: string; approval_status: string }>(
-    'SELECT id, name, approval_status FROM hr_users WHERE id = ? LIMIT 1',
-    [id],
-  );
-  return row ? { id: row.id, name: row.name, approvalStatus: row.approval_status } : null;
+): Promise<{ id: number; name: string; approvalStatus: string; deleted: boolean } | null> {
+  const row = await queryOne<
+    RowDataPacket & { id: number; name: string; approval_status: string; deleted_at: Date | string | null }
+  >('SELECT id, name, approval_status, deleted_at FROM hr_users WHERE id = ? LIMIT 1', [id]);
+  return row
+    ? { id: row.id, name: row.name, approvalStatus: row.approval_status, deleted: row.deleted_at !== null }
+    : null;
 }
 
 export async function hrEmailTaken(email: string): Promise<boolean> {

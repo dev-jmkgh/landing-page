@@ -10,8 +10,8 @@ import type { MouseEvent } from 'react';
  *
  * The href is a real one (`?section=leave`), so Ctrl- or middle-click opens the section
  * in a new tab and a screen reader announces a link. The new address carries ONLY the
- * section: the dashboard's own `date` must not ride along into a screen that might read a
- * parameter of that name as its own filter.
+ * section and the parameters the link names: the dashboard's own `date` must not ride
+ * along into a screen that might read a parameter of that name as its own filter.
  */
 
 export type HrSectionKey =
@@ -28,14 +28,19 @@ export type HrSectionKey =
   | 'organisation'
   | 'audit';
 
-export function sectionHref(section: HrSectionKey): string {
-  return `?section=${encodeURIComponent(section)}`;
+/**
+ * `params` are the target section's OWN view parameters (`peopleTab=pending`), named
+ * explicitly by the caller — never anything carried over from the dashboard's address.
+ */
+export function sectionHref(section: HrSectionKey, params: Record<string, string> = {}): string {
+  return `?${new URLSearchParams({ section, ...params }).toString()}`;
 }
 
-export function goToSection(section: HrSectionKey): void {
+export function goToSection(section: HrSectionKey, params: Record<string, string> = {}): void {
   const url = new URL(window.location.href);
   url.search = '';
   url.searchParams.set('section', section);
+  for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
   // The same entry HrApp's own section switch pushes. Next's patched pushState copies its
   // router state into it, so Back and Forward over this entry behave like any other.
   window.history.pushState({ section }, '', url);
@@ -51,19 +56,22 @@ export function goToSection(section: HrSectionKey): void {
 }
 
 /** `href` + `onClick` for an anchor that switches section in place. */
-export function sectionLinkProps(section: HrSectionKey): {
+export function sectionLinkProps(
+  section: HrSectionKey,
+  params: Record<string, string> = {},
+): {
   href: string;
   onClick: (event: MouseEvent<HTMLAnchorElement>) => void;
 } {
   return {
-    href: sectionHref(section),
+    href: sectionHref(section, params),
     onClick: (event) => {
       // A modified click is the reader asking for a new tab or window: let the browser have it.
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
         return;
       }
       event.preventDefault();
-      goToSection(section);
+      goToSection(section, params);
     },
   };
 }

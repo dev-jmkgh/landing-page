@@ -40,11 +40,14 @@ import {
   employeeAttendanceQuerySchema,
   employeeCalendarQuerySchema,
   employeeCreateSchema,
+  employeePasswordSchema,
   employeePatchSchema,
   settingsPatchSchema,
   type EmployeeCreateInput,
+  type EmployeePasswordInput,
   type EmployeePatchInput,
 } from './people.schema';
+import { deleteEmployee, resetEmployeePassword } from './employeeAccount.service';
 import { createEmployee, updateEmployee } from './people.service';
 
 /**
@@ -343,6 +346,72 @@ hrPeopleAdminRouter.patch(
         ? 'The new role takes effect the next time their app refreshes its session, within a few minutes.'
         : null,
     });
+  }),
+);
+
+/**
+ * Sets a new password for an employee who cannot sign in. ADMIN ONLY.
+ *
+ * The administrator types or generates it and hands it over in person; it is never
+ * emailed. The employee is signed out of the app on every phone. The password itself is
+ * never logged or audited — only that it was reset, and how many sessions ended.
+ */
+hrPeopleAdminRouter.post(
+  '/employees/:id/password',
+  ...write(),
+  validateBody(employeePasswordSchema),
+  asyncHandler(async (request, response) => {
+    const id = parseId(request.params.id);
+    const { password } = request.body as EmployeePasswordInput;
+
+    const result = await resetEmployeePassword(id, password);
+
+    await recordAudit({
+      actor: request.actor!,
+      action: 'hr_password_reset',
+      entityType: 'hr_user',
+      entityId: id,
+      summary: `Reset the HR app password of ${result.name} (${result.employeeCode})`,
+      meta: { sessionsRevoked: result.sessionsRevoked },
+      ipAddress: clientIp(request),
+    });
+
+    response.json({ success: true, sessionsRevoked: result.sessionsRevoked });
+  }),
+);
+
+/**
+ * Deletes an employee. ADMIN ONLY. A soft delete — see `deleteEmployee` for exactly
+ * what it does. The response counts what it closed, so the confirmation can say so.
+ * Deleting somebody already deleted answers 200 with `alreadyDeleted` and changes nothing.
+ */
+hrPeopleAdminRouter.delete(
+  '/employees/:id',
+  ...write(),
+  asyncHandler(async (request, response) => {
+    const id = parseId(request.params.id);
+    const result = await deleteEmployee(id, request.actor!.name);
+
+    if (!result.alreadyDeleted) {
+      await recordAudit({
+        actor: request.actor!,
+        action: 'hr_employee_deleted',
+        entityType: 'hr_user',
+        entityId: id,
+        summary: `Deleted HR employee ${result.name} (${result.employeeCode})`,
+        meta: {
+          leaveCancelled: result.leaveCancelled,
+          correctionsClosed: result.correctionsClosed,
+          requestsClosed: result.requestsClosed,
+          reportsUnassigned: result.reportsUnassigned,
+          payslipsRemoved: result.payslipsRemoved,
+          sessionsRevoked: result.sessionsRevoked,
+        },
+        ipAddress: clientIp(request),
+      });
+    }
+
+    response.json({ success: true, ...result });
   }),
 );
 

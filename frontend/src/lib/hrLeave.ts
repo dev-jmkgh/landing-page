@@ -63,6 +63,11 @@ export type LeaveType = {
   name: string;
   code: string;
   kind: LeaveKind;
+  /**
+   * Compensatory leave: earned by working a full day on a weekly off or holiday, never
+   * given a quota or half days, and decided by HR only. Fixed by the system.
+   */
+  isCompOff: boolean;
   isPaid: boolean;
   /** Days a year. Null means UNTRACKED: there is no balance, and none is shown. */
   annualQuota: number | null;
@@ -96,10 +101,12 @@ export type LeaveRequest = {
   userId: number;
   employeeName: string;
   employeeCode: string;
-  leaveType: { id: number; name: string; code: string; kind: LeaveKind; isPaid: boolean };
+  leaveType: { id: number; name: string; code: string; kind: LeaveKind; isPaid: boolean; isCompOff: boolean };
   startDate: string;
   endDate: string;
   halfDay: HalfDay;
+  /** Compensatory leave only: the weekly off or holiday worked to earn it. */
+  compOffEarnedOn: string | null;
   /** Working days the request costs, fixed when it was raised. */
   days: number;
   reason: string;

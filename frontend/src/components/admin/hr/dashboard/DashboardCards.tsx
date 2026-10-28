@@ -20,6 +20,8 @@ import { sectionLinkProps, type HrSectionKey } from './sectionLink';
 type Queue = {
   key: keyof HrAdminDashboard['pending'];
   section: HrSectionKey;
+  /** The section's own view parameters, so the card opens exactly the waiting list. */
+  params?: Record<string, string>;
   title: string;
   icon: IconName;
   waiting: (value: number) => string;
@@ -30,10 +32,11 @@ const QUEUES: Queue[] = [
   {
     key: 'registrations',
     section: 'people',
+    params: { peopleTab: 'pending' },
     title: 'Registrations',
     icon: 'users',
     waiting: (value) => `${plural(value, 'person', 'people')} waiting to be let in to the HR app`,
-    open: 'Open Employees',
+    open: 'Open Pending approval',
   },
   {
     key: 'regularisations',
@@ -73,7 +76,7 @@ export function AttentionCards({ pending }: { pending: HrAdminDashboard['pending
     <ul className="hr-dash-attention" role="list">
       {QUEUES.map((queue) => {
         const value = pending[queue.key];
-        const link = sectionLinkProps(queue.section);
+        const link = sectionLinkProps(queue.section, queue.params);
         return (
           <li key={queue.key}>
             <a

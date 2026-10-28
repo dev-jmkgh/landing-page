@@ -435,6 +435,45 @@
   gap: var(--space-2);
 }
 
+/* Delete is reachable but must not look like the main choice. */
+.btn.hrp-detail__delete {
+  color: var(--danger-600);
+}
+
+.btn.hrp-detail__delete:hover:not(:disabled) {
+  background-color: var(--danger-050);
+  border-color: transparent;
+}
+
+/* Reset password: Generate and Copy under the field. */
+.hrp-password-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* The new password, large enough to read out over the phone. */
+.hrp-password-shown {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background-color: var(--navy-050);
+  font-size: var(--text-xl);
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* What a delete does, before it is confirmed. */
+.hrp-consequences {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: var(--space-1);
+  color: var(--ink-700);
+}
+
 .hrp-detail__tabs {
   justify-self: start;
   max-width: 100%;

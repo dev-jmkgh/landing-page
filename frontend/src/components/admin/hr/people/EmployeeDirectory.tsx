@@ -30,6 +30,7 @@ import {
 } from '@/lib/hr';
 import { AssignmentDialog } from '../AssignmentDialog';
 import { EmployeePicker, type PickedEmployee } from './EmployeePicker';
+import { readUrlEnum, readUrlId, useUrlParams } from '../reports/shared';
 import { isAbort } from './shared';
 
 /**
@@ -45,7 +46,8 @@ import { isAbort } from './shared';
 const PAGE_SIZE = 25;
 
 type ApprovalFilter = HrApprovalStatus | 'all';
-type AccessFilter = 'all' | 'true' | 'false';
+const ACCESS_FILTERS = ['all', 'true', 'false'] as const;
+type AccessFilter = (typeof ACCESS_FILTERS)[number];
 
 export function EmployeeDirectory({
   departments,
@@ -68,14 +70,17 @@ export function EmployeeDirectory({
   const dialogs = useDialogs();
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
-  const [departmentId, setDepartmentId] = useState('');
+  // Department and access live in the address, so the dashboard's headcount opens this
+  // list filtered to the same people it counted.
+  const [departmentId, setDepartmentId] = useState(() => String(readUrlId('dir-dept') ?? ''));
   const [designationId, setDesignationId] = useState('');
   const [manager, setManager] = useState<PickedEmployee | null>(null);
   const [workMode, setWorkMode] = useState<WorkMode | ''>('');
   const [employmentStatus, setEmploymentStatus] = useState<HrEmploymentStatus | ''>('');
-  const [access, setAccess] = useState<AccessFilter>('all');
+  const [access, setAccess] = useState<AccessFilter>(() => readUrlEnum('dir-active', ACCESS_FILTERS, 'all'));
   const [approval, setApproval] = useState<ApprovalFilter>('approved');
   const [page, setPage] = useState(1);
+  useUrlParams({ 'dir-active': access === 'all' ? null : access, 'dir-dept': departmentId || null });
 
   const [data, setData] = useState<HrPaginated<HrEmployee> | null>(null);
   const [loading, setLoading] = useState(true);

@@ -7,15 +7,19 @@ import {
   missingPunchFor,
   todayFor,
 } from '../attendance/attendance.service';
+import { ensureDaysJudged } from '../attendance/dayJudge';
+import {
+  countExceptions,
+  countRegister,
+  loadRegisterContext,
+  type RegisterContext,
+  type RegisterStatusFilter,
+} from '../attendance/register.service';
 import { pendingCount as pendingRegularisations } from '../attendance/regularisation.service';
 import {
   addDays,
-  calendarForUsers,
   companyToday,
   eachDate,
-  holidaysBetween,
-  verdictOf,
-  type CalendarDayStatus,
   type LeaveKind,
 } from '../calendar/calendar.service';
 import type { HrActor } from '../hrAuth.service';
@@ -31,7 +35,6 @@ import { lastApprovedRun, latestApprovedPayslip } from '../payroll/payroll.servi
 import { countQueue as countRequestQueue } from '../requests/requests.repository';
 import { openRequestCount } from '../requests/requests.service';
 import { teamApprovalCounts } from '../team/team.service';
-import { shiftEndInstant } from './companyClock';
 
 /**
  * The two dashboards: the employee's home screen in the HR app, and HR's overview in
@@ -191,6 +194,9 @@ export async function employeeDashboard(actor: HrActor): Promise<EmployeeDashboa
       year,
       balances: balances
         .filter((balance) => balance.tracked && balance.leaveType.kind === 'leave')
+        // Compensatory leave only once some has been earned: a 0 for everybody who has
+        // never worked a weekly off would only be noise.
+        .filter((balance) => !balance.leaveType.isCompOff || (balance.entitled ?? 0) > 0)
         .slice(0, MAX_BALANCES),
       pendingRequests,
       nextApproved,
@@ -241,17 +247,17 @@ export type AdminDashboard = {
     holidayName: string | null;
     weeklyOff: number;
     /**
-     * Live figures, as of NOW, so null unless `date` is today. Disjoint: every open
-     * session is one or the other.
-     *   currentlyIn   — an open session that is still within its shift (or has no shift
-     *                   and began today): working right now.
-     *   notCheckedOut — an open session past its shift end, or from an earlier day with
-     *                   no shift to judge by: probably a forgotten check-out.
+     * Live figures for today's register, as of NOW, so null unless `date` is today.
+     *   currentlyIn   — checked in now, and the shift is not over.
+     *   notCheckedOut — still checked in after the shift ended, or a check-out the system
+     *                   closed today (a missing punch).
      */
     currentlyIn: number | null;
     notCheckedOut: number | null;
-    /** Days flagged as a missing punch in the seven days ending `date`. */
+    /** Days flagged as a missing punch from `missingPunchesSince` to `date`. */
     missingPunches: number;
+    /** The first day the missing-punch figure covers: seven days ending `date`. */
+    missingPunchesSince: string;
     /** Days with a flagged punch nobody has reviewed yet, up to `date`. */
     flaggedUnreviewed: number;
   };
@@ -262,126 +268,138 @@ export type AdminDashboard = {
   payroll: { lastApproved: { period: string; totalNet: number; employeeCount: number } | null } | null;
 };
 
+
 const TREND_DAYS = 14;
 const MISSING_PUNCH_DAYS = 7;
-/** The calendar loads five queries per batch; 200 people keeps each IN list modest. */
-const CALENDAR_BATCH = 200;
 
-const ACTIVE_EMPLOYEE = "u.is_active = 1 AND u.approval_status = 'approved'";
+/** The directory's "active employees": the people the headcount and every figure are about. */
+const ACTIVE_EMPLOYEE = "u.is_active = 1 AND u.approval_status = 'approved' AND u.deleted_at IS NULL";
 
-async function openSessionCounts(today: string, now: number): Promise<{ currentlyIn: number; notCheckedOut: number }> {
-  // At most one open session per person (migration 019), so this is bounded by headcount.
-  const rows = await query<RowDataPacket & { work_date: string; starts_at: string | null; ends_at: string | null }>(
-    `SELECT DATE_FORMAT(a.work_date, '%Y-%m-%d') AS work_date,
-            TIME_FORMAT(a.shift_starts_at, '%H:%i') AS starts_at,
-            TIME_FORMAT(a.shift_ends_at, '%H:%i')   AS ends_at
-       FROM hr_attendance_sessions s
-       JOIN hr_attendance a ON a.id = s.attendance_id
-       JOIN hr_users u ON u.id = s.user_id
-      WHERE s.ended_at IS NULL AND ${ACTIVE_EMPLOYEE}`,
+/** The day's figures, each the register status that lists the same people. */
+const DAY_FIGURES = {
+  present: 'present',
+  late: 'late',
+  halfDay: 'half_day',
+  absent: 'absent',
+  onLeave: 'on_leave',
+  notYetIn: 'yet_to_check_in',
+  weeklyOff: 'weekly_off',
+  wfh: 'wfh',
+  field: 'field',
+} as const satisfies Record<string, RegisterStatusFilter>;
+
+/**
+ * The fourteen-day trend, in SQL: the attended days in one grouped query, and the days off
+ * on leave and absent from the register's own counts, one date at a time.
+ *
+ * Counted the same way as the figures above it, so today's point and today's tiles agree.
+ * Nothing here grows with the headcount but the rows MySQL counts.
+ */
+async function trendPoints(from: string, to: string, context: RegisterContext): Promise<AdminDashboardTrendPoint[]> {
+  const dates = eachDate(from, to);
+  const points = new Map<string, AdminDashboardTrendPoint>(
+    dates.map((day) => [day, { date: day, present: 0, late: 0, halfDay: 0, absent: 0, onLeave: 0 }]),
   );
 
-  let currentlyIn = 0;
-  let notCheckedOut = 0;
-  for (const row of rows) {
-    const end = shiftEndInstant(row.work_date, row.starts_at, row.ends_at);
-    const overdue = end === null ? row.work_date < today : end < now;
-    if (overdue) notCheckedOut += 1;
-    else currentlyIn += 1;
+  const attended = await query<RowDataPacket & { day: string; status: string; total: number }>(
+    `SELECT DATE_FORMAT(a.work_date, '%Y-%m-%d') AS day, a.status, COUNT(*) AS total
+       FROM hr_attendance a
+       JOIN hr_users u ON u.id = a.user_id
+      WHERE u.approval_status = 'approved' AND u.is_active = 1
+        AND a.work_date BETWEEN ? AND ?
+        AND a.status IN ('present','late','half_day')
+        AND (u.joining_date IS NULL OR u.joining_date <= a.work_date)
+        AND (u.exit_date IS NULL OR u.exit_date >= a.work_date)
+      GROUP BY day, a.status`,
+    [from, to],
+  );
+  for (const row of attended) {
+    const point = points.get(row.day);
+    if (!point) continue;
+    if (row.status === 'present') point.present = Number(row.total);
+    else if (row.status === 'late') point.late = Number(row.total);
+    else if (row.status === 'half_day') point.halfDay = Number(row.total);
   }
-  return { currentlyIn, notCheckedOut };
+
+  await Promise.all(
+    dates.map(async (day) => {
+      const point = points.get(day)!;
+      const [absent, onLeave] = await Promise.all([
+        countRegister({ date: day, status: 'absent' }, context),
+        countRegister({ date: day, status: 'on_leave' }, context),
+      ]);
+      point.absent = absent;
+      point.onLeave = onLeave;
+    }),
+  );
+
+  return dates.map((day) => points.get(day)!);
 }
 
+/**
+ * HR's overview. EVERY FIGURE IS A COUNT OF THE LIST IT OPENS: the day's figures are the
+ * attendance register's totals for one status (`countRegister`), the punch figures the
+ * review queue's (`countExceptions`), the headcount the directory's active employees — so
+ * the number on a card and the total on the filtered screen behind it are the same query.
+ */
 export async function adminDashboard(input: { date?: string; includePayroll: boolean }): Promise<AdminDashboard> {
   const today = companyToday();
   const date = input.date ?? today;
   const isToday = date === today;
   const trendFrom = addDays(date, -(TREND_DAYS - 1));
+  const missingPunchesSince = addDays(date, -(MISSING_PUNCH_DAYS - 1));
 
-  const [employees, departments, holidays] = await Promise.all([
-    query<RowDataPacket & { id: number }>(
-      `SELECT u.id FROM hr_users u WHERE ${ACTIVE_EMPLOYEE} ORDER BY u.id ASC`,
-    ),
-    query<RowDataPacket & { department_id: number | null; name: string | null; total: number }>(
-      `SELECT u.department_id, d.name, COUNT(*) AS total
-         FROM hr_users u
-         LEFT JOIN hr_departments d ON d.id = u.department_id
-        WHERE ${ACTIVE_EMPLOYEE}
-        GROUP BY u.department_id, d.name
-        ORDER BY d.name IS NULL, d.name ASC`,
-    ),
-    holidaysBetween(date, date),
-  ]);
+  // The register reads stored verdicts, so days that ended get theirs first.
+  await ensureDaysJudged();
+  const context = await loadRegisterContext(trendFrom, date);
 
-  /*
-   * Every day of the trend and the headline row comes from calendarForUsers — the same
-   * classification payroll and leave use — in batches of 200 people. "Absent" therefore
-   * already excludes people on leave, on a holiday or on a weekly off.
-   */
-  const dates = eachDate(trendFrom, date);
-  const trend = new Map<string, AdminDashboardTrendPoint>(
-    dates.map((day) => [day, { date: day, present: 0, late: 0, halfDay: 0, absent: 0, onLeave: 0 }]),
-  );
-  const statusCounts = new Map<CalendarDayStatus, number>();
-  let wfh = 0;
-  let field = 0;
+  const figureEntries = Object.entries(DAY_FIGURES) as Array<[keyof typeof DAY_FIGURES, RegisterStatusFilter]>;
 
-  const ids = employees.map((row) => row.id);
-  for (let start = 0; start < ids.length; start += CALENDAR_BATCH) {
-    const calendars = await calendarForUsers(ids.slice(start, start + CALENDAR_BATCH), trendFrom, date);
-    for (const days of calendars.values()) {
-      for (const day of days) {
-        // Counted by verdict: somebody checked in or out today counts as present (or late).
-        const verdict = verdictOf(day);
-        const point = trend.get(day.date);
-        if (point) {
-          if (verdict === 'present') point.present += 1;
-          else if (verdict === 'late') point.late += 1;
-          else if (verdict === 'half_day') point.halfDay += 1;
-          else if (verdict === 'absent') point.absent += 1;
-          else if (verdict === 'on_leave') point.onLeave += 1;
-        }
-        if (day.date === date) {
-          statusCounts.set(verdict, (statusCounts.get(verdict) ?? 0) + 1);
-          if (day.leave?.kind === 'wfh') wfh += 1;
-          if (day.leave?.kind === 'field') field += 1;
-        }
-      }
-    }
-  }
-  const status = (key: CalendarDayStatus) => statusCounts.get(key) ?? 0;
-
-  const [live, exceptions, pending, payroll] = await Promise.all([
-    isToday ? openSessionCounts(today, Date.now()) : Promise.resolve(null),
-    queryOne<RowDataPacket & { missing: number; flagged: number }>(
-      `SELECT
-         (SELECT COUNT(*) FROM hr_attendance a JOIN hr_users u ON u.id = a.user_id
-           WHERE a.missing_punch = 1 AND a.work_date BETWEEN ? AND ? AND ${ACTIVE_EMPLOYEE}) AS missing,
-         (SELECT COUNT(*) FROM hr_attendance a JOIN hr_users u ON u.id = a.user_id
-           WHERE a.flagged = 1 AND a.flag_reviewed_at IS NULL AND a.work_date <= ?
-             AND ${ACTIVE_EMPLOYEE}) AS flagged`,
-      [addDays(date, -(MISSING_PUNCH_DAYS - 1)), date, date],
-    ),
-    // The same counters the queues' own badges use, so the numbers here match them.
-    Promise.all([
-      queryOne<RowDataPacket & { registrations: number }>(
-        `SELECT COUNT(*) AS registrations FROM hr_users WHERE approval_status = 'pending'`,
+  const [headcountRow, departments, figures, live, missingPunches, flaggedUnreviewed, trend, pending, payroll] =
+    await Promise.all([
+      queryOne<RowDataPacket & { total: number }>(`SELECT COUNT(*) AS total FROM hr_users u WHERE ${ACTIVE_EMPLOYEE}`),
+      query<RowDataPacket & { department_id: number | null; name: string | null; total: number }>(
+        `SELECT u.department_id, d.name, COUNT(*) AS total
+           FROM hr_users u
+           LEFT JOIN hr_departments d ON d.id = u.department_id
+          WHERE ${ACTIVE_EMPLOYEE}
+          GROUP BY u.department_id, d.name
+          ORDER BY d.name IS NULL, d.name ASC`,
       ),
-      pendingRegularisations(),
-      countPendingLeave(),
-      countRequestQueue(),
-    ]),
-    input.includePayroll ? lastApprovedRun() : Promise.resolve(null),
-  ]);
+      Promise.all(figureEntries.map(([, status]) => countRegister({ date, status }, context))),
+      isToday
+        ? Promise.all([
+            countRegister({ date, status: 'currently_in' }, context),
+            countRegister({ date, status: 'not_checked_out' }, context),
+          ])
+        : Promise.resolve(null),
+      countExceptions({ type: 'missing_punch', from: missingPunchesSince, to: date }),
+      countExceptions({ type: 'flagged', reviewed: 'false', to: date }),
+      trendPoints(trendFrom, date, context),
+      // The same counters the queues' own badges use, so the numbers here match them.
+      Promise.all([
+        queryOne<RowDataPacket & { registrations: number }>(
+          `SELECT COUNT(*) AS registrations FROM hr_users WHERE approval_status = 'pending' AND deleted_at IS NULL`,
+        ),
+        pendingRegularisations(),
+        countPendingLeave(),
+        countRequestQueue(),
+      ]),
+      input.includePayroll ? lastApprovedRun() : Promise.resolve(null),
+    ]);
 
+  const day = Object.fromEntries(figureEntries.map(([key], index) => [key, figures[index] ?? 0])) as Record<
+    keyof typeof DAY_FIGURES,
+    number
+  >;
   const [registrations, regularisations, leavePending, requestQueue] = pending;
-  const holiday = holidays.find((entry) => !entry.isOptional) ?? null;
+  const holiday = context.holidays.find((entry) => entry.date === date && !entry.isOptional) ?? null;
 
   return {
     date,
     isToday,
     headcount: {
-      total: ids.length,
+      total: Number(headcountRow?.total ?? 0),
       byDepartment: departments.map((row) => ({
         departmentId: row.department_id === null ? null : Number(row.department_id),
         name: row.name,
@@ -389,21 +407,14 @@ export async function adminDashboard(input: { date?: string; includePayroll: boo
       })),
     },
     today: {
-      present: status('present'),
-      late: status('late'),
-      halfDay: status('half_day'),
-      absent: status('absent'),
-      onLeave: status('on_leave'),
-      notYetIn: status('upcoming'),
-      wfh,
-      field,
+      ...day,
       holiday: holiday !== null,
       holidayName: holiday?.name ?? null,
-      weeklyOff: status('weekly_off'),
-      currentlyIn: live ? live.currentlyIn : null,
-      notCheckedOut: live ? live.notCheckedOut : null,
-      missingPunches: Number(exceptions?.missing ?? 0),
-      flaggedUnreviewed: Number(exceptions?.flagged ?? 0),
+      currentlyIn: live ? live[0] : null,
+      notCheckedOut: live ? live[1] : null,
+      missingPunches,
+      missingPunchesSince,
+      flaggedUnreviewed,
     },
     pending: {
       registrations: Number(registrations?.registrations ?? 0),
@@ -412,7 +423,7 @@ export async function adminDashboard(input: { date?: string; includePayroll: boo
       // Both still need HR: nobody has picked up an open one, an in-progress one is not done.
       requests: requestQueue.open + requestQueue.inProgress,
     },
-    trend: dates.map((day) => trend.get(day)!),
+    trend,
     payroll: input.includePayroll
       ? {
           lastApproved: payroll

@@ -22,6 +22,7 @@ import {
   type HrEmployee,
 } from '@/lib/hr';
 import { AssignmentDialog } from '../AssignmentDialog';
+import { DeleteEmployeeDialog, ResetPasswordDialog, deleteSummary } from './EmployeeAccountDialogs';
 import { EditEmployeeDialog, EMPLOYEE_FIELD_LABELS } from './EditEmployeeDialog';
 import { EmployeeAttendanceTab } from './EmployeeAttendanceTab';
 import { EmployeeCalendarTab } from './EmployeeCalendarTab';
@@ -102,6 +103,8 @@ export function EmployeeDetail({
   const [tab, setTab] = useState<Tab>('profile');
   const [editing, setEditing] = useState(false);
   const [assigning, setAssigning] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const heading = useRef<HTMLHeadingElement | null>(null);
@@ -194,6 +197,8 @@ export function EmployeeDetail({
   };
 
   const approved = employee.approvalStatus === 'approved';
+  // A deleted record is kept for its history and nothing else: no edits, no account actions.
+  const deleted = employee.deletedAt !== null;
 
   return (
     <article className="hrp-detail" aria-labelledby={`hr-emp-name-${employee.id}`}>
@@ -218,13 +223,14 @@ export function EmployeeDetail({
             {employee.departmentName ? ` · ${employee.departmentName}` : ''}
           </p>
           <div className="hrp-detail__tags">
+            {deleted ? <Tag tone="bad">Deleted</Tag> : null}
             <Tag tone="neutral">{HR_ROLE_LABELS[employee.role]}</Tag>
             {approved ? null : (
               <Tag tone={employee.approvalStatus === 'rejected' ? 'bad' : 'warn'}>
                 {HR_APPROVAL_LABELS[employee.approvalStatus]}
               </Tag>
             )}
-            {approved ? (
+            {approved && !deleted ? (
               employee.isActive ? (
                 <Tag tone="good">Can sign in</Tag>
               ) : (
@@ -237,45 +243,104 @@ export function EmployeeDetail({
           </div>
         </div>
 
-        <div className="hrp-detail__actions">
-          <button
-            type="button"
-            className="btn btn--primary btn--sm"
-            onClick={() => {
-              setNotice(null);
-              setEditing(true);
-            }}
-          >
-            Edit record
-          </button>
-          <button
-            type="button"
-            className="btn btn--outline btn--sm"
-            onClick={() => {
-              setNotice(null);
-              setAssigning(true);
-            }}
-          >
-            <Icon name="pin" size={14} />
-            Attendance rule
-          </button>
-          {approved ? (
+        {deleted ? null : (
+          <div className="hrp-detail__actions">
             <button
               type="button"
-              className="btn btn--ghost btn--sm"
-              disabled={busy}
-              aria-busy={busy || undefined}
-              onClick={() => void setActive(!employee.isActive)}
+              className="btn btn--primary btn--sm"
+              onClick={() => {
+                setNotice(null);
+                setEditing(true);
+              }}
             >
-              {busy ? <ButtonSpinner /> : null}
-              {employee.isActive ? 'Switch off' : 'Switch on'}
+              Edit record
             </button>
-          ) : null}
-        </div>
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={() => {
+                setNotice(null);
+                setAssigning(true);
+              }}
+            >
+              <Icon name="pin" size={14} />
+              Attendance rule
+            </button>
+            {approved ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={busy}
+                aria-busy={busy || undefined}
+                onClick={() => void setActive(!employee.isActive)}
+              >
+                {busy ? <ButtonSpinner /> : null}
+                {employee.isActive ? 'Switch off' : 'Switch on'}
+              </button>
+            ) : null}
+            {approved ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => {
+                  setNotice(null);
+                  setResetting(true);
+                }}
+              >
+                <Icon name="shield" size={14} />
+                Reset password
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm hrp-detail__delete"
+              onClick={() => {
+                setNotice(null);
+                setDeleting(true);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        )}
       </header>
 
       {error ? <FormAlert variant="error">{error}</FormAlert> : null}
       {notice ? <FormAlert variant="success">{notice}</FormAlert> : null}
+      {deleted ? (
+        <FormAlert variant="info">
+          Deleted{employee.deletedAt ? ` on ${formatDateTime(employee.deletedAt)}` : ''}
+          {employee.deletedByName ? ` by ${employee.deletedByName}` : ''}. Kept here for their history only:
+          they are not in any list, pay period or approval queue, and cannot sign in.
+        </FormAlert>
+      ) : null}
+
+      {resetting ? (
+        <ResetPasswordDialog
+          employee={employee}
+          onUnauthorized={onUnauthorized}
+          onClose={() => setResetting(false)}
+          onDone={(message) => {
+            setResetting(false);
+            setNotice(message);
+          }}
+        />
+      ) : null}
+
+      {deleting ? (
+        <DeleteEmployeeDialog
+          employee={employee}
+          onUnauthorized={onUnauthorized}
+          onClose={() => setDeleting(false)}
+          onDeleted={(result) => {
+            setDeleting(false);
+            setNotice(deleteSummary(result));
+            onChanged();
+            void load();
+            heading.current?.focus();
+          }}
+        />
+      ) : null}
 
       {assigning ? (
         <AssignmentDialog
@@ -401,7 +466,7 @@ export function EmployeeDetail({
             </div>
           </LoadingOverlay>
         ) : tab === 'attendance' ? (
-          <EmployeeAttendanceTab employee={employee} canCorrect={approved} onUnauthorized={onUnauthorized} />
+          <EmployeeAttendanceTab employee={employee} canCorrect={approved && !deleted} onUnauthorized={onUnauthorized} />
         ) : tab === 'calendar' ? (
           <EmployeeCalendarTab employee={employee} onUnauthorized={onUnauthorized} />
         ) : (

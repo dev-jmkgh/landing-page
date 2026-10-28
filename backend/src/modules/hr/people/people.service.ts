@@ -1,5 +1,5 @@
 import { withTransaction } from '../../../db/pool';
-import { badRequest, notFound } from '../../../utils/httpError';
+import { badRequest, conflict, notFound } from '../../../utils/httpError';
 import { logger } from '../../../utils/logger';
 import { companyToday } from '../calendar/calendar.service';
 import type { HrEmployeeProfile } from '../hr.schema';
@@ -74,11 +74,12 @@ async function checkDesignation(id: number | null | undefined, current: number |
 /**
  * A manager must be a real, APPROVED account. A pending or rejected registration is not
  * yet a person anyone reports to — and would receive the team's leave requests in an
- * app it cannot sign in to.
+ * app it cannot sign in to. Nor is a deleted one.
  */
 async function checkManagerExists(managerId: number): Promise<void> {
   const manager = await findAccountState(managerId);
   if (!manager) throw fieldError('managerId', 'That manager does not exist.');
+  if (manager.deleted) throw fieldError('managerId', `${manager.name} has been deleted. Pick another manager.`);
   if (manager.approvalStatus !== 'approved') {
     throw fieldError('managerId', `${manager.name} does not have an approved account yet.`);
   }
@@ -175,6 +176,9 @@ function currentValue(profile: HrEmployeeProfile, field: EmployeeField): string 
 export async function updateEmployee(id: number, input: EmployeePatchInput): Promise<FieldChange[]> {
   const current = await findEmployee(id);
   if (!current) throw notFound('Employee not found.');
+  if (current.deletedAt) {
+    throw conflict(`${current.name} has been deleted, so their record can no longer be edited.`, 'employee_deleted');
+  }
 
   await checkDepartment(input.departmentId, current.departmentId);
   await checkDesignation(input.designationId, current.designationId);

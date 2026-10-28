@@ -5,7 +5,7 @@ import { requireHrActor, requireHrRole } from '../../../middleware/hrActor';
 import { asyncHandler } from '../../../middleware/errorHandler';
 import { mobileSyncLimiter } from '../../../middleware/rateLimit';
 import { validateBody, validateQuery } from '../../../middleware/validate';
-import { badRequest, notFound } from '../../../utils/httpError';
+import { badRequest, forbidden, notFound } from '../../../utils/httpError';
 import { clientIp } from '../../../utils/request';
 import { REGULARISATION_STATUSES } from '../attendance/attendance.schema';
 import {
@@ -114,6 +114,10 @@ for (const decision of ['approve', 'reject'] as const) {
       const row = await findLeaveRequestRow(id);
       if (!row) throw notFound('Request not found.');
       await assertCanDecide(teamScopeFor(request.hrActor!), row.user_id);
+      // Compensatory leave is an HR decision: an HR administrator here, or the admin portal.
+      if (Number(row.type_is_comp_off) === 1 && request.hrActor!.role !== 'hr_admin') {
+        throw forbidden('Compensatory leave is decided by HR, not by the team manager.');
+      }
 
       const decided = await decideLeave(id, decision, reviewerFor(request), note);
 

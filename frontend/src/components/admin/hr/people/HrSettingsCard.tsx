@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ButtonSpinner, LoaderBlock } from '@/components/admin/Loader';
-import { FormAlert } from '@/components/forms/Fields';
+import { FormAlert, TextField } from '@/components/forms/Fields';
 import { ApiError } from '@/lib/api';
 import { formatDate, todayIso } from '@/lib/telecalling';
 import { describeWeekdays, peopleApi, type HrSettings, type Weekday } from '@/lib/hr';
@@ -13,7 +13,7 @@ import { WeekdayPicker } from './WeekdayPicker';
 
 /**
  * Company-wide HR policy: when attendance tracking began, the weekly off for people with
- * no shift, and the pay cycle.
+ * no shift, the pay cycle, and how long compensatory leave stays usable.
  *
  * The first two change how EVERY day is classified — past days included — wherever days
  * are counted: the register, calendars, reports, and any payroll calculated afterwards.
@@ -37,6 +37,7 @@ export function HrSettingsCard({ onUnauthorized }: { onUnauthorized: () => void 
   const [trackedFrom, setTrackedFrom] = useState('');
   const [weeklyOff, setWeeklyOff] = useState<Weekday[]>([]);
   const [cycleDay, setCycleDay] = useState('1');
+  const [compOffDays, setCompOffDays] = useState('30');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -50,10 +51,13 @@ export function HrSettingsCard({ onUnauthorized }: { onUnauthorized: () => void 
     // An API from before the pay cycle existed sends no start day: that is the calendar
     // month (1), and treating it so keeps the form from reading as changed on arrival.
     const cycle = Number.isInteger(next.payrollCycleStartDay) ? next.payrollCycleStartDay : 1;
-    setSettings({ ...next, payrollCycleStartDay: cycle });
+    // Likewise compensatory leave's validity: 30 days until it is set.
+    const validity = Number.isInteger(next.compOffValidityDays) ? next.compOffValidityDays : 30;
+    setSettings({ ...next, payrollCycleStartDay: cycle, compOffValidityDays: validity });
     setTrackedFrom(next.attendanceTrackedFrom ?? '');
     setWeeklyOff(next.defaultWeeklyOff);
     setCycleDay(String(cycle));
+    setCompOffDays(String(validity));
   }, []);
 
   const load = useCallback(
@@ -80,7 +84,8 @@ export function HrSettingsCard({ onUnauthorized }: { onUnauthorized: () => void 
   const weeklyChanged =
     settings !== null && describeWeekdays(weeklyOff) !== describeWeekdays(settings.defaultWeeklyOff);
   const cycleChanged = settings !== null && Number(cycleDay) !== settings.payrollCycleStartDay;
-  const dirty = trackedChanged || weeklyChanged || cycleChanged;
+  const compOffChanged = settings !== null && compOffDays.trim() !== String(settings.compOffValidityDays);
+  const dirty = trackedChanged || weeklyChanged || cycleChanged || compOffChanged;
 
   const save = async () => {
     setError(null);
@@ -88,10 +93,17 @@ export function HrSettingsCard({ onUnauthorized }: { onUnauthorized: () => void 
     setFieldErrors({});
     if (!dirty) return;
 
+    const validity = Number(compOffDays.trim());
+    if (compOffChanged && !(Number.isInteger(validity) && validity >= 1 && validity <= 365)) {
+      setFieldErrors({ compOffValidityDays: 'Use a whole number of days from 1 to 365.' });
+      return;
+    }
+
     const patch: Partial<HrSettings> = {};
     if (trackedChanged) patch.attendanceTrackedFrom = trackedFrom || null;
     if (weeklyChanged) patch.defaultWeeklyOff = weeklyOff;
     if (cycleChanged) patch.payrollCycleStartDay = Number(cycleDay);
+    if (compOffChanged) patch.compOffValidityDays = validity;
 
     setSaving(true);
     try {
@@ -172,6 +184,17 @@ export function HrSettingsCard({ onUnauthorized }: { onUnauthorized: () => void 
                 today,
               )}. Pay periods already opened keep their dates.`}
             />
+
+            <TextField
+              label="Compensatory leave must be taken within (days)"
+              name="hr-comp-off-validity"
+              value={compOffDays}
+              error={fieldErrors.compOffValidityDays}
+              maxLength={3}
+              autoComplete="off"
+              hint="Counted from the weekly off or holiday worked. A worked day older than this can no longer be used."
+              onChange={setCompOffDays}
+            />
           </div>
 
           <p className="tc-dialog__note">
@@ -181,7 +204,8 @@ export function HrSettingsCard({ onUnauthorized }: { onUnauthorized: () => void 
               : 'every day is judged'}
             {' · '}default weekly off {describeWeekdays(settings.defaultWeeklyOff)}
             {' · '}pay periods {settings.payrollCycleStartDay <= 1 ? 'follow' : 'run from'}{' '}
-            {cycleSpan(settings.payrollCycleStartDay)}. Tracking and weekly-off changes apply to
+            {cycleSpan(settings.payrollCycleStartDay)}
+            {' · '}compensatory leave within {settings.compOffValidityDays} days. Tracking and weekly-off changes apply to
             past days as well as future ones — in the register, calendars, reports and any payroll
             calculated afterwards. A new pay cycle applies only to pay periods opened afterwards.
             Approved payroll does not change.

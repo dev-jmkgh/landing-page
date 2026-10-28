@@ -40,6 +40,13 @@ export type LeaveType = {
   name: string;
   code: string;
   kind: LeaveKind;
+  /**
+   * Compensatory leave (migration 038): a day off earned by working a full day on a weekly
+   * off or holiday. Its requests name the day worked, its balance is the worked days not
+   * yet used, and only an HR administrator decides it. Set by the migration, never by an
+   * edit.
+   */
+  isCompOff: boolean;
   isPaid: boolean;
   /** Days a year. Null means UNTRACKED: no balance exists, and none is shown. */
   annualQuota: number | null;
@@ -76,10 +83,12 @@ export type LeaveRequest = {
   userId: number;
   employeeName: string;
   employeeCode: string;
-  leaveType: { id: number; name: string; code: string; kind: LeaveKind; isPaid: boolean };
+  leaveType: { id: number; name: string; code: string; kind: LeaveKind; isPaid: boolean; isCompOff: boolean };
   startDate: string;
   endDate: string;
   halfDay: HalfDay;
+  /** Compensatory leave only: the weekly off or holiday worked to earn it. */
+  compOffEarnedOn: string | null;
   /** Working days the request costs, fixed when it was raised. */
   days: number;
   reason: string;
@@ -96,6 +105,23 @@ export type LeaveRequest = {
 };
 
 export type Holiday = { id: number; date: string; name: string; isOptional: boolean };
+
+/**
+ * A day worked that earns compensatory leave and is still free to use: a weekly off or a
+ * holiday, finished, worked for at least the shift's full-day hours, and not named by
+ * another pending or approved request.
+ */
+export type CompOffDay = {
+  date: string;
+  reason: 'weekly_off' | 'holiday';
+  /** For a holiday, its name. */
+  holidayName: string | null;
+  workedMinutes: number;
+  /** The shift's full-day minimum that day — what made it count. */
+  requiredMinutes: number;
+  /** The last date the day off may be taken. */
+  useBy: string;
+};
 
 /* -------------------------------------------------------------------------- */
 /* Field helpers                                                               */
@@ -151,6 +177,11 @@ export const applySchema = z.object({
    * sent twice over a flaky connection is one request.
    */
   clientKey: z.string().trim().min(8).max(64),
+  /**
+   * Compensatory leave only: the weekly off or holiday worked to earn this day off.
+   * Ignored for every other type. `null` too, for a client that sends "none" that way.
+   */
+  compOffEarnedOn: calendarDateField.nullish(),
 });
 export type ApplyInput = z.infer<typeof applySchema>;
 
@@ -161,6 +192,7 @@ export const previewQuerySchema = z.object({
   /** Defaults to the start date: a one-day request. */
   endDate: calendarDateField.optional(),
   halfDay: z.enum(HALF_DAYS).default('none'),
+  compOffEarnedOn: calendarDateField.optional(),
 });
 
 export const yearQuerySchema = z.object({ year: yearField.optional() });

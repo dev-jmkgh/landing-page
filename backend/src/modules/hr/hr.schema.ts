@@ -158,4 +158,11 @@ export type HrEmployeeProfile = {
   address: string | null;
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
+  /**
+   * Set when an administrator deleted the employee (migration 038). A deleted account is
+   * kept for its history but is in no list, no pay period not yet approved, and cannot
+   * sign in.
+   */
+  deletedAt: string | null;
+  deletedByName: string | null;
 };

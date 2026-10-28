@@ -19,6 +19,7 @@ import {
   type PunchFlag,
 } from '@/lib/hr';
 import { isAbort } from '../people/shared';
+import { readUrlDate, readUrlEnum, useUrlParams } from '../reports/shared';
 import { CorrectDayDialog } from './CorrectDayDialog';
 import { AttendanceStatusTag, FlagTags } from './dayStatus';
 import { ReviewExceptionDialog } from './ReviewExceptionDialog';
@@ -39,8 +40,10 @@ import { ReviewExceptionDialog } from './ReviewExceptionDialog';
 
 const PAGE_SIZE = 20;
 
-type TypeFilter = 'all' | 'missing_punch' | 'flagged';
-type ReviewedFilter = 'false' | 'true' | 'all';
+const TYPE_FILTERS = ['all', 'missing_punch', 'flagged'] as const;
+type TypeFilter = (typeof TYPE_FILTERS)[number];
+const REVIEWED_FILTERS = ['false', 'true', 'all'] as const;
+type ReviewedFilter = (typeof REVIEWED_FILTERS)[number];
 
 /** "phone 09:10 · 16 min behind", from the device time against the server's stamp. */
 function deviceClock(serverAt: string | null, deviceAt: string | null): string | null {
@@ -159,11 +162,18 @@ function SessionEvidence({ session, index }: { session: ExceptionSession; index:
 }
 
 export function ExceptionsView({ onUnauthorized }: { onUnauthorized: () => void }) {
-  const [type, setType] = useState<TypeFilter>('all');
-  const [reviewed, setReviewed] = useState<ReviewedFilter>('false');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  // In the address, so the dashboard's punch figures open this queue already filtered.
+  const [type, setType] = useState<TypeFilter>(() => readUrlEnum('exc-type', TYPE_FILTERS, 'all'));
+  const [reviewed, setReviewed] = useState<ReviewedFilter>(() => readUrlEnum('exc-reviewed', REVIEWED_FILTERS, 'false'));
+  const [from, setFrom] = useState(() => readUrlDate('exc-from'));
+  const [to, setTo] = useState(() => readUrlDate('exc-to'));
   const [page, setPage] = useState(1);
+  useUrlParams({
+    'exc-type': type === 'all' ? null : type,
+    'exc-reviewed': reviewed === 'false' ? null : reviewed,
+    'exc-from': from || null,
+    'exc-to': to || null,
+  });
 
   const [data, setData] = useState<HrPaginated<AttendanceException> | null>(null);
   const [loading, setLoading] = useState(true);

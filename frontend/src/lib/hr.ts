@@ -102,6 +102,12 @@ export type HrEmployee = {
   approvedAt: string | null;
   lastLoginAt: string | null;
   createdAt: string | null;
+  /**
+   * Set when an administrator deleted them. The record stays for history, but they are out
+   * of every list, of current and future payroll, and cannot sign in or be edited.
+   */
+  deletedAt: string | null;
+  deletedByName: string | null;
 
   /* ---- the employee record ---- */
   departmentId: number | null;
@@ -204,6 +210,11 @@ export type HrSettings = {
    * affects pay periods opened afterwards; existing ones keep their dates.
    */
   payrollCycleStartDay: number;
+  /**
+   * Compensatory leave: how many days after the weekly off or holiday worked it must be
+   * taken by, 1 to 365.
+   */
+  compOffValidityDays: number;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -422,7 +433,11 @@ export type Shift = {
   weeklyOffDays: Weekday[];
 };
 
-/** The register's status filter: the day's calendar status, plus two session states. */
+/**
+ * The register's status filter (`register.service.ts` on the server): the day's calendar
+ * status, the two arrangements, and the live states. The HR dashboard's figures are the
+ * register's totals for these, so a figure opens the register filtered to the same people.
+ */
 export const REGISTER_STATUS_FILTERS = [
   'present',
   'late',
@@ -431,6 +446,8 @@ export const REGISTER_STATUS_FILTERS = [
   'on_leave',
   'holiday',
   'weekly_off',
+  'wfh',
+  'field',
   'currently_in',
   'checked_out',
   'yet_to_check_in',
@@ -439,18 +456,24 @@ export const REGISTER_STATUS_FILTERS = [
 export type RegisterStatusFilter = (typeof REGISTER_STATUS_FILTERS)[number];
 
 export const REGISTER_STATUS_FILTER_LABELS: Record<RegisterStatusFilter, string> = {
-  present: 'Present',
+  present: 'Present (on time)',
   late: 'Late',
   half_day: 'Half day',
   absent: 'Absent',
   on_leave: 'On leave',
   holiday: 'Holiday',
   weekly_off: 'Weekly off',
-  currently_in: 'Checked in (in right now)',
+  wfh: 'Working from home',
+  field: 'On field work',
+  currently_in: 'In right now',
   checked_out: 'Checked out (today)',
-  yet_to_check_in: 'Yet to check in (today)',
-  not_checked_out: 'Did not check out',
+  yet_to_check_in: 'Not yet in (today)',
+  not_checked_out: 'Not checked out',
 };
+
+export function isRegisterStatusFilter(value: string | null): value is RegisterStatusFilter {
+  return value !== null && (REGISTER_STATUS_FILTERS as readonly string[]).includes(value);
+}
 
 /** One line of the day register. Everyone approved and active appears, present or not. */
 export type RegisterEntry = {
@@ -771,6 +794,21 @@ export type EmployeePatchResult = {
   notice: string | null;
 };
 
+export type EmployeeDeleteResult = {
+  name: string;
+  employeeCode: string;
+  /** They were deleted already; nothing changed this time. */
+  alreadyDeleted: boolean;
+  leaveCancelled: number;
+  correctionsClosed: number;
+  requestsClosed: number;
+  /** People who reported to them, now with no manager. */
+  reportsUnassigned: number;
+  /** Payslips taken out of pay periods not yet approved. */
+  payslipsRemoved: number;
+  sessionsRevoked: number;
+};
+
 export const peopleApi = {
   /* ---- departments (a bounded list) ---- */
   listDepartments: (signal?: AbortSignal) =>
@@ -822,6 +860,17 @@ export const peopleApi = {
 
   updateEmployee: (id: number, body: EmployeePatch) =>
     adminRequest<EmployeePatchResult>(`${BASE}/employees/${id}`, { method: 'PATCH', body }),
+
+  /** Sets a new HR app password and signs them out on every phone. Never emailed. */
+  resetPassword: (id: number, password: string) =>
+    adminRequest<{ sessionsRevoked: number }>(`${BASE}/employees/${id}/password`, {
+      method: 'POST',
+      body: { password },
+    }),
+
+  /** Soft-deletes them; the counts say what the delete closed. */
+  deleteEmployee: (id: number) =>
+    adminRequest<EmployeeDeleteResult>(`${BASE}/employees/${id}`, { method: 'DELETE' }),
 
   /** One employee's recorded days, newest first. Defaults to the current company month. */
   employeeAttendance: (

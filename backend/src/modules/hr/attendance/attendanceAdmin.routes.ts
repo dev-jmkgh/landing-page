@@ -13,23 +13,15 @@ import {
   queryOne,
   withTransaction,
   type RowDataPacket,
-  type SqlParam,
 } from '../../../db/pool';
 import { badRequest, notFound, validationFailed } from '../../../utils/httpError';
 import { clientIp } from '../../../utils/request';
 import { recordAudit } from '../../telecalling/activity/activity.repository';
-import {
-  calendarForUsers,
-  companyToday,
-  holidaysBetween,
-  isIsoDate,
-  weekdayOf,
-} from '../calendar/calendar.service';
+import { calendarForUsers, companyToday, isIsoDate } from '../calendar/calendar.service';
 import { pageQuerySchema } from '../hr.schema';
-import { WEEKDAYS, getHrSettings, parseWeekdays, type Weekday } from '../settings/hrSettings';
+import { WEEKDAYS, parseWeekdays, type Weekday } from '../settings/hrSettings';
 import {
   COMPANY_UTC_OFFSET,
-  LOCAL_NOW,
   REGULARISATION_STATUSES,
   assignmentSchema,
   shiftSchema,
@@ -39,6 +31,7 @@ import {
 } from './attendance.schema';
 import { dayFor, parseFlags, recomputeDayFor } from './attendance.service';
 import { ensureDaysJudged, rejudgeShiftDays } from './dayJudge';
+import { REGISTER_STATUS_FILTERS, exceptionsWhere, registerQuery } from './register.service';
 import {
   approve as approveRegularisation,
   findById as findRegularisation,
@@ -453,8 +446,9 @@ hrAttendanceAdminRouter.patch(
     const id = parseId(request.params.id);
     const input = request.body as z.infer<typeof assignmentSchema>;
 
+    // A deleted employee has nothing left to assign: they cannot sign in to use it.
     const employee = await queryOne<RowDataPacket & { name: string; employee_code: string }>(
-      'SELECT name, employee_code FROM hr_users WHERE id = ? LIMIT 1',
+      'SELECT name, employee_code FROM hr_users WHERE id = ? AND deleted_at IS NULL LIMIT 1',
       [id],
     );
     if (!employee) throw notFound('Employee not found.');
@@ -512,26 +506,6 @@ const optionalQueryDate = z.preprocess(
   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD.').refine(isIsoDate, 'That is not a real date.').optional(),
 );
 
-/**
- * What the register's `status` filter can ask for — the day's CALENDAR status (see
- * `calendar.service`). While a day is in progress that is `currently_in` (the calendar's
- * `checked_in`), `checked_out` or `yet_to_check_in`; once it is over, the verdict.
- * `not_checked_out` is about sessions and cuts across the rest.
- */
-export const REGISTER_STATUS_FILTERS = [
-  'present',
-  'late',
-  'half_day',
-  'absent',
-  'on_leave',
-  'holiday',
-  'weekly_off',
-  'currently_in',
-  'checked_out',
-  'yet_to_check_in',
-  'not_checked_out',
-] as const;
-
 const registerQuerySchema = pageQuerySchema.extend({
   /** Defaults to the company's today. */
   date: optionalQueryDate,
@@ -567,126 +541,6 @@ interface RegisterRow extends RowDataPacket {
 }
 
 /**
- * The SQL twin of the calendar's day classifier, for ONE date across many people.
- *
- * WHY A TWIN EXISTS AT ALL. The register is paginated, so a status filter has to run in
- * SQL — filtering a page in Node would leave `total` counting the unfiltered list and
- * every page but the last short. The calendar service remains THE classifier: each
- * row's `dayStatus` comes from `calendarForUsers`, and these fragments mirror its
- * precedence (`resolveStatus`) exactly so a filter never returns a row whose own
- * `dayStatus` disagrees with it:
- *
- *   not employed → attended (present/late/half_day) → holiday → weekly off → on leave
- *   → not yet judged / untracked → absent
- *
- * The date-level facts — is it a holiday, is it judged yet, is it before tracking began
- * — are the same for everybody on the register, so they are decided once in Node and
- * collapse the fragment to `1 = 0` where they rule a status out.
- */
-function registerStatusCondition(
-  status: (typeof REGISTER_STATUS_FILTERS)[number],
-  facts: {
-    date: string;
-    weekday: Weekday;
-    defaultWeeklyOff: Weekday[];
-    isHoliday: boolean;
-    /** The date has a verdict: it is over, and tracking had begun by then. */
-    judged: boolean;
-    /** Tracking had begun by the date. */
-    tracked: boolean;
-    isPast: boolean;
-    /** The company's today: the day in progress, with live statuses instead of verdicts. */
-    isToday: boolean;
-  },
-): { sql: string; params: SqlParam[] } {
-  const employed = {
-    sql: '(u.joining_date IS NULL OR u.joining_date <= ?) AND (u.exit_date IS NULL OR u.exit_date >= ?)',
-    params: [facts.date, facts.date] as SqlParam[],
-  };
-  const notAttended = "(a.id IS NULL OR a.status NOT IN ('present','late','half_day'))";
-  // A shift's own SET when they have a shift; the company default when they do not —
-  // the same fallback `loadContexts` applies in the calendar.
-  const weeklyOff = {
-    sql: 'FIND_IN_SET(?, IF(sh.id IS NULL, ?, sh.weekly_off_days)) > 0',
-    params: [facts.weekday, facts.defaultWeeklyOff.join(',')] as SqlParam[],
-  };
-  const onLeave = {
-    sql: `EXISTS (SELECT 1 FROM hr_leave_requests r
-                    JOIN hr_leave_types t ON t.id = r.leave_type_id
-                   WHERE r.user_id = u.id AND r.status = 'approved' AND t.kind = 'leave'
-                     AND r.start_date <= ? AND r.end_date >= ?)`,
-    params: [facts.date, facts.date] as SqlParam[],
-  };
-  const open = `EXISTS (SELECT 1 FROM hr_attendance_sessions os
-                         WHERE os.attendance_id = a.id AND os.ended_at IS NULL)`;
-  const never = { sql: '1 = 0', params: [] as SqlParam[] };
-
-  // Attended, and closed: the in-progress twin of the calendar's `checked_in` test.
-  const closed = 'a.checked_out_at IS NOT NULL';
-
-  switch (status) {
-    case 'present':
-    case 'late':
-    case 'half_day':
-      // A verdict, so only for a day that is over; today's attended days are in or out.
-      if (facts.isToday) return never;
-      return {
-        sql: `(${employed.sql} AND a.status = ? AND (${closed} OR NOT ${open}))`,
-        params: [...employed.params, status],
-      };
-    case 'checked_out':
-      if (!facts.isToday) return never;
-      return {
-        sql: `(${employed.sql} AND a.status IN ('present','late','half_day') AND ${closed})`,
-        params: employed.params,
-      };
-    case 'yet_to_check_in':
-      if (!facts.isToday || facts.isHoliday || !facts.tracked) return never;
-      return {
-        sql: `(${employed.sql} AND ${notAttended} AND NOT (${weeklyOff.sql}) AND NOT ${onLeave.sql})`,
-        params: [...employed.params, ...weeklyOff.params, ...onLeave.params],
-      };
-    case 'holiday':
-      if (!facts.isHoliday) return never;
-      return { sql: `(${employed.sql} AND ${notAttended})`, params: employed.params };
-    case 'weekly_off':
-      if (facts.isHoliday) return never;
-      return {
-        sql: `(${employed.sql} AND ${notAttended} AND ${weeklyOff.sql})`,
-        params: [...employed.params, ...weeklyOff.params],
-      };
-    case 'on_leave':
-      if (facts.isHoliday) return never;
-      return {
-        sql: `(${employed.sql} AND ${notAttended} AND NOT (${weeklyOff.sql}) AND ${onLeave.sql})`,
-        params: [...employed.params, ...weeklyOff.params, ...onLeave.params],
-      };
-    case 'absent':
-      if (facts.isHoliday || !facts.judged) return never;
-      return {
-        sql: `(${employed.sql} AND ${notAttended} AND NOT (${weeklyOff.sql}) AND NOT ${onLeave.sql})`,
-        params: [...employed.params, ...weeklyOff.params, ...onLeave.params],
-      };
-    case 'currently_in':
-      return { sql: `(${employed.sql} AND a.status IN ('present','late','half_day') AND ${open})`, params: employed.params };
-    case 'not_checked_out':
-      /*
-       * Either the system already closed a forgotten session (a missing punch), or one is
-       * still open past the point it should have ended: any open session on an earlier
-       * day, or today's once the day's shift end has passed.
-       */
-      return {
-        sql: `(a.missing_punch = 1 OR (${open} AND ${
-          facts.isPast
-            ? '1 = 1'
-            : `a.shift_ends_at IS NOT NULL AND ${LOCAL_NOW} > CAST(CONCAT(a.work_date, ' ', a.shift_ends_at) AS DATETIME)`
-        }))`,
-        params: [],
-      };
-  }
-}
-
-/**
  * The day's register: every approved, active employee, present or not — a page at a time.
  *
  * A LEFT JOIN from `hr_users`, not a SELECT from `hr_attendance`. Listing only the
@@ -706,60 +560,18 @@ hrAttendanceAdminRouter.get(
   asyncHandler(async (_request, response) => {
     const filters = response.locals.query as z.infer<typeof registerQuerySchema>;
 
-    const today = companyToday();
-    const date = filters.date ?? today;
+    const date = filters.date ?? companyToday();
 
-    // The status filter below reads the stored verdicts, so days that ended get theirs first.
+    // The status filter reads the stored verdicts, so days that ended get theirs first.
     await ensureDaysJudged();
-    const [settings, holidays] = await Promise.all([getHrSettings(), holidaysBetween(date, date)]);
-    const trackedFrom = settings.attendanceTrackedFrom;
-
-    const conditions: string[] = ["u.approval_status = 'approved'", 'u.is_active = 1'];
-    const whereParams: SqlParam[] = [];
-
-    if (filters.userId) {
-      conditions.push('u.id = ?');
-      whereParams.push(filters.userId);
-    }
-    if (filters.q) {
-      conditions.push('(u.name LIKE ? OR u.employee_code LIKE ? OR u.email LIKE ?)');
-      const term = `%${filters.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-      whereParams.push(term, term, term);
-    }
-    if (filters.departmentId) {
-      conditions.push('u.department_id = ?');
-      whereParams.push(filters.departmentId);
-    }
-    if (filters.locationId) {
-      conditions.push('u.work_location_id = ?');
-      whereParams.push(filters.locationId);
-    }
-    if (filters.status) {
-      const condition = registerStatusCondition(filters.status, {
-        date,
-        weekday: weekdayOf(date),
-        defaultWeeklyOff: settings.defaultWeeklyOff,
-        isHoliday: holidays.some((holiday) => !holiday.isOptional),
-        judged: date < today && !(trackedFrom !== null && date < trackedFrom),
-        tracked: !(trackedFrom !== null && date < trackedFrom),
-        isPast: date < today,
-        isToday: date === today,
-      });
-      conditions.push(condition.sql);
-      whereParams.push(...condition.params);
-    }
-
-    const from = `
-      FROM hr_users u
-      LEFT JOIN hr_attendance a
-             ON a.user_id = u.id
-            AND a.work_date = ?
-      LEFT JOIN hr_work_locations l ON l.id = a.check_in_location_id
-      LEFT JOIN hr_departments d    ON d.id = u.department_id
-      LEFT JOIN hr_designations g   ON g.id = u.designation_id
-      LEFT JOIN hr_shifts sh        ON sh.id = u.shift_id
-     WHERE ${conditions.join(' AND ')}`;
-    const params: SqlParam[] = [date, ...whereParams];
+    const { from, params } = await registerQuery({
+      date,
+      userId: filters.userId,
+      q: filters.q,
+      departmentId: filters.departmentId,
+      locationId: filters.locationId,
+      status: filters.status,
+    });
 
     const countRow = await queryOne<RowDataPacket & { total: number }>(
       `SELECT COUNT(*) AS total ${from}`,
@@ -1269,33 +1081,7 @@ hrAttendanceAdminRouter.get(
   validateQuery(exceptionsQuerySchema),
   asyncHandler(async (_request, response) => {
     const filters = response.locals.query as z.infer<typeof exceptionsQuerySchema>;
-
-    const conditions: string[] = [
-      filters.type === 'missing_punch'
-        ? 'a.missing_punch = 1'
-        : filters.type === 'flagged'
-          ? 'a.flagged = 1'
-          : '(a.missing_punch = 1 OR a.flagged = 1)',
-    ];
-    const params: SqlParam[] = [];
-
-    if (filters.reviewed !== undefined) {
-      conditions.push(filters.reviewed === 'true' ? 'a.flag_reviewed_at IS NOT NULL' : 'a.flag_reviewed_at IS NULL');
-    }
-    if (filters.from) {
-      conditions.push('a.work_date >= ?');
-      params.push(filters.from);
-    }
-    if (filters.to) {
-      conditions.push('a.work_date <= ?');
-      params.push(filters.to);
-    }
-    if (filters.userId) {
-      conditions.push('a.user_id = ?');
-      params.push(filters.userId);
-    }
-
-    const where = `WHERE ${conditions.join(' AND ')}`;
+    const { where, params } = exceptionsWhere(filters);
 
     const countRow = await queryOne<RowDataPacket & { total: number }>(
       `SELECT COUNT(*) AS total FROM hr_attendance a ${where}`,
